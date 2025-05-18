@@ -1,0 +1,24 @@
+{
+  "name": "@compendiumnav2/server",
+  "version": "1.0.0",
+  "description": "Server component for CompendiumNav2",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@compendiumnav2/shared": "file:../compendiumnav2-shared",
+    "express": "^4.18.2",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.17",
+    "@types/node": "^20.5.0",
+    "@types/ws": "^8.5.5",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.1.6"
+  }
+}

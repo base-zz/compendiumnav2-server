@@ -1,0 +1,9 @@
+{
+  "length": "ft",
+  "speed": "kts",
+  "temperature": "°F",
+  "pressure": "inHg",
+  "volume": "gal",
+  "angle": "deg",
+  "preset": "IMPERIAL"
+}
