@@ -1,11 +1,10 @@
 import dotenv from "dotenv";
 import { stateService } from "./state/StateService.js";
-import { startRelayServer } from "../relay/server/index.js";
-import { startDirectServer } from "../relay/server/index.js";
+import { startRelayServer, startDirectServer } from "./relay/server/index.js";
 import http from "http";
 
-console.log("Loading .env.server");
-dotenv.config({ path: ".env.server" });
+console.log("Loading .env");
+dotenv.config({ path: ".env" });
 
 // --- Helper to build the VPS URL ---
 function buildVpsUrl() {
@@ -32,7 +31,7 @@ async function bridgeStateToRelay() {
   try {
     const { stateData } = await import("./state/StateData.js");
     const { stateManager } = await import(
-      "../relay/core/state/StateManager.js"
+      "./relay/core/state/StateManager.js"
     );
 
     // Bridge canonical StateService events to relay stateManager

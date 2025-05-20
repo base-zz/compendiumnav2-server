@@ -1,10 +1,21 @@
-import dotenv from "dotenv";
-import { stateServiceDemo } from "./state/StateServiceDemo.js";
-import { startRelayServer, startDirectServerWrapper } from "../relay/server/index.js";
-import http from "http";
+// Import module alias configuration first
+import './module-alias.js';
 
-console.log("Loading .env.server");
-dotenv.config({ path: ".env.server" });
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+import stateServiceDemo from './state/StateServiceDemo.js';
+import { startRelayServer, startDirectServerWrapper } from './relay/server/index.js';
+import http from 'http';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+console.log("Loading .env file from:", resolve(__dirname, '../.env'));
+dotenv.config({ path: resolve(__dirname, '../.env') });
+
+// Log the token secret for debugging (remove in production)
+console.log('TOKEN_SECRET:', process.env.TOKEN_SECRET ? '*** (set)' : 'NOT SET');
 
 // --- Helper to build the VPS URL ---
 function buildVpsUrl() {
@@ -31,7 +42,7 @@ async function bridgeStateToRelay() {
   try {
     const { stateData } = await import("./state/StateData.js");
     const { stateManager } = await import(
-      "../relay/core/state/StateManager.js"
+      "./relay/core/state/StateManager.js"
     );
 
     // Set up state update handlers
@@ -79,24 +90,18 @@ async function startDevServer() {
     stateServiceDemo.startMockMultipleTanksAndBatteries(5000); // Update every 5 seconds
     console.log("[DEV-SERVER] Started mock data generation for multiple tanks and batteries");
 
-    // 4. Build relay and direct server configs
-    const relayPort = parseInt(
-      process.env.RELAY_PORT ||
-        process.env.RELAY_SERVER_PORT ||
-        process.env.PORT ||
-        "3009",
-      10
-    );
-
-    const directPort = parseInt(
-      process.env.DIRECT_WS_PORT ||
-      process.env.PORT ||
-      "3009",
-      10
-    );
+    // 4. Build relay and direct server configs - using 3009 for WebSocket
+    const relayPort = 3008; // Different port for relay
+    const directPort = 3009; // WebSocket server on 3009 to match client
+    
+    console.log(`[DEV-SERVER] Starting WebSocket server on port ${directPort}`);
+    
+    // Ensure the relay port is different from the direct port
+    const relayPortInput = relayPort;
+    const relayPortFinal = relayPortInput === directPort ? directPort + 1 : relayPortInput;
 
     const relayConfig = {
-      port: relayPort,
+      port: relayPortFinal,
       signalKRefreshRate: parseInt(
         process.env.SIGNALK_REFRESH_RATE || "1000",
         10
@@ -113,6 +118,7 @@ async function startDevServer() {
 
     const directConfig = {
       port: directPort,
+      host: '0.0.0.0', // Explicitly bind to all interfaces
       maxPayload: 1024 * 1024 // 1MB default
     };
     if (!relayConfig.port || isNaN(relayConfig.port))

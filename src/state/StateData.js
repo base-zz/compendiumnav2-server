@@ -47,8 +47,8 @@ function setDeep(obj, path, value) {
   return obj;
 }
 
-import { createStateDataModel } from '../../shared/stateDataModel.js';
-import { UNIT_PRESETS } from '../../shared/unitPreferences.js';
+import { createStateDataModel } from '@compendiumnav2/shared/stateDataModel.js';
+import { UNIT_PRESETS } from '@compendiumnav2/shared/unitPreferences.js';
 
 // Create the base state using the shared model with imperial units as default
 // This matches the client-side default and ensures consistency
