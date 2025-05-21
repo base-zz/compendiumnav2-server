@@ -14,7 +14,11 @@ NC='\033[0m'
 # Configuration
 CURRENT_USER=$(whoami)
 APP_USER="${COMPENDIUM_USER:-$CURRENT_USER}"
-HOSTNAME="compendium"
+# Use system hostname by default, fallback to 'compendium'
+HOSTNAME=$(hostname)
+if [ "$HOSTNAME" = "openplotter" ] || [ -z "$HOSTNAME" ] || [ "$HOSTNAME" = "localhost" ]; then
+    HOSTNAME="compendium"
+fi
 # Ensure we're using the correct home directory for the compendium user
 if [ "$APP_USER" = "root" ]; then
     APP_DIR="/root/compendiumnav2"

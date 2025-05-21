@@ -15,7 +15,11 @@ NC='\033[0m'
 DEFAULT_APP_USER="compendium"
 CURRENT_USER=$(whoami)
 APP_USER="${COMPENDIUM_USER:-$CURRENT_USER}"
-HOSTNAME="compendium"
+# Use system hostname by default, fallback to 'compendium'
+HOSTNAME=$(hostname)
+if [ "$HOSTNAME" = "openplotter" ] || [ -z "$HOSTNAME" ] || [ "$HOSTNAME" = "localhost" ]; then
+    HOSTNAME="compendium"
+fi
 DOMAIN="local"
 SERVICE_NAME="_compendium._tcp"
 # Ensure we're using the correct home directory for the compendium user

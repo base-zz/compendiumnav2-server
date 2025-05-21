@@ -15,7 +15,11 @@ NC='\033[0m'
 DEFAULT_APP_USER="compendium"
 CURRENT_USER=$(whoami)
 APP_USER="${COMPENDIUM_USER:-$CURRENT_USER}"
-HOSTNAME="compendium"
+# Use system hostname by default, fallback to 'compendium'
+HOSTNAME=$(hostname)
+if [ "$HOSTNAME" = "openplotter" ] || [ -z "$HOSTNAME" ] || [ "$HOSTNAME" = "localhost" ]; then
+    HOSTNAME="compendium"
+fi
 DOMAIN="local"
 SERVICE_NAME="_compendium._tcp"
 # Ensure we're using the correct home directory for the compendium user
@@ -427,6 +431,18 @@ EOF
 # Setup systemd service with mDNS support
 setup_systemd_service() {
     echo -e "${BLUE}Setting up systemd service...${NC}"
+    
+    # Ensure /etc/hosts has both hostnames
+    if ! grep -q "127.0.1.1.*compendium" /etc/hosts; then
+        echo -e "${BLUE}Updating /etc/hosts to include compendium hostname...${NC}"
+        if grep -q "127.0.1.1" /etc/hosts; then
+            # Append to existing line if it exists
+            sudo sed -i "/127\.0\.1\.1/s/$/ compendium/" /etc/hosts
+        else
+            # Add new line if it doesn't exist
+            echo "127.0.1.1       compendium" | sudo tee -a /etc/hosts > /dev/null
+        fi
+    fi
     
     # Create systemd service file
     local service_file="/etc/systemd/system/compendium.service"
