@@ -15,7 +15,12 @@ NC='\033[0m'
 CURRENT_USER=$(whoami)
 APP_USER="${COMPENDIUM_USER:-$CURRENT_USER}"
 HOSTNAME="compendium"
-APP_DIR="${APP_DIR:-$HOME/compendiumnav2}"
+# Ensure we're using the correct home directory for the compendium user
+if [ "$APP_USER" = "root" ]; then
+    APP_DIR="/root/compendiumnav2"
+else
+    APP_DIR="${APP_DIR:-/Users/$APP_USER/compendiumnav2}"
+fi
 BACKUP_DIR="${BACKUP_DIR:-$HOME/compendium-backups}"
 NODE_VERSION="18"
 GIT_REPO="https://github.com/base-zz/compendium2.git"
@@ -307,7 +312,8 @@ setup_launch_agent() {
     <string>com.compendium.navigation</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$(which npm)</string>
+        <string>/usr/bin/env</string>
+        <string>npm</string>
         <string>start</string>
     </array>
     <key>RunAtLoad</key>
@@ -325,7 +331,7 @@ setup_launch_agent() {
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
         <key>NODE_ENV</key>
-        <string>development</string>
+        <string>production</string>
         <key>PORT</key>
         <string>$HTTP_PORT</string>
         <key>VPS_WS_PORT</key>

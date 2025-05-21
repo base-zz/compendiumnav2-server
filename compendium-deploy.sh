@@ -18,7 +18,12 @@ APP_USER="${COMPENDIUM_USER:-$CURRENT_USER}"
 HOSTNAME="compendium"
 DOMAIN="local"
 SERVICE_NAME="_compendium._tcp"
-APP_DIR="/home/$APP_USER/compendiumnav2"
+# Ensure we're using the correct home directory for the compendium user
+if [ "$APP_USER" = "root" ]; then
+    APP_DIR="/root/compendiumnav2"
+else
+    APP_DIR="/home/$APP_USER/compendiumnav2"
+fi
 BACKUP_DIR="/home/$APP_USER/compendium-backups"
 NODE_VERSION="18"
 GIT_REPO="https://github.com/base-zz/compendium2.git"
@@ -336,7 +341,8 @@ WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env.server
 
 # Main service
-ExecStart=/usr/bin/node $APP_DIR/src/server/mainServer.js
+# Use full path to npm and ensure we're in the correct directory
+ExecStart=/usr/bin/env npm start
 
 # mDNS service registration
 ExecStartPost=/bin/sh -c 'avahi-publish -s $HOSTNAME $SERVICE_NAME $HTTP_PORT "Path=/" & echo \$! > /tmp/compendium-mdns.pid'
