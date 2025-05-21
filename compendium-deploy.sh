@@ -328,10 +328,46 @@ EOF
 
 # Setup systemd service with mDNS support
 setup_systemd_service() {
-    echo -e "${BLUE}Setting up systemd service with mDNS support...${NC}"
-    local service_file="/etc/systemd/system/compendium.service"
+    echo -e "${BLUE}Setting up systemd service...${NC}"
     
-    # Create service file with mDNS support
+    # Ensure /etc/hosts has both hostnames
+    if ! grep -q "127.0.1.1.*compendium" /etc/hosts; then
+        echo -e "${BLUE}Updating /etc/hosts to include compendium hostname...${NC}"
+        if grep -q "127\.0\.1\.1" /etc/hosts; then
+            # Append to existing line if it exists
+            sed -i "/127\.0\.1\.1/s/$/ compendium/" /etc/hosts
+        else
+            # Add new line if it doesn't exist
+            echo "127.0.1.1       compendium" | tee -a /etc/hosts > /dev/null
+        fi
+    fi
+    
+    # Verify main server file exists
+    local main_server_file="$APP_DIR/src/mainServer.js"
+    if [ ! -f "$main_server_file" ]; then
+        echo -e "${RED}Error: Main server file not found at $main_server_file${NC}" >&2
+        echo -e "${YELLOW}Checking for alternative locations...${NC}"
+        
+        # Try to find the main server file
+        local found_file=$(find "$APP_DIR" -name "mainServer.js" -type f -print -quit)
+        
+        if [ -n "$found_file" ]; then
+            echo -e "${GREEN}Found main server file at: $found_file${NC}"
+            main_server_file="$found_file"
+        else
+            echo -e "${RED}Could not find main server file in $APP_DIR${NC}"
+            echo -e "${YELLOW}Please ensure the application files are properly installed.${NC}"
+            return 1
+        fi
+    fi
+    
+    # Create systemd service directory if it doesn't exist
+    mkdir -p /etc/systemd/system
+    
+    # Create systemd service file
+    local service_file="/etc/systemd/system/compendium.service"
+    echo -e "${BLUE}Creating service file at $service_file${NC}"
+    
     cat > "$service_file" << EOF
 [Unit]
 Description=Compendium Navigation Server
@@ -340,34 +376,49 @@ Wants=avahi-daemon.service
 
 [Service]
 Type=simple
-User=$APP_USER
+User=root
 WorkingDirectory=$APP_DIR
-EnvironmentFile=$APP_DIR/.env.server
-
-# Main service
-# Use full path to npm and ensure we're in the correct directory
-ExecStart=/usr/bin/env npm start
-
-# mDNS service registration
-ExecStartPost=/bin/sh -c 'avahi-publish -s $HOSTNAME $SERVICE_NAME $HTTP_PORT "Path=/" & echo \$! > /tmp/compendium-mdns.pid'
-ExecStopPost=/bin/sh -c 'kill -9 \$(cat /tmp/compendium-mdns.pid) 2>/dev/null || true; rm -f /tmp/compendium-mdns.pid'
-
+ExecStart=/usr/bin/node $main_server_file
 Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=compendium
+Environment=NODE_ENV=production
+Environment=PORT=$HTTP_PORT
+Environment=WS_PORT=$WS_PORT
+
+# mDNS service registration
+ExecStartPost=/bin/sh -c 'avahi-publish -s $HOSTNAME _compendium._tcp $HTTP_PORT "Path=/" & echo \$! > /tmp/compendium-mdns.pid'
+ExecStopPost=/bin/sh -c 'kill -9 \$(cat /tmp/compendium-mdns.pid) 2>/dev/null || true; rm -f /tmp/compendium-mdns.pid'
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
-    # Reload systemd and enable service
+    
+    # Set correct permissions
+    chmod 644 "$service_file"
+    
+    # Reload systemd
     systemctl daemon-reload
+    
+    # Enable and start the service
     systemctl enable compendium.service
-    systemctl restart compendium.service
     
     echo -e "${GREEN}Systemd service configured${NC}"
+    echo -e "${YELLOW}Starting Compendium service...${NC}"
+    
+    if systemctl start compendium.service; then
+        echo -e "${GREEN}Compendium service started successfully${NC}"
+        echo -e "${BLUE}Service status:${NC}"
+        systemctl status compendium.service --no-pager
+    else
+        echo -e "${RED}Failed to start Compendium service${NC}" >&2
+        journalctl -u compendium -n 20 --no-pager
+        return 1
+    fi
+    
+    return 0
 }
 
 # Configure firewall

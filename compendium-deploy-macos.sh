@@ -298,59 +298,149 @@ set_env_var() {
 
 # Configure macOS LaunchAgent for auto-start
 setup_launch_agent() {
-    echo -e "${BLUE}Setting up LaunchAgent for auto-start...${NC}"
+    echo -e "${BLUE}Configuring LaunchAgent for auto-start...${NC}"
     
-    local plist_dir="$HOME/Library/LaunchAgents"
-    local plist_file="$plist_dir/com.compendium.navigation.plist"
+    local launch_agent_dir="$HOME/Library/LaunchAgents"
+    local launch_agent_plist="$launch_agent_dir/com.compendiumnav.server.plist"
+    local log_dir="$APP_DIR/logs"
     
-    # Create LaunchAgents directory if it doesn't exist
-    mkdir -p "$plist_dir"
+    # Create necessary directories
+    mkdir -p "$launch_agent_dir"
+    mkdir -p "$log_dir"
     
-    # Create plist file
-    cat > "$plist_file" << EOF
+    # Get the full path to node and the main server file
+    local node_path=$(which node)
+    if [ -z "$node_path" ]; then
+        echo -e "${RED}Error: Node.js not found. Please install Node.js first.${NC}" >&2
+        return 1
+    fi
+    
+    local main_script="$APP_DIR/src/mainServer.js"
+    
+    # Verify main server file exists
+    if [ ! -f "$main_script" ]; then
+        echo -e "${RED}Error: Main server file not found at $main_script${NC}" >&2
+        echo -e "${YELLOW}Checking for alternative locations...${NC}"
+        
+        # Try to find the main server file
+        local found_file=$(find "$APP_DIR" -name "mainServer.js" -type f -print -quit)
+        
+        if [ -n "$found_file" ]; then
+            echo -e "${GREEN}Found main server file at: $found_file${NC}"
+            main_script="$found_file"
+        else
+            echo -e "${RED}Could not find main server file in $APP_DIR${NC}"
+            echo -e "${YELLOW}Please ensure the application files are properly installed.${NC}"
+            return 1
+        fi
+    fi
+    
+    # Create the plist file with improved configuration
+    echo -e "${BLUE}Creating LaunchAgent plist at $launch_agent_plist${NC}"
+    
+    cat > "$launch_agent_plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.compendium.navigation</string>
+    <string>com.compendiumnav.server</string>
+    
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/env</string>
-        <string>npm</string>
-        <string>start</string>
+        <string>$node_path</string>
+        <string>$main_script</string>
     </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>WorkingDirectory</key>
-    <string>$APP_DIR</string>
-    <key>StandardOutPath</key>
-    <string>$HOME/Library/Logs/compendium.log</string>
-    <key>StandardErrorPath</key>
-    <string>$HOME/Library/Logs/compendium.error.log</string>
+    
     <key>EnvironmentVariables</key>
     <dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
         <key>NODE_ENV</key>
         <string>production</string>
         <key>PORT</key>
         <string>$HTTP_PORT</string>
-        <key>VPS_WS_PORT</key>
+        <key>WS_PORT</key>
         <string>$WS_PORT</string>
+        <key>HOSTNAME</key>
+        <string>$HOSTNAME</string>
+        <key>NODE_PATH</key>
+        <string>$APP_DIR/node_modules</string>
     </dict>
+    
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <key>KeepAlive</key>
+    <true/>
+    
+    <key>StandardOutPath</key>
+    <string>$log_dir/compendium.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>$log_dir/compendium-error.log</string>
+    
+    <key>WorkingDirectory</key>
+    <string>$APP_DIR</string>
+    
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    
+    <key>SessionCreate</key>
+    <true/>
+    
+    <key>AbandonProcessGroup</key>
+    <true/>
+    
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
 </dict>
 </plist>
 EOF
     
-    # Load the LaunchAgent
-    launchctl unload "$plist_file" 2>/dev/null || true
-    launchctl load -w "$plist_file"
+    # Set correct permissions
+    chmod 644 "$launch_agent_plist"
     
-    echo -e "${GREEN}LaunchAgent configured${NC}"
-    return 0
+    # Create log rotation configuration
+    local log_rotate_conf="/etc/newsyslog.d/com.compendiumnav.server.conf"
+    if [ ! -f "$log_rotate_conf" ]; then
+        echo -e "${BLUE}Configuring log rotation...${NC}"
+        echo -e "$log_dir/compendium.log $APP_USER:staff 644 7 * @T00 J" | sudo tee "$log_rotate_conf" > /dev/null
+        echo -e "$log_dir/compendium-error.log $APP_USER:staff 644 7 * @T00 J" | sudo tee -a "$log_rotate_conf" > /dev/null
+    fi
+    
+    # Load the LaunchAgent
+    echo -e "${BLUE}Loading LaunchAgent...${NC}"
+    launchctl unload "$launch_agent_plist" 2>/dev/null || true
+    
+    if launchctl load -w "$launch_agent_plist"; then
+        echo -e "${GREEN}LaunchAgent configured successfully${NC}"
+        
+        # Start the service
+        echo -e "${YELLOW}Starting Compendium service...${NC}"
+        if launchctl start com.compendiumnav.server; then
+            echo -e "${GREEN}Compendium service started successfully${NC}"
+            echo -e "${BLUE}Service status:${NC}"
+            launchctl list | grep com.compendiumnav.server
+            
+            # Show initial logs
+            echo -e "\n${BLUE}=== Initial Logs ===${NC}"
+            echo -e "${YELLOW}Application logs: $log_dir/compendium.log${NC}"
+            echo -e "${YELLOW}Error logs: $log_dir/compendium-error.log${NC}"
+            
+            # Show the last few lines of the log
+            if [ -f "$log_dir/compendium.log" ]; then
+                echo -e "\n${BLUE}=== Last 5 lines of application log ===${NC}"
+                tail -n 5 "$log_dir/compendium.log"
+            fi
+        else
+            echo -e "${RED}Failed to start Compendium service${NC}" >&2
+            return 1
+        fi
+        
+        return 0
+    else
+        echo -e "${RED}Failed to load LaunchAgent${NC}" >&2
+        return 1
+    fi
 }
 
 # Configure macOS firewall
