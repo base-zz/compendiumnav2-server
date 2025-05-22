@@ -16,18 +16,6 @@ DEFAULT_APP_USER="compendium"
 CURRENT_USER=$(whoami)
 APP_USER="${COMPENDIUM_USER:-$CURRENT_USER}"
 # Use system hostname by default, fallback to 'compendium'
-HOSTNAME=$(hostname)
-if [ "$HOSTNAME" = "openplotter" ] || [ -z "$HOSTNAME" ] || [ "$HOSTNAME" = "localhost" ]; then
-    HOSTNAME="compendium"
-fi
-DOMAIN="local"
-SERVICE_NAME="_compendium._tcp"
-# Ensure we're using the correct home directory for the compendium user
-if [ "$APP_USER" = "root" ]; then
-    APP_DIR="/root/compendiumnav2"
-else
-    APP_DIR="/home/$APP_USER/compendiumnav2"
-fi
 BACKUP_DIR="/home/$APP_USER/compendium-backups"
 NODE_VERSION="18"
 GIT_REPO="https://github.com/base-zz/compendium2.git"
@@ -229,51 +217,29 @@ install_dependencies() {
     return 0
 }
 
-# Setup repository
-setup_repository() {
-    echo -e "${BLUE}Setting up repository...${NC}"
+# Verify repository
+verify_repository() {
+    echo -e "${BLUE}Verifying repository...${NC}"
     
-    if [ ! -d "$APP_DIR" ]; then
-        # Clone the repository
-        echo -e "${BLUE}Cloning repository...${NC}"
-        if ! git clone --branch "$GIT_BRANCH" "$GIT_REPO" "$APP_DIR"; then
-            echo -e "${RED}Failed to clone repository${NC}" >&2
-            return 1
-        fi
-    else
-        # Update existing repository
-        echo -e "${BLUE}Updating repository...${NC}"
-        cd "$APP_DIR" || return 1
-        if ! git fetch --all; then
-            echo -e "${RED}Failed to fetch updates${NC}" >&2
-            return 1
-        fi
+    if [ ! -d ".git" ]; then
+        echo -e "${RED}Error: Not a git repository. Please run this script from the compendiumnav2 directory.${NC}" >&2
+        return 1
     fi
     
-    # Checkout specific version if requested
-    cd "$APP_DIR" || return 1
-    if [ "$TARGET_VERSION" != "latest" ]; then
-        echo -e "${BLUE}Checking out version $TARGET_VERSION...${NC}"
-        if ! git checkout "$TARGET_VERSION"; then
-            echo -e "${RED}Failed to checkout version $TARGET_VERSION${NC}" >&2
+    # Ensure we have the latest version
+    echo -e "${BLUE}Updating repository...${NC}"
+    git pull
+    
+    # Checkout specific version if specified
+    if [ -n "$COMPENDIUM_VERSION" ] && [ "$COMPENDIUM_VERSION" != "latest" ]; then
+        echo -e "${BLUE}Checking out version $COMPENDIUM_VERSION...${NC}"
+        git checkout "$COMPENDIUM_VERSION" 2>/dev/null || {
+            echo -e "${RED}Failed to checkout version $COMPENDIUM_VERSION${NC}" >&2;
             return 1
-        fi
-    else
-        echo -e "${BLUE}Checking out latest version...${NC}"
-        if ! git checkout "$GIT_BRANCH"; then
-            echo -e "${RED}Failed to checkout branch $GIT_BRANCH${NC}" >&2
-            return 1
-        fi
-        if ! git pull; then
-            echo -e "${RED}Failed to pull latest changes${NC}" >&2
-            return 1
-        fi
+        }
     fi
     
-    # Set proper ownership
-    chown -R "$APP_USER:$APP_USER" "$APP_DIR"
-    
-    echo -e "${GREEN}Repository setup completed${NC}"
+    echo -e "${GREEN}Repository verified${NC}"
     return 0
 }
 
@@ -282,23 +248,22 @@ configure_environment() {
     echo -e "${BLUE}Configuring environment...${NC}"
     
     # Create .env file if it doesn't exist
-    local env_file="$APP_DIR/.env"
+    local env_file=".env"
     if [ ! -f "$env_file" ]; then
         touch "$env_file"
-        chown "$APP_USER:$APP_USER" "$env_file"
     fi
     
     # Set environment variables
     set_env_var "PORT" "$HTTP_PORT"
     set_env_var "VPS_WS_PORT" "$WS_PORT"
     set_env_var "NODE_ENV" "production"
-    set_env_var "FRONTEND_URL" "http://$HOSTNAME.$DOMAIN:$HTTP_PORT"
+    set_env_var "FRONTEND_URL" "http://$(hostname -I | awk '{print $1}'):$(echo -e "${HTTP_PORT}")"
     
     # mDNS configuration
     set_env_var "MDNS_ENABLED" "true"
-    set_env_var "MDNS_NAME" "$HOSTNAME"
-    set_env_var "MDNS_DOMAIN" "$DOMAIN"
-    set_env_var "MDNS_SERVICE" "$SERVICE_NAME"
+    set_env_var "MDNS_NAME" "$(hostname)"
+    set_env_var "MDNS_DOMAIN" "local"
+    set_env_var "MDNS_SERVICE" "_compendium._tcp"
     
     # Log level
     set_env_var "LOG_LEVEL" "info"
@@ -306,7 +271,6 @@ configure_environment() {
     # Data directory
     local data_dir="/home/$APP_USER/compendium-data"
     mkdir -p "$data_dir"
-    chown "$APP_USER:$APP_USER" "$data_dir"
     set_env_var "DATA_DIR" "$data_dir"
     
     # Raspberry Pi specific settings
@@ -367,7 +331,7 @@ configure_memory_management() {
 set_env_var() {
     local key=$1
     local value=$2
-    local env_file="$APP_DIR/.env"
+    local env_file=".env"
     
     # Remove existing entry if present
     if grep -q "^$key=" "$env_file"; then
@@ -417,8 +381,8 @@ EOF
     # Test mDNS resolution
     echo -e "${BLUE}Testing mDNS resolution...${NC}"
     if command_exists avahi-resolve; then
-        if avahi-resolve --name "$HOSTNAME.$DOMAIN" &>/dev/null; then
-            echo -e "${GREEN}mDNS resolution working: $HOSTNAME.$DOMAIN${NC}"
+        if avahi-resolve --name "$(hostname).local" &>/dev/null; then
+            echo -e "${GREEN}mDNS resolution working: $(hostname).local${NC}"
         else
             echo -e "${YELLOW}mDNS resolution not working yet. This may take a moment to propagate.${NC}"
         fi
@@ -445,13 +409,13 @@ setup_systemd_service() {
     fi
     
     # Verify main server file exists
-    local main_server_file="$APP_DIR/src/mainServer.js"
+    local main_server_file="src/mainServer.js"
     if [ ! -f "$main_server_file" ]; then
         echo -e "${RED}Error: Main server file not found at $main_server_file${NC}" >&2
         echo -e "${YELLOW}Checking for alternative locations...${NC}"
         
         # Try to find the main server file
-        local found_file=$(find "$APP_DIR" -name "mainServer.js" -type f -print -quit)
+        local found_file=$(find . -name "mainServer.js" -type f -print -quit)
         
         if [ -n "$found_file" ]; then
             echo -e "${GREEN}Found main server file at: $found_file${NC}"
@@ -479,7 +443,7 @@ Wants=avahi-daemon.service
 [Service]
 Type=simple
 User=root
-WorkingDirectory=$APP_DIR
+WorkingDirectory=$(pwd)
 ExecStart=/usr/bin/node $main_server_file
 Restart=always
 RestartSec=10
@@ -491,7 +455,7 @@ Environment=PORT=$HTTP_PORT
 Environment=WS_PORT=$WS_PORT
 
 # mDNS service registration
-ExecStartPost=/bin/sh -c 'avahi-publish -s $HOSTNAME _compendium._tcp $HTTP_PORT "Path=/" & echo \$! > /tmp/compendium-mdns.pid'
+ExecStartPost=/bin/sh -c 'avahi-publish -s $(hostname) _compendium._tcp $HTTP_PORT "Path=/" & echo \$! > /tmp/compendium-mdns.pid'
 ExecStopPost=/bin/sh -c 'kill -9 \$(cat /tmp/compendium-mdns.pid) 2>/dev/null || true; rm -f /tmp/compendium-mdns.pid'
 
 [Install]
@@ -654,32 +618,40 @@ health_check() {
 
 # Main installation function
 install() {
+    echo -e "${BLUE}Starting installation...${NC}"
+    
+    # Verify we're in the right directory
+    verify_repository || return 1
+    
+    # Check system requirements
     check_root
     check_raspberry_pi
     initialize_ports
     validate_config
-    backup_existing
+    
+    # Install system dependencies
     install_dependencies
-    setup_repository
+    
+    # Configure environment
     configure_environment
-    configure_memory_management
-    tune_performance
-    configure_avahi
+    
+    # Install npm dependencies
+    echo -e "${BLUE}Installing npm dependencies...${NC}"
+    npm install || {
+        echo -e "${RED}Failed to install npm dependencies${NC}" >&2
+        return 1
+    }
+    
+    # Setup systemd service
     setup_systemd_service
+    
+    # Configure firewall
     configure_firewall
     
-    # Install npm dependencies with optimizations for Raspberry Pi
-    cd "$APP_DIR" || exit 1
-    echo -e "${BLUE}Installing npm dependencies...${NC}"
-    su -c "npm install --no-optional --production" - "$APP_USER"
-    
-    # Start the service
-    systemctl enable compendium
-    systemctl start compendium
-    
-    health_check
-    monitor_temperature
-    
+    echo -e "\n${GREEN}Installation completed successfully!${NC}"
+    echo -e "${YELLOW}The Compendium Navigation Server should now be running.${NC}"
+    echo -e "${YELLOW}Access it at: http://$(hostname -I | awk '{print $1}'):$(echo -e "${HTTP_PORT}")${NC}"
+    return 0
     echo -e "${GREEN}Compendium Navigation Server has been successfully installed!${NC}"
     echo -e "${GREEN}You can access it at http://$HOSTNAME.$DOMAIN:$HTTP_PORT${NC}"
 }

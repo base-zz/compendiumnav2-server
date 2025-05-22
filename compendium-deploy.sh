@@ -16,18 +16,6 @@ DEFAULT_APP_USER="compendium"
 CURRENT_USER=$(whoami)
 APP_USER="${COMPENDIUM_USER:-$CURRENT_USER}"
 # Use system hostname by default, fallback to 'compendium'
-HOSTNAME=$(hostname)
-if [ "$HOSTNAME" = "openplotter" ] || [ -z "$HOSTNAME" ] || [ "$HOSTNAME" = "localhost" ]; then
-    HOSTNAME="compendium"
-fi
-DOMAIN="local"
-SERVICE_NAME="_compendium._tcp"
-# Ensure we're using the correct home directory for the compendium user
-if [ "$APP_USER" = "root" ]; then
-    APP_DIR="/root/compendiumnav2"
-else
-    APP_DIR="/home/$APP_USER/compendiumnav2"
-fi
 BACKUP_DIR="/home/$APP_USER/compendium-backups"
 NODE_VERSION="18"
 GIT_REPO="https://github.com/base-zz/compendium2.git"
@@ -113,112 +101,29 @@ validate_config() {
     echo -e "${GREEN}Configuration validated${NC}"
 }
 
-# Backup existing installation
-backup_existing() {
-    echo -e "${BLUE}Checking for existing installation...${NC}"
+# Verify repository
+verify_repository() {
+    echo -e "${BLUE}Verifying repository...${NC}"
     
-    if [ -d "$APP_DIR" ]; then
-        echo -e "${YELLOW}Existing installation found, creating backup...${NC}"
-        local timestamp=$(date +%Y%m%d_%H%M%S)
-        local backup_path="$BACKUP_DIR/backup_$timestamp"
-        
-        mkdir -p "$BACKUP_DIR"
-        cp -r "$APP_DIR" "$backup_path"
-        
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}Backup created at $backup_path${NC}"
-        else
-            echo -e "${RED}Failed to create backup${NC}" >&2
-            return 1
-        fi
-    else
-        echo -e "${GREEN}No existing installation found, proceeding with fresh install${NC}"
-    fi
-}
-
-# Install system dependencies
-install_dependencies() {
-    echo -e "${BLUE}Installing system dependencies...${NC}"
-    
-    # Update package lists
-    if ! apt-get update; then
-        echo -e "${RED}Failed to update package lists${NC}" >&2
+    if [ ! -d ".git" ]; then
+        echo -e "${RED}Error: Not a git repository. Please run this script from the compendiumnav2 directory.${NC}" >&2
         return 1
     fi
     
-    # Install required packages
-    local packages=(
-        git curl wget
-        build-essential
-        python3
-        python3-pip
-        libavahi-compat-libdnssd-dev
-        libudev-dev
-        libusb-1.0-0-dev
-        avahi-daemon    # For mDNS support
-        libnss-mdns     # For .local resolution
-        avahi-utils     # For avahi-publish
-    )
-    
-    if ! apt-get install -y "${packages[@]}"; then
-        echo -e "${RED}Failed to install required packages${NC}" >&2
-        return 1
-    fi
-    
-    # Install Node.js
-    if ! command -v node &> /dev/null; then
-        echo -e "${BLUE}Installing Node.js...${NC}"
-        curl -fsSL https://deb.nodesource.com/setup_$NODE_VERSION.x | bash -
-        if ! apt-get install -y nodejs; then
-            echo -e "${RED}Failed to install Node.js${NC}" >&2
-            return 1
-        fi
-    fi
-    
-    # Install PM2
-    if ! command -v pm2 &> /dev/null; then
-        echo -e "${BLUE}Installing PM2...${NC}"
-        if ! npm install -g pm2; then
-            echo -e "${RED}Failed to install PM2${NC}" >&2
-            return 1
-        fi
-    fi
-    
-    echo -e "${GREEN}Dependencies installed successfully${NC}"
-    return 0
-}
-
-# Setup repository
-setup_repository() {
-    echo -e "${BLUE}Setting up repository...${NC}"
-    
-    if [ ! -d "$APP_DIR" ]; then
-        # Clone the repository
-        echo -e "${BLUE}Cloning repository...${NC}"
-        if ! git clone --branch "$GIT_BRANCH" "$GIT_REPO" "$APP_DIR"; then
-            echo -e "${RED}Failed to clone repository${NC}" >&2
-            return 1
-        fi
-    else
-        # Update existing repository
-        echo -e "${BLUE}Updating repository...${NC}"
-        cd "$APP_DIR" || return 1
-        if ! git fetch --all; then
-            echo -e "${RED}Failed to fetch updates${NC}" >&2
-            return 1
-        fi
-    fi
+    # Ensure we have the latest version
+    echo -e "${BLUE}Updating repository...${NC}"
+    git pull
     
     # Checkout specific version if specified
-    if [ "$TARGET_VERSION" != "latest" ]; then
-        echo -e "${BLUE}Checking out version $TARGET_VERSION...${NC}"
-        cd "$APP_DIR" || return 1
-        if ! git checkout "$TARGET_VERSION"; then
-            echo -e "${RED}Failed to checkout version $TARGET_VERSION${NC}" >&2
+    if [ -n "$COMPENDIUM_VERSION" ] && [ "$COMPENDIUM_VERSION" != "latest" ]; then
+        echo -e "${BLUE}Checking out version $COMPENDIUM_VERSION...${NC}"
+        git checkout "$COMPENDIUM_VERSION" 2>/dev/null || {
+            echo -e "${RED}Failed to checkout version $COMPENDIUM_VERSION${NC}" >&2;
             return 1
-        fi
+        }
     fi
     
+    echo -e "${GREEN}Repository verified${NC}"
     return 0
 }
 
@@ -300,7 +205,7 @@ configure_avahi() {
     
     cat > "$avahi_service_file" << EOF
 <?xml version="1.0" standalone='no'?>
-<!DOCTYPE service-group SYSTEM "avahi-service.d/tdb.dtd">
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <service-group>
   <name>Compendium Navigation Server</name>
   <service>
@@ -472,37 +377,26 @@ health_check() {
 
 # Main installation function
 install() {
-    echo -e "${GREEN}=== Starting Compendium Installation ===${NC}"
+    echo -e "${BLUE}Starting installation...${NC}"
     
-    # Check if running as root
-    check_root
+    # Verify we're in the right directory
+    verify_repository || return 1
     
-    # Initialize ports
-    initialize_ports
+    # Check system requirements
+    check_requirements
     
-    # Validate configuration
-    validate_config
-    
-    # Backup existing installation
-    backup_existing
-    
-    # Install dependencies
-    if ! install_dependencies; then
-        echo -e "${RED}Failed to install dependencies${NC}" >&2
-        exit 1
-    fi
-    
-    # Setup repository
-    if ! setup_repository; then
-        echo -e "${RED}Failed to setup repository${NC}" >&2
-        exit 1
-    fi
+    # Install system dependencies
+    install_dependencies
     
     # Configure environment
-    if ! configure_environment; then
-        echo -e "${RED}Failed to configure environment${NC}" >&2
-        exit 1
-    fi
+    configure_environment
+    
+    # Install npm dependencies
+    echo -e "${BLUE}Installing npm dependencies...${NC}"
+    npm install || {
+        echo -e "${RED}Failed to install npm dependencies${NC}" >&2
+        return 1
+    }
     
     # Setup systemd service
     if ! setup_systemd_service; then

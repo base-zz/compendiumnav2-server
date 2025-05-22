@@ -13,18 +13,6 @@ NC='\033[0m'
 
 # Configuration
 CURRENT_USER=$(whoami)
-APP_USER="${COMPENDIUM_USER:-$CURRENT_USER}"
-# Use system hostname by default, fallback to 'compendium'
-HOSTNAME=$(hostname)
-if [ "$HOSTNAME" = "openplotter" ] || [ -z "$HOSTNAME" ] || [ "$HOSTNAME" = "localhost" ]; then
-    HOSTNAME="compendium"
-fi
-# Ensure we're using the correct home directory for the compendium user
-if [ "$APP_USER" = "root" ]; then
-    APP_DIR="/root/compendiumnav2"
-else
-    APP_DIR="${APP_DIR:-/Users/$APP_USER/compendiumnav2}"
-fi
 BACKUP_DIR="${BACKUP_DIR:-$HOME/compendium-backups}"
 NODE_VERSION="18"
 GIT_REPO="https://github.com/base-zz/compendium2.git"
@@ -220,33 +208,29 @@ install_dependencies() {
     return 0
 }
 
-# Setup repository
-setup_repository() {
-    echo -e "${BLUE}Setting up repository...${NC}"
+# Verify repository
+verify_repository() {
+    echo -e "${BLUE}Verifying repository...${NC}"
     
-    if [ ! -d "$APP_DIR" ]; then
-        # Clone the repository
-        echo -e "${BLUE}Cloning repository...${NC}"
-        git clone --branch "$GIT_BRANCH" "$GIT_REPO" "$APP_DIR"
-    else
-        # Update existing repository
-        echo -e "${BLUE}Updating repository...${NC}"
-        cd "$APP_DIR" || return 1
-        git fetch --all
+    if [ ! -d ".git" ]; then
+        echo -e "${RED}Error: Not a git repository. Please run this script from the compendiumnav2 directory.${NC}" >&2
+        return 1
     fi
     
-    # Checkout specific version if requested
-    cd "$APP_DIR" || return 1
-    if [ "$TARGET_VERSION" != "latest" ]; then
-        echo -e "${BLUE}Checking out version $TARGET_VERSION...${NC}"
-        git checkout "$TARGET_VERSION"
-    else
-        echo -e "${BLUE}Checking out latest version...${NC}"
-        git checkout "$GIT_BRANCH"
-        git pull
+    # Ensure we have the latest version
+    echo -e "${BLUE}Updating repository...${NC}"
+    git pull
+    
+    # Checkout specific version if specified
+    if [ -n "$COMPENDIUM_VERSION" ] && [ "$COMPENDIUM_VERSION" != "latest" ]; then
+        echo -e "${BLUE}Checking out version $COMPENDIUM_VERSION...${NC}"
+        git checkout "$COMPENDIUM_VERSION" 2>/dev/null || {
+            echo -e "${RED}Failed to checkout version $COMPENDIUM_VERSION${NC}" >&2;
+            return 1
+        }
     fi
     
-    echo -e "${GREEN}Repository setup completed${NC}"
+    echo -e "${GREEN}Repository verified${NC}"
     return 0
 }
 
@@ -526,36 +510,71 @@ health_check() {
 
 # Main installation function
 install() {
-    check_root
-    check_macos
-    initialize_ports
-    validate_config
-    backup_existing
+    echo -e "${BLUE}Starting installation...${NC}"
+    
+    # Verify we're in the right directory
+    verify_repository || return 1
+    
+    # Check if running as root (not recommended on macOS)
+    if [ "$(id -u)" -eq 0 ]; then
+        echo -e "${YELLOW}Warning: Running as root is not recommended on macOS.${NC}"
+        read -p "Do you want to continue as root? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo -e "${RED}Installation aborted by user.${NC}"
+            exit 1
+        fi
+    fi
+    
+    # Install Homebrew if not installed
+    if ! command -v brew &> /dev/null; then
+        echo -e "${BLUE}Installing Homebrew...${NC}"
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || {
+            echo -e "${RED}Failed to install Homebrew${NC}" >&2
+            exit 1
+        }
+        
+        # Add Homebrew to PATH if not already there
+        if [[ ":$PATH:" != *":/opt/homebrew/bin:"* ]]; then
+            echo 'export PATH="/opt/homebrew/bin:$PATH"' >> ~/.zshrc
+            export PATH="/opt/homebrew/bin:$PATH"
+        fi
+    fi
+    
+    # Install system dependencies
     install_dependencies
-    setup_repository
+    
+    # Configure environment
     configure_environment
     
     # Install npm dependencies
-    cd "$APP_DIR" || exit 1
     echo -e "${BLUE}Installing npm dependencies...${NC}"
-    npm install
+    npm install || {
+        echo -e "${RED}Failed to install npm dependencies${NC}" >&2
+        return 1
+    }
     
+    # Setup LaunchAgent
     setup_launch_agent
-    configure_firewall
-    start_service
-    health_check
     
-    echo -e "${GREEN}Compendium Navigation Server has been successfully installed!${NC}"
-    echo -e "${GREEN}You can access it at http://localhost:$HTTP_PORT${NC}"
-    echo -e "${BLUE}Logs are available at:${NC}"
-    echo -e "${BLUE}- $HOME/Library/Logs/compendium.log${NC}"
-    echo -e "${BLUE}- $HOME/Library/Logs/compendium.error.log${NC}"
+    # Configure firewall
+    configure_firewall
+    
+    echo -e "\n${GREEN}Installation completed successfully!${NC}"
+    echo -e "${YELLOW}The Compendium Navigation Server should now be running.${NC}"
+    echo -e "${YELLOW}Access it at: http://localhost:${HTTP_PORT}${NC}"
+    echo -e "\n${YELLOW}To start the server manually, run:${NC}"
+    echo -e "  launchctl start com.compendiumnav.server"
+    echo -e "\n${YELLOW}To view logs:${NC}"
+    echo -e "  tail -f $(pwd)/logs/compendium.log"
 }
 
 # Update function
 update() {
     echo -e "${BLUE}Updating Compendium Navigation Server...${NC}"
     
+    # Verify we're in the right directory
+    verify_repository || return 1
     check_macos
     backup_existing
     
