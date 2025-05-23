@@ -1,10 +1,10 @@
 import { EventEmitter } from "events";
-import { createStateDataModel } from '../../../../src/shared/stateDataModel.js';
+import { createStateDataModel } from '../../../../shared/stateDataModel.js';
 import { RuleEngine } from './ruleEngine.js';
 import { AllRules } from './allRules.js';
 import { AlertService } from '../services/AlertService.js';
-import { getOrCreateAppUuid } from "../../../../src/state/uniqueAppId.js";
-import { UNIT_PRESETS } from '../../../../src/shared/unitPreferences.js';
+import { getOrCreateAppUuid } from "../../../../state/uniqueAppId.js";
+import { UNIT_PRESETS } from '../../../../shared/unitPreferences.js';
 import { recordPatch, recordFullState } from './db.js'
 
 
