@@ -8,16 +8,16 @@
 
 import WebSocket from "ws";
 import EventEmitter from "events";
-import debug from "../shared/debug.js";
+import debug from "debug";
 import { stateData } from "./StateData.js";
 import { signalKAdapterRegistry } from "../relay/server/adapters/SignalKAdapterRegistry.js";
-import fetch from "../shared/node-fetch.js";
+import fetch from "node-fetch";
 import { extractAISTargetsFromSignalK } from "./extractAISTargets.js";
 import { convertSignalKNotifications } from '../shared/convertSignalK.js';
 import { UNIT_PRESETS } from '../shared/unitPreferences.js';
 import { getServerUnitPreferences } from './serverUnitPreferences.js';
 import { UnitConversion } from '../shared/unitConversion.js';
-import pkg from "../shared/fast-json-patch.js";
+import pkg from "fast-json-patch";
 import { stateManager } from "../relay/core/state/StateManager.js";
 
 const { compare: jsonPatchCompare } = pkg;
@@ -56,10 +56,6 @@ class StateService extends EventEmitter {
       }
     }
   }
-  _debug(...args) {
-    // console.debug('[StateService]', ...args);
-  }
-
   constructor() {
     super();
     this.isInitialized = false;
