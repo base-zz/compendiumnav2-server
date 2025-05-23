@@ -14,7 +14,14 @@ jobs:
     - name: Add SSH Key
       uses: webfactory/ssh-agent@v0.7.0
       with:
-        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+        ssh-private-key: |
+          ${{ secrets.SSH_PRIVATE_KEY }}
+      
+    # Debug: Show SSH key was added
+    - name: Debug SSH
+      run: |
+        echo "SSH_AUTH_SOCK: $SSH_AUTH_SOCK"
+        ssh-add -l
     
     # Create .env file from secrets
     - name: Create .env file
@@ -55,8 +62,16 @@ jobs:
     # Deploy to Raspberry Pi
     - name: Deploy
       run: |
-        scp -o StrictHostKeyChecking=no .env pi@compendium.local:~/compendium/.env
-        ssh -o StrictHostKeyChecking=no pi@compendium.local "cd ~/compendium && \
+        # Test connection first
+        ssh-keyscan -H compendium.local >> ~/.ssh/known_hosts
+        
+        # Copy .env file
+        scp -v -o StrictHostKeyChecking=no .env pi@compendium.local:~/compendium/.env
+        
+        # Run deployment commands
+        ssh -v -o StrictHostKeyChecking=no pi@compendium.local "
+          cd ~/compendium && \
           git pull && \
           npm install && \
-          systemctl --user restart compendium"
+          systemctl --user restart compendium
+        "
