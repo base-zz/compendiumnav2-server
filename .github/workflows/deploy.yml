@@ -37,6 +37,7 @@ jobs:
         SIGNALK_ADAPTER: ${{ secrets.SIGNALK_ADAPTER }}
         RECONNECT_DELAY: ${{ secrets.RECONNECT_DELAY }}
         MAX_RECONNECT_ATTEMPTS: ${{ secrets.MAX_RECONNECT_ATTEMPTS }}
+        UPDATE_INTERVAL: ${{ secrets.UPDATE_INTERVAL || '5000' }}
         VPS_URL: ${{ secrets.VPS_URL }}
         VPS_PORT: ${{ secrets.VPS_PORT }}
         RELAY_ENV_PATH: ${{ secrets.RELAY_ENV_PATH }}
