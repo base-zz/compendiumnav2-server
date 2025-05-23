@@ -18,11 +18,19 @@ jobs:
       
     - name: Deploy
       run: |
+        # Debug info
+        echo "Using PI_IP: ${{ secrets.PI_IP }}"
+        
         # Add IP to known hosts
-        ssh-keyscan -H 192.168.68.66 >> ~/.ssh/known_hosts
+        ssh-keyscan -H ${{ secrets.PI_IP }} >> ~/.ssh/known_hosts
+        
+        # Test connection first
+        echo "Testing SSH connection..."
+        ssh -o StrictHostKeyChecking=no -v pi@${{ secrets.PI_IP }} "echo Connection successful"
         
         # Run deployment commands
-        ssh -o StrictHostKeyChecking=no pi@192.168.68.66 "
+        echo "Running deployment commands..."
+        ssh -o StrictHostKeyChecking=no pi@${{ secrets.PI_IP }} "
           cd ~/compendium
           git pull
           npm install
