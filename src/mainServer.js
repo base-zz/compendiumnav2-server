@@ -1,7 +1,11 @@
 import dotenv from "dotenv";
-import { stateService } from "./state/StateService.js";
-import { startRelayServer, startDirectServer } from "./relay/server/index.js";
 import http from "http";
+import { stateService, setStateManager } from "./state/StateService.js";
+import { startRelayServer, startDirectServer } from "./relay/server/index.js";
+import { stateManager } from "./relay/core/state/StateManager.js";
+
+// Set up circular dependency
+setStateManager(stateManager);
 
 console.log("Loading .env");
 dotenv.config({ path: ".env" });
@@ -27,6 +31,10 @@ function buildVpsUrl() {
 
 // --- Bridge canonical state into relay state manager ---
 async function bridgeStateToRelay() {
+  if (!stateManager) {
+    console.error("[SERVER] State manager not initialized");
+    return;
+  }
   console.log("[SERVER] Starting state bridge to relay");
   try {
     const { stateData } = await import("./state/StateData.js");

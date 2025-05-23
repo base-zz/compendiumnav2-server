@@ -28,6 +28,24 @@ error_handler() {
     exit $exit_code
 }
 
+# Function to ensure required npm packages are installed
+ensure_npm_packages() {
+    local required_packages=("dotenv" "node-fetch@2")
+    
+    for pkg in "${required_packages[@]}"; do
+        if ! npm list "$pkg" >/dev/null 2>&1; then
+            echo -e "${BLUE}Installing $pkg...${NC}"
+            if ! npm install "$pkg"; then
+                echo -e "${YELLOW}Failed to install $pkg, trying with --force...${NC}"
+                npm install --force "$pkg" || {
+                    echo -e "${RED}Error: Failed to install $pkg${NC}" >&2
+                    return 1
+                }
+            fi
+        fi
+    done
+}
+
 # Set the error handler
 trap 'error_handler ${LINENO} "${BASH_COMMAND}"' ERR
 

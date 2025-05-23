@@ -13,12 +13,18 @@ import { stateData } from "./StateData.js";
 import { signalKAdapterRegistry } from "../relay/server/adapters/SignalKAdapterRegistry.js";
 import fetch from "node-fetch";
 import { extractAISTargetsFromSignalK } from "./extractAISTargets.js";
-import { convertSignalKNotifications } from '../shared/convertSignalK.js';
-import { UNIT_PRESETS } from '../shared/unitPreferences.js';
+import { convertSignalKNotifications } from '@compendiumnav2/shared/convertSignalK.js';
+import { UNIT_PRESETS } from '@compendiumnav2/shared/unitPreferences.js';
 import { getServerUnitPreferences } from './serverUnitPreferences.js';
-import { UnitConversion } from '../shared/unitConversion.js';
+import { UnitConversion } from '@compendiumnav2/shared/unitConversion.js';
 import pkg from "fast-json-patch";
-import { stateManager } from "../relay/core/state/StateManager.js";
+// StateManager is imported dynamically to avoid circular dependency
+let stateManager = null;
+
+// Function to set stateManager after imports are resolved
+function setStateManager(manager) {
+  stateManager = manager;
+}
 
 const { compare: jsonPatchCompare } = pkg;
 
@@ -1220,4 +1226,4 @@ async function fetchSignalKFullState(signalKBaseUrl, signalKToken) {
   return { vessels: await response.json() };
 }
 
-export { stateService, StateService, fetchSignalKFullState };
+export { stateService, StateService, fetchSignalKFullState, setStateManager };

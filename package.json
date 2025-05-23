@@ -11,16 +11,18 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "_moduleAliases": {
-    "@capacitor/preferences": "./src/mocks/capacitor-preferences.js"
+    "@capacitor/preferences": "./src/mocks/capacitor-preferences.js",
+    "@compendiumnav2/shared": "./src/shared"
   },
   "dependencies": {
     "@compendiumnav2/shared": "file:../compendiumnav2-shared",
+    "debug": "^4.3.4",
     "dotenv": "^16.5.0",
     "express": "^4.18.2",
     "fast-json-patch": "^3.1.1",
     "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",
-    "node-fetch": "^2.7.0",
+    "node-fetch": "^3.3.2",
     "sqlite3": "^5.1.7",
     "winston": "^3.17.0",
     "ws": "^8.14.2"
