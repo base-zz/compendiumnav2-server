@@ -65,7 +65,7 @@ jobs:
       run: |
         # Resolve mDNS hostname
         echo "Resolving compendium.local..."
-        PI_IP=$(avahi-resolve-host-name compendium.local | awk '{print $2}')
+        PI_IP=$(avahi-resolve-host-name compendium.local | awk '{print $2}' || echo "")
         
         if [ -z "$PI_IP" ]; then
           echo "Failed to resolve compendium.local - using fallback IP"
@@ -74,17 +74,34 @@ jobs:
         
         echo "Using IP: $PI_IP"
         
-        # Add IP to known hosts
-        ssh-keyscan -H $PI_IP >> ~/.ssh/known_hosts
+        # Add IP to known hosts with verbose output
+        echo "Adding $PI_IP to known hosts..."
+        ssh-keyscan -H $PI_IP >> ~/.ssh/known_hosts || echo "Warning: ssh-keyscan failed but continuing"
         
-        # Copy .env file
-        scp -o StrictHostKeyChecking=no .env pi@$PI_IP:~/compendium/.env
+        # Test SSH connection first
+        echo "Testing SSH connection..."
+        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -v pi@$PI_IP "echo SSH connection successful"; then
+          echo "SSH connection test passed"
+        else
+          echo "SSH connection test failed. Checking if host is reachable..."
+          ping -c 3 $PI_IP || echo "Warning: Host not responding to ping"
+          echo "Trying alternate connection method..."
+        fi
         
-        # Run deployment commands
+        # Copy .env file with better error handling
+        echo "Copying .env file..."
+        scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 -v .env pi@$PI_IP:~/compendium/.env
+        
+        # Run deployment commands with better error handling
         echo "Running deployment commands..."
-        ssh -o StrictHostKeyChecking=no pi@$PI_IP "
-          cd ~/compendium
-          git pull
-          npm install
-          systemctl --user restart compendium
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -v pi@$PI_IP "
+          echo 'Connected to Raspberry Pi'
+          cd ~/compendium || { echo 'Failed to change directory'; exit 1; }
+          echo 'Running git pull...'
+          git pull || { echo 'Git pull failed'; exit 1; }
+          echo 'Running npm install...'
+          npm install || { echo 'npm install failed'; exit 1; }
+          echo 'Restarting service...'
+          systemctl --user restart compendium || { echo 'Service restart failed'; exit 1; }
+          echo 'Deployment completed successfully'
         "
