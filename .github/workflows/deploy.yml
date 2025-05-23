@@ -55,8 +55,8 @@ jobs:
     # Deploy to Raspberry Pi
     - name: Deploy
       run: |
-        scp -o StrictHostKeyChecking=no .env pi@${{ secrets.PI_IP }}:~/compendium/.env
-        ssh -o StrictHostKeyChecking=no pi@${{ secrets.PI_IP }} "cd ~/compendium && \
+        scp -o StrictHostKeyChecking=no .env pi@compendium.local:~/compendium/.env
+        ssh -o StrictHostKeyChecking=no pi@compendium.local "cd ~/compendium && \
           git pull && \
           npm install && \
           systemctl --user restart compendium"
