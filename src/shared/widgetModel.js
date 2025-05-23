@@ -1,5 +1,5 @@
 // src/shared/widgetModel.js
-import { getDataSourceById } from '@/shared/widgetDataConfig.js';
+import { getDataSourceById } from './widgetDataConfig.js';
 
 /**
  * Creates a standardized widget object with consistent properties

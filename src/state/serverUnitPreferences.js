@@ -4,7 +4,7 @@
  * This module provides a server-specific implementation of unit preferences
  * that doesn't rely on browser-based APIs like Capacitor.
  */
-import { UNIT_PRESETS } from '../../shared/unitPreferences.js';
+import { UNIT_PRESETS } from '../shared/unitPreferences.js';
 import fs from 'fs/promises';
 import path from 'path';
 

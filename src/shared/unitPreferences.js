@@ -4,7 +4,15 @@
  * This module provides utilities for managing user unit preferences
  * and standardizing unit conversions across the application.
  */
-import { Preferences } from '@capacitor/preferences';
+// Using mock preferences for server-side
+const Preferences = {
+  async get({ key }) {
+    return { value: null };
+  },
+  async set({ key, value }) {
+    // No-op for server
+  }
+};
 
 // Unit types
 export const UNIT_TYPES = {
