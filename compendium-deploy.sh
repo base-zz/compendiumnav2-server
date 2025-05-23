@@ -35,11 +35,12 @@ DEFAULT_WS_PORT=3009
 HTTP_PORT=$DEFAULT_HTTP_PORT
 WS_PORT=$DEFAULT_WS_PORT
 
-# Default ports
-DEFAULT_HTTP_PORT=8080
-DEFAULT_WS_PORT=3009
-HTTP_PORT=$DEFAULT_HTTP_PORT
-WS_PORT=$DEFAULT_WS_PORT
+# Detect if running on Raspberry Pi
+if [ -f /etc/rpi-issue ] || grep -q 'Raspberry Pi' /etc/os-release 2>/dev/null; then
+    IS_RASPBERRY_PI=true
+else
+    IS_RASPBERRY_PI=false
+fi
 
 # Check if running as root for operations that need it
 check_root() {

@@ -13,7 +13,11 @@ NC='\033[0m'
 
 # Configuration
 CURRENT_USER=$(whoami)
+APP_USER="${COMPENDIUM_USER:-$CURRENT_USER}"
 BACKUP_DIR="${BACKUP_DIR:-$HOME/compendium-backups}"
+
+# Always false on macOS
+IS_RASPBERRY_PI=false
 NODE_VERSION="18"
 GIT_REPO="https://github.com/base-zz/compendium2.git"
 GIT_BRANCH="main"

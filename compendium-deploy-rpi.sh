@@ -74,7 +74,14 @@ NC='\033[0m'
 # Configuration
 CURRENT_USER=$(whoami)
 APP_USER="${COMPENDIUM_USER:-$CURRENT_USER}"
-SERVICE_NAME="compendium"  # For Avahi service
+SERVICE_NAME="compendium"
+
+# Detect if running on Raspberry Pi
+if [ -f /etc/rpi-issue ] || grep -q 'Raspberry Pi' /etc/os-release 2>/dev/null; then
+    IS_RASPBERRY_PI=true
+else
+    IS_RASPBERRY_PI=false
+fi  # For Avahi service
 
 # User-specific directories
 USER_HOME=$(eval echo ~"$APP_USER")
@@ -1180,14 +1187,38 @@ update() {
         fi
     fi
     
-    # Update systemd service file if it exists
+    # Ensure systemd user directory exists
     local user_systemd_dir="${USER_HOME}/.config/systemd/user"
+    mkdir -p "$user_systemd_dir"
+    
+    # Create or update systemd service file
     local service_file="${user_systemd_dir}/compendium.service"
-    if [ -f "$service_file" ]; then
-        echo -e "${BLUE}Updating systemd service file...${NC}"
-        sed -i "s|ExecStart=.*|ExecStart=/usr/bin/node $main_server_file|g" "$service_file"
-        systemctl --user daemon-reload
-    fi
+    echo -e "${BLUE}Setting up systemd service...${NC}"
+    
+    cat > "$service_file" << EOF
+[Unit]
+Description=Compendium Navigation Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$APP_DIR
+ExecStart=/usr/bin/node $main_server_file
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=compendium
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target
+EOF
+
+    # Set proper permissions
+    chmod 644 "$service_file"
+    systemctl --user daemon-reload
+    systemctl --user enable compendium.service
     
     # Start service
     echo -e "${BLUE}Starting compendium service...${NC}"
