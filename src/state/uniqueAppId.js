@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -11,7 +11,7 @@ export function getOrCreateAppUuid() {
     return fs.readFileSync(UUID_FILE, 'utf8').trim();
   }
   // Generate, persist, and return new UUID
-  const newUuid = uuidv4();
+  const newUuid = randomUUID();
   fs.writeFileSync(UUID_FILE, newUuid, 'utf8');
   return newUuid;
 }
