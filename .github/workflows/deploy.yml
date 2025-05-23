@@ -1,0 +1,62 @@
+name: Deploy to Raspberry Pi
+
+on:
+  push:
+    branches: [ main ]  # Run when code is pushed to main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    # Install SSH key for deployment
+    - name: Add SSH Key
+      uses: webfactory/ssh-agent@v0.7.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    
+    # Create .env file from secrets
+    - name: Create .env file
+      env:
+        NODE_ENV: ${{ secrets.NODE_ENV || 'production' }}
+        PORT: ${{ secrets.PORT || 3001 }}
+        INTERNAL_PORT: ${{ secrets.INTERNAL_PORT || 3001 }}
+        AUTH_PORT: ${{ secrets.AUTH_PORT || 3001 }}
+        FRONTEND_URL: ${{ secrets.FRONTEND_URL || 'http://localhost:5176' }}
+        DEBUG: ${{ secrets.DEBUG || 'true' }}
+        REQUIRE_AUTH: ${{ secrets.REQUIRE_AUTH || 'false' }}
+        TOKEN_EXPIRY: ${{ secrets.TOKEN_EXPIRY || '86400' }}
+        VPS_WS_PORT: ${{ secrets.VPS_WS_PORT || '3009' }}
+        VPS_PATH: ${{ secrets.VPS_PATH || '/relay' }}
+        VPS_HOST: ${{ secrets.VPS_HOST || 'compendiumnav.com' }}
+        DIRECT_WS_PORT: ${{ secrets.DIRECT_WS_PORT || '3009' }}
+        DIRECT_WS_HOST: ${{ secrets.DIRECT_WS_HOST || '0.0.0.0' }}
+        SIGNALK_URL: ${{ secrets.SIGNALK_URL || 'http://openplotter.local:3000/signalk' }}
+        SIGNALK_TOKEN: ${{ secrets.SIGNALK_TOKEN || '' }}
+        SIGNALK_ADAPTER: ${{ secrets.SIGNALK_ADAPTER || '' }}
+        RECONNECT_DELAY: ${{ secrets.RECONNECT_DELAY || '3000' }}
+        MAX_RECONNECT_ATTEMPTS: ${{ secrets.MAX_RECONNECT_ATTEMPTS || '10' }}
+        VPS_URL: ${{ secrets.VPS_URL || 'ws://compendiumnav.com' }}
+        VPS_PORT: ${{ secrets.VPS_PORT || '443' }}
+        RELAY_ENV_PATH: ${{ secrets.RELAY_ENV_PATH || '.env.server' }}
+        CONNECTION_TIMEOUT: ${{ secrets.CONNECTION_TIMEOUT || '30000' }}
+        MAX_RETRIES: ${{ secrets.MAX_RETRIES || '5' }}
+        MOCK_MODE: ${{ secrets.MOCK_MODE || 'false' }}
+        FALLBACK_TO_MOCK: ${{ secrets.FALLBACK_TO_MOCK || 'true' }}
+        TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
+        ALLOWED_ORIGINS: ${{ secrets.ALLOWED_ORIGINS || 'http://localhost:5176,http://localhost:3000' }}
+        VITE_TOKEN_SECRET: ${{ secrets.VITE_TOKEN_SECRET || secrets.TOKEN_SECRET }}
+        DATABASE_PATH: ${{ secrets.DATABASE_PATH || './src/signalk_dev.db' }}
+      run: |
+        # Create .env file from environment variables
+        env | grep -v '^GITHUB' | grep -v '^PATH=' | grep -v '^_' | sort > .env
+    
+    # Deploy to Raspberry Pi
+    - name: Deploy
+      run: |
+        scp -o StrictHostKeyChecking=no .env pi@${{ secrets.PI_IP }}:~/compendium/.env
+        ssh -o StrictHostKeyChecking=no pi@${{ secrets.PI_IP }} "cd ~/compendium && \
+          git pull && \
+          npm install && \
+          systemctl --user restart compendium"
