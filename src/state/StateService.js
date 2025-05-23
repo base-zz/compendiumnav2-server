@@ -8,16 +8,16 @@
 
 import WebSocket from "ws";
 import EventEmitter from "events";
-import debug from "debug";
+import debug from "../shared/debug.js";
 import { stateData } from "./StateData.js";
 import { signalKAdapterRegistry } from "../relay/server/adapters/SignalKAdapterRegistry.js";
-import fetch from "node-fetch";
+import fetch from "../shared/node-fetch.js";
 import { extractAISTargetsFromSignalK } from "./extractAISTargets.js";
-import { convertSignalKNotifications } from '@compendiumnav2/shared/convertSignalK.js';
-import { UNIT_PRESETS } from '@compendiumnav2/shared/unitPreferences.js';
+import { convertSignalKNotifications } from '../shared/convertSignalK.js';
+import { UNIT_PRESETS } from '../shared/unitPreferences.js';
 import { getServerUnitPreferences } from './serverUnitPreferences.js';
-import { UnitConversion } from '@compendiumnav2/shared/unitConversion.js';
-import pkg from "fast-json-patch";
+import { UnitConversion } from '../shared/unitConversion.js';
+import pkg from "../shared/fast-json-patch.js";
 import { stateManager } from "../relay/core/state/StateManager.js";
 
 const { compare: jsonPatchCompare } = pkg;
