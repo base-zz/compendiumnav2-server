@@ -12,15 +12,28 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Configuration
-DEFAULT_APP_USER="compendium"
 CURRENT_USER=$(whoami)
 APP_USER="${COMPENDIUM_USER:-$CURRENT_USER}"
-# Use system hostname by default, fallback to 'compendium'
-BACKUP_DIR="/home/$APP_USER/compendium-backups"
+SERVICE_NAME="compendium"
+
+# User-specific directories
+USER_HOME=$(eval echo ~"$APP_USER")
+APP_DIR="${USER_HOME}/compendium"
+BACKUP_DIR="${USER_HOME}/compendium-backups"
+DATA_DIR="${USER_HOME}/compendium-data"
+LOG_DIR="${USER_HOME}/compendium-logs"
+
+# Application settings
 NODE_VERSION="18"
 GIT_REPO="https://github.com/base-zz/compendium2.git"
 GIT_BRANCH="main"
 TARGET_VERSION="${COMPENDIUM_VERSION:-latest}"
+
+# Ports (will be checked for availability)
+DEFAULT_HTTP_PORT=8080
+DEFAULT_WS_PORT=3009
+HTTP_PORT=$DEFAULT_HTTP_PORT
+WS_PORT=$DEFAULT_WS_PORT
 
 # Default ports
 DEFAULT_HTTP_PORT=8080
@@ -28,53 +41,109 @@ DEFAULT_WS_PORT=3009
 HTTP_PORT=$DEFAULT_HTTP_PORT
 WS_PORT=$DEFAULT_WS_PORT
 
-# Ensure running as root
+# Check if running as root for operations that need it
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
-        echo -e "${RED}This script must be run as root. Use sudo.${NC}" >&2
-        exit 1
+        echo -e "${YELLOW}Warning: Some operations require root privileges. Using sudo when needed.${NC}"
+        return 1
+    fi
+    return 0
+}
+
+# Run a command with sudo if not root
+run_with_sudo() {
+    if [ "$(id -u)" -ne 0 ]; then
+        sudo "$@"
+    else
+        "$@"
     fi
 }
 
 # Check if command exists
 command_exists() {
-    command -v "$1" >/dev/null 2>&1
+    if ! command -v "$1" >/dev/null 2>&1; then
+        echo -e "${YELLOW}✗ Command not found: $1${NC}" >&2
+        return 1
+    fi
+    return 0
 }
 
 # Check if port is available
 is_port_available() {
     local port=$1
     if ! command -v nc &> /dev/null; then
+        echo -e "${YELLOW}✗ netcat (nc) not found, port checking disabled${NC}" >&2
         return 0
     fi
+    
     if nc -z 127.0.0.1 "$port" &>/dev/null; then
+        echo -e "${YELLOW}Port ${port} is in use${NC}" >&2
         return 1
     fi
+    
+    # Check if port is privileged (requires root)
+    if [ "$port" -lt 1024 ] && [ "$(id -u)" -ne 0 ]; then
+        echo -e "${YELLOW}Port ${port} requires root privileges${NC}" >&2
+        return 1
+    fi
+    
     return 0
 }
 
 # Find an available port starting from the given port
 find_available_port() {
     local port=$1
-    while ! is_port_available $port; do
-        echo -e "${YELLOW}Port $port is in use, trying $((port+1))${NC}"
+    local max_attempts=100
+    local attempts=0
+    
+    while [ $attempts -lt $max_attempts ]; do
+        if is_port_available $port; then
+            echo $port
+            return 0
+        fi
+        
+        echo -e "${YELLOW}Port $port is in use, trying $((port+1))${NC}" >&2
         port=$((port+1))
+        attempts=$((attempts+1))
     done
-    echo $port
+    
+    echo -e "${RED}✗ Failed to find available port after $max_attempts attempts${NC}" >&2
+    return 1
 }
 
 # Initialize ports
 initialize_ports() {
-    echo -e "${BLUE}Checking port availability...${NC}"
-    HTTP_PORT=$(find_available_port $DEFAULT_HTTP_PORT)
-    WS_PORT=$(find_available_port $DEFAULT_WS_PORT)
+    echo -e "${BLUE}🔍 Checking port availability...${NC}"
     
-    if [ "$HTTP_PORT" -eq "$WS_PORT" ]; then
-        WS_PORT=$((WS_PORT+1))
-        echo -e "${YELLOW}Adjusted WebSocket port to $WS_PORT to avoid conflict with HTTP port${NC}"
+    # Find available HTTP port
+    HTTP_PORT=$(find_available_port $DEFAULT_HTTP_PORT) || {
+        echo -e "${RED}✗ Failed to find available HTTP port${NC}" >&2
+        return 1
+    }
+    
+    # Find available WebSocket port, ensuring it's different from HTTP port
+    WS_PORT=$DEFAULT_WS_PORT
+    if [ "$WS_PORT" -eq "$HTTP_PORT" ]; then
+        WS_PORT=$((WS_PORT + 1))
     fi
     
-    echo -e "${GREEN}Using ports - HTTP: $HTTP_PORT, WebSocket: $WS_PORT${NC}"
+    WS_PORT=$(find_available_port $WS_PORT) || {
+        echo -e "${RED}✗ Failed to find available WebSocket port${NC}" >&2
+        return 1
+    }
+    
+    # Ensure ports are different
+    if [ "$HTTP_PORT" -eq "$WS_PORT" ]; then
+        WS_PORT=$((WS_PORT + 1))
+        if ! is_port_available $WS_PORT; then
+            echo -e "${RED}✗ Failed to find distinct ports for HTTP and WebSocket${NC}" >&2
+            return 1
+        fi
+        echo -e "${YELLOW}⚠ Adjusted WebSocket port to $WS_PORT to avoid conflict with HTTP port${NC}"
+    fi
+    
+    echo -e "${GREEN}✅ Ports configured - HTTP: $HTTP_PORT, WebSocket: $WS_PORT${NC}"
+    return 0
 }
 
 # Validate configuration
@@ -197,16 +266,29 @@ export HOSTNAME DOMAIN SERVICE_NAME
 configure_avahi() {
     echo -e "${BLUE}Configuring Avahi (mDNS) service...${NC}"
     
+    # Check if we can configure Avahi
+    if [ ! -w "/etc/avahi/services" ]; then
+        echo -e "${YELLOW}Root access required to configure Avahi${NC}"
+        if ! run_with_sudo true; then
+            echo -e "${YELLOW}Skipping Avahi configuration - run with sudo to enable mDNS service discovery${NC}"
+            return 0
+        fi
+    fi
+    
     # Ensure avahi-daemon is running
     if ! systemctl is-active --quiet avahi-daemon; then
         echo -e "${YELLOW}Starting avahi-daemon...${NC}"
-        systemctl enable --now avahi-daemon
+        run_with_sudo systemctl enable --now avahi-daemon
     fi
     
-    # Create Avahi service file
+    # Create Avahi service file in a temporary location first
+    local temp_avahi_file="/tmp/compendium-avahi.$$.service"
     local avahi_service_file="/etc/avahi/services/${SERVICE_NAME}.service"
     
-    cat > "$avahi_service_file" << EOF
+    # Get the hostname
+    local hostname=$(hostname)
+    
+    cat > "$temp_avahi_file" << EOF
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <service-group>
@@ -224,59 +306,78 @@ configure_avahi() {
 </service-group>
 EOF
     
+    # Move the file to the Avahi services directory
+    if ! run_with_sudo cp "$temp_avahi_file" "$avahi_service_file"; then
+        echo -e "${RED}Failed to create Avahi service file${NC}" >&2
+        rm -f "$temp_avahi_file"
+        return 1
+    fi
+    rm -f "$temp_avahi_file"
+    
+    # Set correct permissions
+    run_with_sudo chmod 644 "$avahi_service_file"
+    
     echo -e "${GREEN}Avahi service configured at $avahi_service_file${NC}"
     
     # Restart avahi to apply changes
-    systemctl restart avahi-daemon
-    
-    echo -e "${GREEN}mDNS service is now advertising:${NC}"
-    echo -e "  - HTTP:     http://$HOSTNAME.$DOMAIN:$HTTP_PORT"
-    echo -e "  - WebSocket: ws://$HOSTNAME.$DOMAIN:$WS_PORT"
+    if run_with_sudo systemctl restart avahi-daemon; then
+        echo -e "${GREEN}mDNS service is now advertising:${NC}"
+        echo -e "  - HTTP:     http://${hostname}.local:$HTTP_PORT"
+        echo -e "  - WebSocket: ws://${hostname}.local:$WS_PORT"
+    else
+        echo -e "${YELLOW}Failed to restart Avahi daemon. Changes may not take effect immediately.${NC}"
+    fi
 }
 
-# Setup systemd service with mDNS support
+# Setup user systemd service
 setup_systemd_service() {
-    echo -e "${BLUE}Setting up systemd service...${NC}"
+    echo -e "${BLUE}Setting up user systemd service...${NC}"
     
-    # Ensure /etc/hosts has both hostnames
-    if ! grep -q "127.0.1.1.*compendium" /etc/hosts; then
-        echo -e "${BLUE}Updating /etc/hosts to include compendium hostname...${NC}"
-        if grep -q "127\.0\.1\.1" /etc/hosts; then
-            # Append to existing line if it exists
-            sed -i "/127\.0\.1\.1/s/$/ compendium/" /etc/hosts
-        else
-            # Add new line if it doesn't exist
-            echo "127.0.1.1       compendium" | tee -a /etc/hosts > /dev/null
+    # Create user systemd directory if it doesn't exist
+    USER_SYSTEMD_DIR="${USER_HOME}/.config/systemd/user"
+    mkdir -p "${USER_SYSTEMD_DIR}"
+    
+    # Enable lingering for the user to allow user services to run at boot
+    if ! loginctl show-user "$USER" 2>/dev/null | grep -q Linger=yes; then
+        echo -e "${YELLOW}Enabling user service persistence across logins...${NC}"
+        if command -v loginctl >/dev/null; then
+            if ! loginctl enable-linger "$USER"; then
+                echo -e "${YELLOW}Failed to enable user lingering. Services may not start at boot.${NC}"
+            fi
         fi
     fi
+    
+    # Use localhost for user service
+    echo -e "${BLUE}Using localhost for user service...${NC}"
     
     # Verify main server file exists
-    local main_server_file="$APP_DIR/src/mainServer.js"
+    local main_server_file="src/mainServer.js"
     if [ ! -f "$main_server_file" ]; then
-        echo -e "${RED}Error: Main server file not found at $main_server_file${NC}" >&2
-        echo -e "${YELLOW}Checking for alternative locations...${NC}"
-        
-        # Try to find the main server file
-        local found_file=$(find "$APP_DIR" -name "mainServer.js" -type f -print -quit)
-        
-        if [ -n "$found_file" ]; then
-            echo -e "${GREEN}Found main server file at: $found_file${NC}"
-            main_server_file="$found_file"
-        else
-            echo -e "${RED}Could not find main server file in $APP_DIR${NC}"
-            echo -e "${YELLOW}Please ensure the application files are properly installed.${NC}"
+        echo -e "${YELLOW}Warning: Main server file not found at $main_server_file${NC}"
+        read -p "Enter the path to mainServer.js: " main_server_file
+        if [ ! -f "$main_server_file" ]; then
+            echo -e "${YELLOW}Could not find main server file at $main_server_file${NC}" >&2
+            echo -e "${YELLOW}You'll need to configure the service manually.${NC}"
             return 1
         fi
+    else
+        # Convert to absolute path
+        main_server_file="$(pwd)/$main_server_file"
     fi
     
-    # Create systemd service directory if it doesn't exist
-    mkdir -p /etc/systemd/system
+    # Create user systemd service file
+    local service_file="${USER_SYSTEMD_DIR}/compendium.service"
+    run_with_sudo mkdir -p /etc/systemd/system
     
-    # Create systemd service file
-    local service_file="/etc/systemd/system/compendium.service"
-    echo -e "${BLUE}Creating service file at $service_file${NC}"
+    # Create systemd service file in a temporary location first
+    local temp_service_file="/tmp/compendium.service.$$"
+    echo -e "${BLUE}Creating service file...${NC}"
     
-    cat > "$service_file" << EOF
+    # Get the current working directory
+    local app_dir=$(pwd)
+    
+    # Create the service file in a temporary location
+    cat > "$temp_service_file" << EOF
 [Unit]
 Description=Compendium Navigation Server
 After=network.target avahi-daemon.service
@@ -284,8 +385,8 @@ Wants=avahi-daemon.service
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=$APP_DIR
+User=$(whoami)
+WorkingDirectory=$app_dir
 ExecStart=/usr/bin/node $main_server_file
 Restart=always
 RestartSec=10
@@ -297,128 +398,219 @@ Environment=PORT=$HTTP_PORT
 Environment=WS_PORT=$WS_PORT
 
 # mDNS service registration
-ExecStartPost=/bin/sh -c 'avahi-publish -s $HOSTNAME _compendium._tcp $HTTP_PORT "Path=/" & echo \$! > /tmp/compendium-mdns.pid'
+ExecStartPost=/bin/sh -c 'avahi-publish -s $(hostname) _compendium._tcp $HTTP_PORT "Path=/" & echo \$! > /tmp/compendium-mdns.pid'
 ExecStopPost=/bin/sh -c 'kill -9 \$(cat /tmp/compendium-mdns.pid) 2>/dev/null || true; rm -f /tmp/compendium-mdns.pid'
 
 [Install]
 WantedBy=multi-user.target
 EOF
     
+    # Move the service file to the system directory with sudo if needed
+    local service_file="/etc/systemd/system/compendium.service"
+    if ! run_with_sudo cp "$temp_service_file" "$service_file"; then
+        echo -e "${RED}Failed to create systemd service file${NC}" >&2
+        rm -f "$temp_service_file"
+        return 1
+    fi
+    rm -f "$temp_service_file"
+    
     # Set correct permissions
-    chmod 644 "$service_file"
+    run_with_sudo chmod 644 "$service_file"
     
     # Reload systemd
-    systemctl daemon-reload
+    if ! run_with_sudo systemctl daemon-reload; then
+        echo -e "${RED}Failed to reload systemd${NC}" >&2
+        return 1
+    fi
     
     # Enable and start the service
-    systemctl enable compendium.service
+    if ! run_with_sudo systemctl enable compendium.service; then
+        echo -e "${YELLOW}Failed to enable compendium service${NC}" >&2
+    fi
     
     echo -e "${GREEN}Systemd service configured${NC}"
-    echo -e "${YELLOW}Starting Compendium service...${NC}"
     
-    if systemctl start compendium.service; then
-        echo -e "${GREEN}Compendium service started successfully${NC}"
-        echo -e "${BLUE}Service status:${NC}"
-        systemctl status compendium.service --no-pager
+    # Only try to start the service if we're running as root or with sudo
+    if [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; then
+        echo -e "${YELLOW}Starting Compendium service...${NC}"
+        
+        if run_with_sudo systemctl start compendium.service; then
+            echo -e "${GREEN}Compendium service started successfully${NC}"
+            echo -e "${BLUE}Service status:${NC}"
+            run_with_sudo systemctl status compendium.service --no-pager || true
+        else
+            echo -e "${RED}Failed to start Compendium service${NC}" >&2
+            run_with_sudo journalctl -u compendium -n 20 --no-pager || true
+            return 1
+        fi
     else
-        echo -e "${RED}Failed to start Compendium service${NC}" >&2
-        journalctl -u compendium -n 20 --no-pager
-        return 1
+        echo -e "${YELLOW}Run the following commands to start the service:${NC}"
+        echo "  sudo systemctl start compendium.service"
+        echo "  sudo systemctl status compendium.service"
     fi
     
     return 0
 }
 
-# Configure firewall
+# Inform about required firewall ports
 configure_firewall() {
-    echo -e "${BLUE}Configuring firewall...${NC}"
+    echo -e "${BLUE}Checking firewall configuration...${NC}"
     
-    if ! command -v ufw &> /dev/null; then
-        echo -e "${YELLOW}ufw not installed, skipping firewall configuration${NC}"
-        return 0
+    # Check if we can access firewall commands
+    local can_configure_firewall=0
+    
+    if [ "$(id -u)" -eq 0 ]; then
+        can_configure_firewall=1
+    elif command -v sudo >/dev/null 2>&1; then
+        if sudo -n true 2>/dev/null; then
+            can_configure_firewall=1
+        fi
     fi
     
-    # Allow SSH
-    ufw allow OpenSSH
+    if [ "$can_configure_firewall" -eq 1 ]; then
+        # Check if ufw is available
+        if command -v ufw >/dev/null 2>&1; then
+            echo -e "${BLUE}Configuring ufw firewall...${NC}"
+            if run_with_sudo ufw allow "$HTTP_PORT/tcp" 2>/dev/null; then
+                echo -e "${GREEN}Firewall configured to allow port $HTTP_PORT (HTTP)${NC}"
+            fi
+            if run_with_sudo ufw allow "$WS_PORT/tcp" 2>/dev/null; then
+                echo -e "${GREEN}Firewall configured to allow port $WS_PORT (WebSocket)${NC}"
+            fi
+        # Check if firewalld is available
+        elif command -v firewall-cmd >/dev/null 2>&1; then
+            echo -e "${BLUE}Configuring firewalld...${NC}"
+            if run_with_sudo firewall-cmd --permanent --add-port="$HTTP_PORT/tcp" 2>/dev/null; then
+                run_with_sudo firewall-cmd --reload
+                echo -e "${GREEN}Firewall configured to allow port $HTTP_PORT (HTTP)${NC}"
+            fi
+            if run_with_sudo firewall-cmd --permanent --add-port="$WS_PORT/tcp" 2>/dev/null; then
+                run_with_sudo firewall-cmd --reload
+                echo -e "${GREEN}Firewall configured to allow port $WS_PORT (WebSocket)${NC}"
+            fi
+        fi
+    fi
     
-    # Allow HTTP/HTTPS
-    ufw allow $HTTP_PORT/tcp
+    # Always show the required ports message
+    echo -e "\n${YELLOW}IMPORTANT: Ensure the following ports are open in your firewall:${NC}"
+    echo -e "- Port $HTTP_PORT/tcp (HTTP)"
+    echo -e "- Port $WS_PORT/tcp (WebSocket)"
+    echo -e "\n${YELLOW}If you're behind a router, you may need to configure port forwarding.${NC}"
+    run_with_sudo ufw allow $HTTP_PORT/tcp
     
     # Allow WebSocket
-    ufw allow $WS_PORT/tcp
+    run_with_sudo ufw allow $WS_PORT/tcp
     
     # Enable firewall
-    echo "y" | ufw enable
+    echo "y" | run_with_sudo ufw enable
     
     echo -e "${GREEN}Firewall configured${NC}"
+    echo -e "${YELLOW}Firewall status:${NC}"
+    run_with_sudo ufw status
 }
 
 # Health check
 health_check() {
     echo -e "${BLUE}Running health checks...${NC}"
+    local all_checks_passed=true
     
-    # Check if service is running
-    if ! systemctl is-active --quiet compendium.service; then
-        echo -e "${RED}Service is not running${NC}" >&2
-        return 1
+    # Check if service is running (only if we have permission)
+    if systemctl is-active --quiet compendium.service 2>/dev/null || \
+       run_with_sudo systemctl is-active --quiet compendium.service 2>/dev/null; then
+        echo -e "${GREEN}✓ Service is running${NC}"
+    else
+        echo -e "${YELLOW}⚠ Service status unknown (run with sudo to check)${NC}"
+        all_checks_passed=false
     fi
     
     # Check if ports are accessible
-    if ! nc -z 127.0.0.1 $HTTP_PORT; then
-        echo -e "${RED}HTTP port $HTTP_PORT is not accessible${NC}" >&2
-        return 1
+    if command -v nc &> /dev/null; then
+        if nc -z 127.0.0.1 $HTTP_PORT 2>/dev/null; then
+            echo -e "${GREEN}✓ HTTP port $HTTP_PORT is accessible${NC}"
+        else
+            echo -e "${YELLOW}⚠ HTTP port $HTTP_PORT is not accessible (is the service running?)${NC}" >&2
+            all_checks_passed=false
+        fi
+        
+        if nc -z 127.0.0.1 $WS_PORT 2>/dev/null; then
+            echo -e "${GREEN}✓ WebSocket port $WS_PORT is accessible${NC}"
+        else
+            echo -e "${YELLOW}⚠ WebSocket port $WS_PORT is not accessible (is the service running?)${NC}" >&2
+            all_checks_passed=false
+        fi
+    else
+        echo -e "${YELLOW}⚠ netcat (nc) not found, skipping port checks${NC}"
+        all_checks_passed=false
     fi
     
-    if ! nc -z 127.0.0.1 $WS_PORT; then
-        echo -e "${RED}WebSocket port $WS_PORT is not accessible${NC}" >&2
+    if [ "$all_checks_passed" = true ]; then
+        echo -e "${GREEN}✓ All health checks passed${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}⚠ Some health checks did not pass${NC}" >&2
         return 1
     fi
-    
-    echo -e "${GREEN}✓ All health checks passed${NC}"
-    return 0
 }
 
 # Main installation function
 install() {
     echo -e "${BLUE}Starting installation...${NC}"
+    echo -e "${YELLOW}This installation will run without root access where possible.${NC}"
+    
+    # Create necessary directories
+    echo -e "${BLUE}Setting up directories...${NC}"
+    mkdir -p "$APP_DIR" "$BACKUP_DIR" "$DATA_DIR" "$LOG_DIR"
+    chmod 755 "$APP_DIR" "$BACKUP_DIR" "$DATA_DIR" "$LOG_DIR"
     
     # Verify we're in the right directory
     verify_repository || return 1
     
     # Check system requirements
-    check_requirements
+    check_root
+    initialize_ports
+    validate_config
     
-    # Install system dependencies
-    install_dependencies
+    # Install system dependencies (may need root)
+    install_dependencies || {
+        echo -e "${YELLOW}Some dependencies might not have been installed. Continuing anyway...${NC}"
+    }
     
     # Configure environment
     configure_environment
     
     # Install npm dependencies
     echo -e "${BLUE}Installing npm dependencies...${NC}"
-    npm install || {
+    if ! npm install; then
         echo -e "${RED}Failed to install npm dependencies${NC}" >&2
         return 1
-    }
-    
-    # Setup systemd service
-    if ! setup_systemd_service; then
-        echo -e "${RED}Failed to setup systemd service${NC}" >&2
-        exit 1
     fi
-
-    # Get IP address
-    local ip_address
-    ip_address=$(hostname -I | awk '{print $1}')
     
-    # Print completion message
-    echo -e "\n${GREEN}=== Installation Complete! ===${NC}"
-    echo -e "Your Compendium Navigation Server is now running."
-    echo -e ""
-    echo -e "${YELLOW}Access Information:${NC}"
-    echo -e "  - Local URL:    http://localhost:$HTTP_PORT"
-    echo -e "  - Network URL:  http://$ip_address:$HTTP_PORT"
-    echo -e "  - WebSocket:    ws://$ip_address:$WS_PORT"
+    # Setup systemd service (user mode)
+    setup_systemd_service
+    
+    # Configure firewall (just informs user about required ports)
+    configure_firewall
+    
+    # Get network info
+    local ip_address
+    ip_address=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+    local hostname
+    hostname=$(hostname 2>/dev/null || echo "localhost")
+    
+    echo -e "\n${GREEN}Installation completed successfully!${NC}"
+    echo -e "${YELLOW}The Compendium Navigation Server should now be running.${NC}"
+    echo -e "\n${YELLOW}Access it at:${NC}"
+    echo -e "- http://localhost:${HTTP_PORT} (on this machine)"
+    echo -e "- http://${ip_address}:${HTTP_PORT} (on your local network)"
+    echo -e "- http://${hostname}.local:${HTTP_PORT} (via mDNS if available)"
+    
+    echo -e "\n${YELLOW}To manage the service:${NC}"
+    echo -e "  systemctl --user status compendium.service"
+    echo -e "  systemctl --user restart compendium.service"
+    echo -e "\n${YELLOW}To view logs:${NC}"
+    echo -e "  journalctl --user -u compendium -f"
+    
+    return 0
     echo -e ""
     echo -e "${YELLOW}Management Commands:${NC}"
     echo -e "  Start:    systemctl start compendium"
@@ -435,67 +627,92 @@ install() {
 
 # Update function
 update() {
-    echo -e "${GREEN}=== Updating Compendium ===${NC}"
+    echo -e "${BLUE}Updating Compendium Navigation Server...${NC}"
     
-    # Check if running as root
-    check_root
+    # Stop service if running
+    if systemctl --user is-active --quiet compendium.service; then
+        echo -e "${BLUE}Stopping compendium service...${NC}"
+        systemctl --user stop compendium.service
+    fi
     
     # Backup existing installation
     backup_existing
     
     # Update repository
-    if ! setup_repository; then
-        echo -e "${RED}Failed to update repository${NC}" >&2
-        exit 1
+    echo -e "${BLUE}Updating repository...${NC}"
+    if ! git pull; then
+        echo -e "${YELLOW}Warning: Failed to update repository. Continuing with existing files...${NC}"
     fi
     
-    # Install dependencies
-    if ! install_dependencies; then
-        echo -e "${RED}Failed to install dependencies${NC}" >&2
-        exit 1
+    # Update dependencies
+    echo -e "${BLUE}Updating dependencies...${NC}"
+    if ! npm install; then
+        echo -e "${YELLOW}Warning: Failed to update some dependencies. The application might not work correctly.${NC}"
     fi
     
-    # Restart service
-    if ! systemctl restart compendium.service; then
-        echo -e "${RED}Failed to restart service${NC}" >&2
-        exit 1
+    # Start service
+    echo -e "${BLUE}Starting compendium service...${NC}"
+    if ! systemctl --user start compendium.service; then
+        echo -e "${YELLOW}Warning: Failed to start the service automatically.${NC}"
+        echo -e "${YELLOW}You can try starting it manually with: systemctl --user start compendium.service${NC}"
     fi
     
-    echo -e "${GREEN}✓ Update completed successfully${NC}"
+    # Show service status
+    echo -e "\n${BLUE}Service status:${NC}"
+    systemctl --user status compendium.service --no-pager || true
+    
+    echo -e "\n${GREEN}Update completed!${NC}"
+    echo -e "${YELLOW}The Compendium Navigation Server has been updated.${NC}"
+    
+    return 0
 }
 
 # Uninstall function
 uninstall() {
-    echo -e "${YELLOW}=== Uninstalling Compendium ===${NC}"
+    echo -e "${BLUE}Uninstalling Compendium Navigation Server...${NC}"
     
-    # Check if running as root
-    check_root
-    
-    # Stop and disable service
-    if systemctl is-active --quiet compendium.service; then
-        echo -e "${BLUE}Stopping service...${NC}"
-        systemctl stop compendium.service
+    # Stop and disable user service
+    if systemctl --user is-active --quiet compendium.service; then
+        echo -e "${BLUE}Stopping compendium user service...${NC}"
+        systemctl --user stop compendium.service
     fi
     
-    if systemctl is-enabled --quiet compendium.service; then
-        echo -e "${BLUE}Disabling service...${NC}"
-        systemctl disable compendium.service
+    if systemctl --user is-enabled --quiet compendium.service; then
+        echo -e "${BLUE}Disabling compendium user service...${NC}"
+        systemctl --user disable compendium.service
     fi
     
-    # Remove service file
-    if [ -f "/etc/systemd/system/compendium.service" ]; then
-        echo -e "${BLUE}Removing service file...${NC}"
-        rm -f "/etc/systemd/system/compendium.service"
-        systemctl daemon-reload
+    # Remove user service file
+    local user_systemd_dir="${USER_HOME}/.config/systemd/user"
+    local service_file="${user_systemd_dir}/compendium.service"
+    
+    if [ -f "$service_file" ]; then
+        echo -e "${BLUE}Removing user service file...${NC}"
+        rm -f "$service_file"
+        systemctl --user daemon-reload
+    fi
+    
+    # Backup existing installation if it exists
+    if [ -d "$APP_DIR" ]; then
+        backup_existing
     fi
     
     # Remove application directory
     if [ -d "$APP_DIR" ]; then
-        echo -e "${BLUE}Removing application files...${NC}"
+        echo -e "${BLUE}Removing application directory...${NC}"
         rm -rf "$APP_DIR"
     fi
     
-    echo -e "${GREEN}✓ Uninstallation completed${NC}"
+    echo -e "\n${GREEN}Uninstallation completed successfully!${NC}"
+    echo -e "${YELLOW}Note: User data and backups have been preserved in:${NC}"
+    echo -e "- Data: $DATA_DIR"
+    echo -e "- Logs: $LOG_DIR"
+    echo -e "- Backups: $BACKUP_DIR"
+    
+    echo -e "\n${YELLOW}To completely remove all traces, you can run:${NC}"
+    echo -e "  rm -rf \"$DATA_DIR\" \"$LOG_DIR\" \"$BACKUP_DIR\""
+    
+    return 0
 }
 
 # Show help

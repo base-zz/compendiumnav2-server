@@ -37,17 +37,36 @@ check_root() {
     fi
 }
 
-# Check macOS version
+# Check macOS version and compatibility
 check_macos() {
-    echo -e "${BLUE}Checking macOS compatibility...${NC}"
+    echo -e "${BLUE}🔍 Checking system compatibility...${NC}"
     
+    # Verify macOS
     if [ "$(uname)" != "Darwin" ]; then
-        echo -e "${RED}This script is designed for macOS only.${NC}" >&2
+        echo -e "${RED}✗ This script is designed for macOS only.${NC}" >&2
         exit 1
     fi
     
-    local macos_version=$(sw_vers -productVersion)
-    echo -e "${GREEN}Detected: macOS $macos_version${NC}"
+    # Get macOS version
+    if ! command_exists sw_vers; then
+        echo -e "${RED}✗ Could not determine macOS version${NC}" >&2
+        return 1
+    fi
+    
+    local macos_version
+    macos_version=$(sw_vers -productVersion)
+    echo -e "${GREEN}✓ Detected: macOS $macos_version${NC}"
+    
+    # Check architecture
+    local arch
+    arch=$(uname -m)
+    if [ "$arch" = "arm64" ]; then
+        echo -e "${GREEN}✓ Architecture: Apple Silicon (${arch})${NC}"
+    elif [ "$arch" = "x86_64" ]; then
+        echo -e "${GREEN}✓ Architecture: Intel (${arch})${NC}"
+    else
+        echo -e "${YELLOW}⚠ Unsupported architecture: ${arch}${NC}"
+    fi
     
     # Check if macOS version is supported (10.15+)
     if [[ $(echo "$macos_version" | cut -d. -f1) -lt 10 || ($(echo "$macos_version" | cut -d. -f1) -eq 10 && $(echo "$macos_version" | cut -d. -f2) -lt 15) ]]; then
@@ -75,41 +94,105 @@ check_macos() {
 
 # Check if command exists
 command_exists() {
-    command -v "$1" >/dev/null 2>&1
+    if ! command -v "$1" >/dev/null 2>&1; then
+        echo -e "${YELLOW}✗ Command not found: $1${NC}" >&2
+        return 1
+    fi
+    return 0
 }
 
 # Check if port is available
 is_port_available() {
     local port=$1
-    if ! nc -z 127.0.0.1 "$port" &>/dev/null; then
-        return 0
+    
+    # Check if lsof is available (preferred on macOS)
+    if command_exists lsof; then
+        if ! lsof -i :"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+            # Port is available
+            return 0
+        fi
+    # Fallback to nc if lsof not available
+    elif command_exists nc; then
+        if ! nc -z 127.0.0.1 "$port" &>/dev/null; then
+            # Port is available
+            return 0
+        fi
     else
-        return 1
+        echo -e "${YELLOW}✗ Neither lsof nor nc found, port checking disabled${NC}" >&2
+        return 0
     fi
+    
+    echo -e "${YELLOW}Port ${port} is in use${NC}" >&2
+    return 1
 }
 
 # Find an available port starting from the given port
 find_available_port() {
     local port=$1
-    while ! is_port_available $port; do
-        echo -e "${YELLOW}Port $port is in use, trying $((port+1))${NC}"
+    local max_attempts=100
+    local attempts=0
+    
+    while [ $attempts -lt $max_attempts ]; do
+        if is_port_available $port; then
+            echo $port
+            return 0
+        fi
+        
+        echo -e "${YELLOW}Port $port is in use, trying $((port+1))${NC}" >&2
         port=$((port+1))
+        attempts=$((attempts+1))
+        
+        # Skip ports that are commonly used by macOS
+        if [ $port -eq 49152 ]; then
+            port=60000  # Skip dynamic/private ports
+        fi
     done
-    echo $port
+    
+    echo -e "${RED}✗ Failed to find available port after $max_attempts attempts${NC}" >&2
+    return 1
 }
 
 # Initialize ports
 initialize_ports() {
-    echo -e "${BLUE}Checking port availability...${NC}"
-    HTTP_PORT=$(find_available_port $DEFAULT_HTTP_PORT)
-    WS_PORT=$(find_available_port $DEFAULT_WS_PORT)
+    echo -e "${BLUE}🔍 Checking port availability...${NC}"
     
-    if [ "$HTTP_PORT" -eq "$WS_PORT" ]; then
-        WS_PORT=$((WS_PORT+1))
-        echo -e "${YELLOW}Adjusted WebSocket port to $WS_PORT to avoid conflict with HTTP port${NC}"
+    # Find available HTTP port
+    HTTP_PORT=$(find_available_port $DEFAULT_HTTP_PORT) || {
+        echo -e "${RED}✗ Failed to find available HTTP port${NC}" >&2
+        return 1
+    }
+    
+    # Find available WebSocket port, ensuring it's different from HTTP port
+    WS_PORT=$DEFAULT_WS_PORT
+    if [ "$WS_PORT" -eq "$HTTP_PORT" ]; then
+        WS_PORT=$((WS_PORT + 1))
     fi
     
-    echo -e "${GREEN}Using ports - HTTP: $HTTP_PORT, WebSocket: $WS_PORT${NC}"
+    WS_PORT=$(find_available_port $WS_PORT) || {
+        echo -e "${RED}✗ Failed to find available WebSocket port${NC}" >&2
+        return 1
+    }
+    
+    # Ensure ports are different
+    if [ "$HTTP_PORT" -eq "$WS_PORT" ]; then
+        WS_PORT=$((WS_PORT + 1))
+        if ! is_port_available $WS_PORT; then
+            echo -e "${RED}✗ Failed to find distinct ports for HTTP and WebSocket${NC}" >&2
+            return 1
+        fi
+        echo -e "${YELLOW}⚠ Adjusted WebSocket port to $WS_PORT to avoid conflict with HTTP port${NC}"
+    fi
+    
+    # Check if ports are in privileged range (requires root)
+    if [ "$HTTP_PORT" -lt 1024 ] || [ "$WS_PORT" -lt 1024 ]; then
+        echo -e "${YELLOW}⚠ Warning: Running services on ports below 1024 may require root privileges${NC}"
+    fi
+    
+    echo -e "\n${GREEN}✅ Ports configured successfully:${NC}"
+    echo -e "  • HTTP Server:    ${BLUE}http://localhost:${HTTP_PORT}${NC}"
+    echo -e "  • WebSocket:      ${BLUE}ws://localhost:${WS_PORT}${NC}\n"
+    
+    return 0
 }
 
 # Validate configuration
