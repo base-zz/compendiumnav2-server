@@ -639,10 +639,19 @@ install() {
     
     # Install npm dependencies
     echo -e "${BLUE}Installing npm dependencies...${NC}"
-    npm install || {
-        echo -e "${RED}Failed to install npm dependencies${NC}" >&2
-        return 1
-    }
+    if ! npm install --no-optional; then
+        echo -e "${YELLOW}Warning: Failed to install some dependencies. Trying with --force...${NC}" >&2
+        npm install --no-optional --force || {
+            echo -e "${RED}Error: Failed to install dependencies${NC}" >&2
+            return 1
+        }
+    fi
+    
+    # Ensure dotenv is available
+    if ! npm list dotenv >/dev/null 2>&1; then
+        echo -e "${BLUE}Installing dotenv...${NC}"
+        npm install dotenv
+    fi
     
     # Setup LaunchAgent
     setup_launch_agent
@@ -682,7 +691,19 @@ update() {
     # Update dependencies
     cd "$APP_DIR" || exit 1
     echo -e "${BLUE}Updating npm dependencies...${NC}"
-    npm install
+    if ! npm install --no-optional; then
+        echo -e "${YELLOW}Warning: Failed to update some dependencies. Trying with --force...${NC}" >&2
+        npm install --no-optional --force || {
+            echo -e "${RED}Error: Failed to update dependencies${NC}" >&2
+            return 1
+        }
+    fi
+    
+    # Ensure dotenv is available
+    if ! npm list dotenv >/dev/null 2>&1; then
+        echo -e "${BLUE}Installing dotenv...${NC}"
+        npm install dotenv
+    fi
     
     # Restart service
     start_service

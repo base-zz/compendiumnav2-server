@@ -581,9 +581,18 @@ install() {
     
     # Install npm dependencies
     echo -e "${BLUE}Installing npm dependencies...${NC}"
-    if ! npm install; then
-        echo -e "${RED}Failed to install npm dependencies${NC}" >&2
-        return 1
+    if ! npm install --no-optional; then
+        echo -e "${YELLOW}Warning: Failed to install some dependencies. Trying with --force...${NC}" >&2
+        npm install --no-optional --force || {
+            echo -e "${RED}Error: Failed to install dependencies${NC}" >&2
+            return 1
+        }
+    fi
+    
+    # Ensure dotenv is available
+    if ! npm list dotenv >/dev/null 2>&1; then
+        echo -e "${BLUE}Installing dotenv...${NC}"
+        npm install dotenv
     fi
     
     # Setup systemd service (user mode)
@@ -640,21 +649,6 @@ update() {
     backup_existing
     
     # Update repository
-    echo -e "${BLUE}Updating repository...${NC}"
-    if ! git pull; then
-        echo -e "${YELLOW}Warning: Failed to update repository. Continuing with existing files...${NC}"
-    fi
-    
-    # Update dependencies
-    echo -e "${BLUE}Updating dependencies...${NC}"
-    if ! npm install; then
-        echo -e "${YELLOW}Warning: Failed to update some dependencies. The application might not work correctly.${NC}"
-    fi
-    
-    # Start service
-    echo -e "${BLUE}Starting compendium service...${NC}"
-    if ! systemctl --user start compendium.service; then
-        echo -e "${YELLOW}Warning: Failed to start the service automatically.${NC}"
         echo -e "${YELLOW}You can try starting it manually with: systemctl --user start compendium.service${NC}"
     fi
     

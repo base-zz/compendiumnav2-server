@@ -1041,10 +1041,21 @@ install() {
         echo -e "${YELLOW}Warning: Some dependencies might not have been installed. Continuing anyway...${NC}" >&2
     fi
     
-    # Install npm dependencies
+    # Install dependencies
     echo -e "${BLUE}Installing npm dependencies...${NC}"
-    if ! npm install --no-optional --production; then
-        echo -e "${YELLOW}Warning: Failed to install some npm dependencies. The application might not work correctly.${NC}" >&2
+    # First install production deps
+    if ! npm install --no-optional; then
+        echo -e "${YELLOW}Warning: Failed to install some dependencies. Trying with --force...${NC}" >&2
+        npm install --no-optional --force || {
+            echo -e "${RED}Error: Failed to install dependencies${NC}" >&2
+            return 1
+        }
+    fi
+    
+    # Ensure dotenv is available
+    if ! npm list dotenv >/dev/null 2>&1; then
+        echo -e "${BLUE}Installing dotenv...${NC}"
+        npm install dotenv
     fi
     
     # Setup user systemd service
@@ -1173,8 +1184,18 @@ update() {
     
     # Update dependencies
     echo -e "${BLUE}Updating npm dependencies...${NC}"
-    if ! npm install --no-optional --production; then
-        echo -e "${YELLOW}Warning: Failed to update some dependencies. The application might not work correctly.${NC}" >&2
+    if ! npm install --no-optional; then
+        echo -e "${YELLOW}Warning: Failed to update some dependencies. Trying with --force...${NC}" >&2
+        npm install --no-optional --force || {
+            echo -e "${RED}Error: Failed to update dependencies${NC}" >&2
+            return 1
+        }
+    fi
+    
+    # Ensure dotenv is available
+    if ! npm list dotenv >/dev/null 2>&1; then
+        echo -e "${BLUE}Installing dotenv...${NC}"
+        npm install dotenv
     fi
     
     # Set main server file path
