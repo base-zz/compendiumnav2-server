@@ -16,21 +16,30 @@ jobs:
         ssh-private-key: |
           ${{ secrets.SSH_PRIVATE_KEY }}
       
+    - name: Install mDNS tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y avahi-utils
+        
     - name: Deploy
       run: |
-        # Debug info
-        echo "Using PI_IP: ${{ secrets.PI_IP }}"
+        # Resolve mDNS hostname
+        echo "Resolving compendium.local..."
+        PI_IP=$(avahi-resolve-host-name compendium.local | awk '{print $2}')
+        
+        if [ -z "$PI_IP" ]; then
+          echo "Failed to resolve compendium.local - using fallback IP"
+          PI_IP="192.168.68.66"
+        fi
+        
+        echo "Using IP: $PI_IP"
         
         # Add IP to known hosts
-        ssh-keyscan -H ${{ secrets.PI_IP }} >> ~/.ssh/known_hosts
-        
-        # Test connection first
-        echo "Testing SSH connection..."
-        ssh -o StrictHostKeyChecking=no -v pi@${{ secrets.PI_IP }} "echo Connection successful"
+        ssh-keyscan -H $PI_IP >> ~/.ssh/known_hosts
         
         # Run deployment commands
         echo "Running deployment commands..."
-        ssh -o StrictHostKeyChecking=no pi@${{ secrets.PI_IP }} "
+        ssh -o StrictHostKeyChecking=no pi@$PI_IP "
           cd ~/compendium
           git pull
           npm install
