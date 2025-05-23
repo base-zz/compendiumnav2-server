@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid/dist/esm-browser/index.js';
+import { v4 as uuidv4 } from 'uuid/dist/index.js';
 import fs from 'fs';
 import path from 'path';
 
