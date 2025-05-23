@@ -1,4 +1,6 @@
-import { v4 as uuidv4 } from 'uuid/dist/index.js';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { v4: uuidv4 } = require('uuid');
 import fs from 'fs';
 import path from 'path';
 
