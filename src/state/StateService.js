@@ -10,7 +10,7 @@ import WebSocket from "ws";
 import EventEmitter from "events";
 import debug from "debug";
 import { stateData } from "./StateData.js";
-import { signalKAdapterRegistry } from "../../relay/server/adapters/SignalKAdapterRegistry.js";
+import { signalKAdapterRegistry } from "../relay/server/adapters/SignalKAdapterRegistry.js";
 import fetch from "node-fetch";
 import { extractAISTargetsFromSignalK } from "./extractAISTargets.js";
 import { convertSignalKNotifications } from '@compendiumnav2/shared/convertSignalK.js';
