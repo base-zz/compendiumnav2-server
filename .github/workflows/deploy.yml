@@ -15,7 +15,42 @@ jobs:
       with:
         ssh-private-key: |
           ${{ secrets.SSH_PRIVATE_KEY }}
-      
+    
+    # Create .env file using dedicated action
+    - name: Create .env file
+      uses: SpicyPizza/create-envfile@v1.3
+      with:
+        envkey_NODE_ENV: ${{ secrets.NODE_ENV }}
+        envkey_PORT: ${{ secrets.PORT }}
+        envkey_INTERNAL_PORT: ${{ secrets.INTERNAL_PORT }}
+        envkey_AUTH_PORT: ${{ secrets.AUTH_PORT }}
+        envkey_FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+        envkey_DEBUG: ${{ secrets.DEBUG }}
+        envkey_REQUIRE_AUTH: ${{ secrets.REQUIRE_AUTH }}
+        envkey_TOKEN_EXPIRY: ${{ secrets.TOKEN_EXPIRY }}
+        envkey_VPS_WS_PORT: ${{ secrets.VPS_WS_PORT }}
+        envkey_VPS_PATH: ${{ secrets.VPS_PATH }}
+        envkey_VPS_HOST: ${{ secrets.VPS_HOST }}
+        envkey_DIRECT_WS_PORT: ${{ secrets.DIRECT_WS_PORT }}
+        envkey_DIRECT_WS_HOST: ${{ secrets.DIRECT_WS_HOST }}
+        envkey_SIGNALK_URL: ${{ secrets.SIGNALK_URL }}
+        envkey_SIGNALK_TOKEN: ${{ secrets.SIGNALK_TOKEN }}
+        envkey_SIGNALK_ADAPTER: ${{ secrets.SIGNALK_ADAPTER }}
+        envkey_RECONNECT_DELAY: ${{ secrets.RECONNECT_DELAY }}
+        envkey_MAX_RECONNECT_ATTEMPTS: ${{ secrets.MAX_RECONNECT_ATTEMPTS }}
+        envkey_VPS_URL: ${{ secrets.VPS_URL }}
+        envkey_VPS_PORT: ${{ secrets.VPS_PORT }}
+        envkey_RELAY_ENV_PATH: ${{ secrets.RELAY_ENV_PATH }}
+        envkey_CONNECTION_TIMEOUT: ${{ secrets.CONNECTION_TIMEOUT }}
+        envkey_MAX_RETRIES: ${{ secrets.MAX_RETRIES }}
+        envkey_MOCK_MODE: ${{ secrets.MOCK_MODE }}
+        envkey_FALLBACK_TO_MOCK: ${{ secrets.FALLBACK_TO_MOCK }}
+        envkey_TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
+        envkey_ALLOWED_ORIGINS: ${{ secrets.ALLOWED_ORIGINS }}
+        envkey_VITE_TOKEN_SECRET: ${{ secrets.VITE_TOKEN_SECRET }}
+        envkey_DATABASE_PATH: ${{ secrets.DATABASE_PATH }}
+        file_name: .env
+        
     - name: Install mDNS tools
       run: |
         sudo apt-get update
@@ -36,6 +71,9 @@ jobs:
         
         # Add IP to known hosts
         ssh-keyscan -H $PI_IP >> ~/.ssh/known_hosts
+        
+        # Copy .env file
+        scp -o StrictHostKeyChecking=no .env pi@$PI_IP:~/compendium/.env
         
         # Run deployment commands
         echo "Running deployment commands..."
