@@ -114,8 +114,11 @@ verify_repository() {
     echo -e "${BLUE}Updating repository...${NC}"
     git pull
     
-    # Checkout specific version if specified
-    if [ -n "$COMPENDIUM_VERSION" ] && [ "$COMPENDIUM_VERSION" != "latest" ]; then
+    # Set default version if not specified
+    COMPENDIUM_VERSION="${COMPENDIUM_VERSION:-latest}"
+    
+    # Checkout specific version if specified and not 'latest'
+    if [ "$COMPENDIUM_VERSION" != "latest" ]; then
         echo -e "${BLUE}Checking out version $COMPENDIUM_VERSION...${NC}"
         git checkout "$COMPENDIUM_VERSION" 2>/dev/null || {
             echo -e "${RED}Failed to checkout version $COMPENDIUM_VERSION${NC}" >&2;
