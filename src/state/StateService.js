@@ -124,13 +124,15 @@ class StateService extends EventEmitter {
       (isNodeEnv ? process.env.MAX_RECONNECT_ATTEMPTS : undefined);
     const updateInterval = config.updateInterval || process.env.UPDATE_INTERVAL;
 
-    if (
-      !signalKBaseUrl ||
-      !reconnectDelay ||
-      !maxReconnectAttempts ||
-      !updateInterval
-    ) {
-      throw new Error("Missing required configuration parameters");
+    // Check for missing configuration parameters and provide detailed error messages
+    const missingParams = [];
+    if (!signalKBaseUrl) missingParams.push('SIGNALK_URL');
+    if (!reconnectDelay) missingParams.push('RECONNECT_DELAY');
+    if (!maxReconnectAttempts) missingParams.push('MAX_RECONNECT_ATTEMPTS');
+    if (!updateInterval) missingParams.push('UPDATE_INTERVAL');
+    
+    if (missingParams.length > 0) {
+      throw new Error(`Missing required configuration parameters: ${missingParams.join(', ')}. Please check your .env file.`);
     }
 
     this.config = {

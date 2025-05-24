@@ -1,108 +1,81 @@
-name: Deploy to Raspberry Pi
+name: Create Deployment Package
 
 on:
   push:
     branches: [ main ]
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
     
-    - name: Add SSH Key
-      uses: webfactory/ssh-agent@v0.7.0
-      with:
-        ssh-private-key: |
-          ${{ secrets.SSH_PRIVATE_KEY }}
-    
-    # Create .env file with all secrets explicitly listed
-    - name: Create .env file
+    # Update .env file with sensitive values from GitHub Secrets
+    - name: Update .env file with secrets
       env:
-        NODE_ENV: ${{ secrets.NODE_ENV }}
-        PORT: ${{ secrets.PORT }}
-        INTERNAL_PORT: ${{ secrets.INTERNAL_PORT }}
-        AUTH_PORT: ${{ secrets.AUTH_PORT }}
-        FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
-        DEBUG: ${{ secrets.DEBUG }}
-        REQUIRE_AUTH: ${{ secrets.REQUIRE_AUTH }}
-        TOKEN_EXPIRY: ${{ secrets.TOKEN_EXPIRY }}
-        VPS_WS_PORT: ${{ secrets.VPS_WS_PORT }}
-        VPS_PATH: ${{ secrets.VPS_PATH }}
-        VPS_HOST: ${{ secrets.VPS_HOST }}
-        DIRECT_WS_PORT: ${{ secrets.DIRECT_WS_PORT }}
-        DIRECT_WS_HOST: ${{ secrets.DIRECT_WS_HOST }}
-        SIGNALK_URL: ${{ secrets.SIGNALK_URL }}
-        SIGNALK_TOKEN: ${{ secrets.SIGNALK_TOKEN }}
-        SIGNALK_ADAPTER: ${{ secrets.SIGNALK_ADAPTER }}
-        RECONNECT_DELAY: ${{ secrets.RECONNECT_DELAY }}
-        MAX_RECONNECT_ATTEMPTS: ${{ secrets.MAX_RECONNECT_ATTEMPTS }}
-        UPDATE_INTERVAL: ${{ secrets.UPDATE_INTERVAL || '5000' }}
-        VPS_URL: ${{ secrets.VPS_URL }}
-        VPS_PORT: ${{ secrets.VPS_PORT }}
-        RELAY_ENV_PATH: ${{ secrets.RELAY_ENV_PATH }}
-        CONNECTION_TIMEOUT: ${{ secrets.CONNECTION_TIMEOUT }}
-        MAX_RETRIES: ${{ secrets.MAX_RETRIES }}
-        MOCK_MODE: ${{ secrets.MOCK_MODE }}
-        FALLBACK_TO_MOCK: ${{ secrets.FALLBACK_TO_MOCK }}
         TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
-        ALLOWED_ORIGINS: ${{ secrets.ALLOWED_ORIGINS }}
         VITE_TOKEN_SECRET: ${{ secrets.VITE_TOKEN_SECRET }}
-        DATABASE_PATH: ${{ secrets.DATABASE_PATH }}
       run: |
-        # Create .env file from environment variables
-        env | grep -v '^GITHUB' | grep -v '^PATH=' | grep -v '^_' | sort > .env
+        # Update specific values in the .env file
+        if [ -n "$TOKEN_SECRET" ]; then
+          sed -i "s|^TOKEN_SECRET=.*|TOKEN_SECRET=$TOKEN_SECRET|" .env
+        fi
+        
+        if [ -n "$VITE_TOKEN_SECRET" ]; then
+          sed -i "s|^VITE_TOKEN_SECRET=.*|VITE_TOKEN_SECRET=$VITE_TOKEN_SECRET|" .env
+        fi
         
         # Show what's in the .env file (without sensitive values)
-        echo "Created .env file with these variables:"
+        echo "Updated .env file with these variables:"
         cat .env | cut -d= -f1
-        
-    - name: Install mDNS tools
+    
+    # Install dependencies
+    - name: Install dependencies
+      run: npm install
+      
+    # Create deployment package
+    - name: Create deployment package
       run: |
-        sudo apt-get update
-        sudo apt-get install -y avahi-utils
+        # Create version file with timestamp and commit hash
+        echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC') - $(git rev-parse --short HEAD)" > VERSION
         
-    - name: Deploy
-      run: |
-        # Resolve mDNS hostname
-        echo "Resolving compendium.local..."
-        PI_IP=$(avahi-resolve-host-name compendium.local | awk '{print $2}' || echo "")
+        # Create deployment package
+        mkdir -p deployment
+        tar -czf deployment/compendium-deploy.tar.gz --exclude=node_modules --exclude=.git --exclude=deployment .
         
-        if [ -z "$PI_IP" ]; then
-          echo "Failed to resolve compendium.local - using fallback IP"
-          PI_IP="192.168.68.66"
-        fi
-        
-        echo "Using IP: $PI_IP"
-        
-        # Add IP to known hosts with verbose output
-        echo "Adding $PI_IP to known hosts..."
-        ssh-keyscan -H $PI_IP >> ~/.ssh/known_hosts || echo "Warning: ssh-keyscan failed but continuing"
-        
-        # Test SSH connection first
-        echo "Testing SSH connection..."
-        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -v pi@$PI_IP "echo SSH connection successful"; then
-          echo "SSH connection test passed"
-        else
-          echo "SSH connection test failed. Checking if host is reachable..."
-          ping -c 3 $PI_IP || echo "Warning: Host not responding to ping"
-          echo "Trying alternate connection method..."
-        fi
-        
-        # Copy .env file with better error handling
-        echo "Copying .env file..."
-        scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 -v .env pi@$PI_IP:~/compendium/.env
-        
-        # Run deployment commands with better error handling
-        echo "Running deployment commands..."
-        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -v pi@$PI_IP "
-          echo 'Connected to Raspberry Pi'
-          cd ~/compendium || { echo 'Failed to change directory'; exit 1; }
-          echo 'Running git pull...'
-          git pull || { echo 'Git pull failed'; exit 1; }
-          echo 'Running npm install...'
-          npm install || { echo 'npm install failed'; exit 1; }
-          echo 'Restarting service...'
-          systemctl --user restart compendium || { echo 'Service restart failed'; exit 1; }
-          echo 'Deployment completed successfully'
-        "
+        # Create a simple version info file
+        echo "$(date -u +'%Y%m%d%H%M%S')-$(git rev-parse --short HEAD)" > deployment/version.txt
+    
+    # Upload deployment package as artifact
+    - name: Upload deployment package
+      uses: actions/upload-artifact@v3
+      with:
+        name: compendium-deployment
+        path: deployment/
+        retention-days: 7
+    
+    # Create a GitHub release with the deployment package
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: deploy-${{ github.run_number }}
+        release_name: Deployment ${{ github.run_number }}
+        body: |
+          Automated deployment package created from commit ${{ github.sha }}
+          Created at $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+        draft: false
+        prerelease: false
+    
+    # Upload deployment package to the release
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./deployment/compendium-deploy.tar.gz
+        asset_name: compendium-deploy.tar.gz
+        asset_content_type: application/gzip

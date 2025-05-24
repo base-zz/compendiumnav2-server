@@ -4,3 +4,6 @@ dist/
 .env
 *.log
 /src/signalk_dev.db
+.private-key
+.public-key
+.app-uuid

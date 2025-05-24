@@ -1,7 +1,9 @@
 import WebSocket from "ws";
 import EventEmitter from "events";
 import jwt from "jsonwebtoken";
-import { getOrCreateAppUuid } from "../../../server/uniqueAppId.js";
+import { getOrCreateAppUuid } from "../../../state/uniqueAppId.js";
+import { getOrCreateKeyPair, signMessage } from "../../../state/keyPair.js";
+
 const boatId = getOrCreateAppUuid();
 
 /**
@@ -20,8 +22,7 @@ export class VPSConnector extends EventEmitter {
     // Ensure sensible defaults
     this.config.reconnectInterval = this.config.reconnectInterval || 5000;
     this.config.maxRetries = this.config.maxRetries || 10;
-    if (!this.config.tokenSecret)
-      throw new Error("VPSConnector: tokenSecret is required in config");
+    // tokenSecret is optional when using key-based authentication
     if (!this.config.vpsUrl)
       throw new Error("VPSConnector: vpsUrl is required in config");
   }
@@ -90,22 +91,21 @@ export class VPSConnector extends EventEmitter {
    */
 
   _generateToken() {
-    const payload = {
-      originId: "relay-server",
-      boatId: boatId,
-      role: "boat-server",
-    };
+    // For backward compatibility, generate a JWT token if tokenSecret is provided
+    if (this.config.tokenSecret) {
+      const payload = {
+        boatId,
+        role: "boat-server",
+        iat: Math.floor(Date.now() / 1000),
+      };
 
-    console.log("[VPS-CONNECTOR] Payload for token:", payload);
-
-    // Use TOKEN_EXPIRY from env or default to 90 days
-    const expiresIn = process.env.TOKEN_EXPIRY
-      ? `${process.env.TOKEN_EXPIRY}s`
-      : "30d";
-    return jwt.sign(payload, this.config.tokenSecret, {
-      expiresIn: expiresIn,
-      algorithm: "HS256",
-    });
+      return jwt.sign(payload, this.config.tokenSecret, {
+        expiresIn: "60d", // Token expires in 60 days
+      });
+    }
+    
+    // Return empty string if no token secret (we'll use key-based auth instead)
+    return "";
   }
 
   /**
@@ -146,11 +146,18 @@ export class VPSConnector extends EventEmitter {
           });
           this.connection.send(registerMessage);
 
-          // Send initial message to identify as a relay server
+          // Send initial message to identify as a relay server with signature
+          const timestamp = Date.now().toString();
+          const { privateKey } = getOrCreateKeyPair();
+          const message = `${boatId}:${timestamp}`;
+          const signature = signMessage(message, privateKey);
+          
           const identityMessage = JSON.stringify({
             type: "identity",
             boatId: boatId,
             role: "boat-server",
+            timestamp: timestamp,
+            signature: signature,
             time: new Date().toISOString(),
           });
           this.connection.send(identityMessage);
