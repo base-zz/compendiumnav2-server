@@ -9,7 +9,7 @@ export class RelayServer extends EventEmitter {
 
     // Validate configuration
     if (!config.port) throw new Error("RelayServer: port must be provided in config");
-    if (!config.tokenSecret) throw new Error("RelayServer: tokenSecret is required");
+    // tokenSecret is optional when using key-based authentication
     if (!config.vpsUrl) throw new Error("RelayServer: vpsUrl is required");
 
     this.config = {
@@ -51,9 +51,19 @@ export class RelayServer extends EventEmitter {
   async initialize() {
     try {
       console.log("[RELAY] Initializing relay server");
+      console.log(`[RELAY] VPS URL: ${this.config.vpsUrl}`);
+      console.log(`[RELAY] Using token secret: ${this.config.tokenSecret ? 'YES' : 'NO'}`);
       
       // Connect to VPS
-      await this.vpsConnector.connect();
+      console.log("[RELAY] Attempting to connect to VPS...");
+      try {
+        await this.vpsConnector.connect();
+        console.log("[RELAY] Successfully connected to VPS");
+      } catch (vpsError) {
+        console.error("[RELAY] VPS connection failed:", vpsError.message);
+        console.log("[RELAY] Continuing without VPS connection");
+        // Don't rethrow - we'll continue without VPS connection
+      }
       
       // Setup server components
       this._setupServer();

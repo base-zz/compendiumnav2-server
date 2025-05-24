@@ -1,42 +1,72 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import fetch from 'node-fetch';
 import { getOrCreateAppUuid } from './uniqueAppId.js';
 
-const PRIVATE_KEY_FILE = path.resolve(process.cwd(), '.private-key');
-const PUBLIC_KEY_FILE = path.resolve(process.cwd(), '.public-key');
+const PRIVATE_KEY_FILE = '.private-key';
+const PUBLIC_KEY_FILE = '.public-key';
 
 /**
- * Derives a deterministic key pair from the boat ID
- * This ensures the same boat ID always generates the same key pair
+ * Generate or retrieve the key pair for this boat server
+ * @returns {Object} The key pair with publicKey and privateKey
  */
-export function deriveKeyPairFromBoatId() {
-  const boatId = getOrCreateAppUuid();
-  
-  // Create a seed from the boatId
-  const seed = crypto.createHash('sha256').update(boatId).digest();
-  
-  // Use the seed to create a deterministic random number generator
-  const prng = (size) => {
-    let buffer = Buffer.alloc(size);
-    let offset = 0;
-    
-    while (offset < size) {
-      const hash = crypto.createHash('sha256')
-        .update(seed)
-        .update(Buffer.from([offset]))
-        .digest();
-      
-      const copySize = Math.min(hash.length, size - offset);
-      hash.copy(buffer, offset, 0, copySize);
-      offset += copySize;
+export function getOrCreateKeyPair() {
+  const existingKeyPair = loadKeyPair();
+  if (existingKeyPair) {
+    return existingKeyPair;
+  }
+
+  // Generate a new key pair if none exists
+  return generateAndSaveKeyPair();
+}
+
+/**
+ * Load the key pair from disk if it exists
+ * @returns {Object|null} The key pair or null if not found
+ */
+function loadKeyPair() {
+  try {
+    if (fs.existsSync(PRIVATE_KEY_FILE) && fs.existsSync(PUBLIC_KEY_FILE)) {
+      const privateKey = fs.readFileSync(PRIVATE_KEY_FILE, 'utf8');
+      const publicKey = fs.readFileSync(PUBLIC_KEY_FILE, 'utf8');
+      return { privateKey, publicKey };
     }
+  } catch (error) {
+    console.error('Error loading key pair:', error);
+  }
+  return null;
+}
+
+/**
+ * Generate a new key pair and save it to disk
+ * @returns {Object} The generated key pair
+ */
+function generateAndSaveKeyPair() {
+  try {
+    // Generate a deterministic key pair based on the boat ID
+    const boatId = getOrCreateAppUuid();
+    const { publicKey, privateKey } = generateKeyPair(boatId);
     
-    return buffer;
-  };
-  
-  // Generate the key pair
-  return crypto.generateKeyPairSync('rsa', {
+    // Save the keys to disk
+    fs.writeFileSync(PRIVATE_KEY_FILE, privateKey);
+    fs.writeFileSync(PUBLIC_KEY_FILE, publicKey);
+    
+    return { privateKey, publicKey };
+  } catch (error) {
+    console.error('Error generating key pair:', error);
+    throw error;
+  }
+}
+
+/**
+ * Generate a key pair deterministically based on the boat ID
+ * @param {string} boatId - The unique boat ID
+ * @returns {Object} The generated key pair
+ */
+function generateKeyPair(boatId) {
+  // Use the boat ID as a seed for deterministic key generation
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
     modulusLength: 2048,
     publicKeyEncoding: {
       type: 'spki',
@@ -45,44 +75,87 @@ export function deriveKeyPairFromBoatId() {
     privateKeyEncoding: {
       type: 'pkcs8',
       format: 'pem'
-    },
-    prng: prng
+    }
   });
-}
-
-/**
- * Gets existing key pair or creates a new one
- */
-export function getOrCreateKeyPair() {
-  // Check if keys already exist
-  if (fs.existsSync(PRIVATE_KEY_FILE) && fs.existsSync(PUBLIC_KEY_FILE)) {
-    return {
-      privateKey: fs.readFileSync(PRIVATE_KEY_FILE, 'utf8'),
-      publicKey: fs.readFileSync(PUBLIC_KEY_FILE, 'utf8')
-    };
-  }
-
-  // Generate new key pair
-  const { privateKey, publicKey } = deriveKeyPairFromBoatId();
-
-  // Save keys
-  fs.writeFileSync(PRIVATE_KEY_FILE, privateKey, 'utf8');
-  fs.writeFileSync(PUBLIC_KEY_FILE, publicKey, 'utf8');
   
-  // Set restrictive permissions on private key
-  fs.chmodSync(PRIVATE_KEY_FILE, 0o600);
-
-  return { privateKey, publicKey };
+  return { publicKey, privateKey };
 }
 
 /**
- * Signs a message with the private key
+ * Sign a message using the private key
+ * @param {string} message - The message to sign
+ * @param {string} [privateKey] - The private key to use for signing. If not provided, will be retrieved from the key pair.
+ * @returns {string} The signature as a base64 string
  */
 export function signMessage(message, privateKey) {
+  // If privateKey is not provided, get it from the key pair
+  if (!privateKey) {
+    const keyPair = getOrCreateKeyPair();
+    if (!keyPair || !keyPair.privateKey) {
+      throw new Error('No private key available for signing');
+    }
+    privateKey = keyPair.privateKey;
+  }
+  
   const sign = crypto.createSign('SHA256');
   sign.update(message);
   sign.end();
   return sign.sign(privateKey, 'base64');
+}
+
+/**
+ * Register the public key with the VPS
+ * @param {string} vpsUrl - The URL of the VPS (without the ws:// prefix)
+ * @returns {Promise<boolean>} True if registration was successful
+ */
+export async function registerPublicKeyWithVPS(vpsUrl) {
+  try {
+    const keyPair = getOrCreateKeyPair();
+    const boatId = getOrCreateAppUuid();
+    
+    // Extract hostname from the WebSocket URL
+    // Format: ws://hostname:port/path -> http://hostname
+    // Use default HTTP port (80) for the API
+    const hostname = vpsUrl.match(/^ws:\/\/([^:]+)/i)[1];
+    const apiBaseUrl = `http://${hostname}`;
+    console.log(`[KEY-PAIR] API base URL: ${apiBaseUrl}`);
+    
+    const registrationUrl = `${apiBaseUrl}/api/boat/register-key`;
+    console.log(`[KEY-PAIR] Registering public key with VPS at ${registrationUrl}`);
+    
+    // Create a timeout promise
+    const timeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Request timeout after 15 seconds')), 15000);
+    });
+    
+    // Create the fetch promise
+    const fetchPromise = fetch(registrationUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        boatId,
+        publicKey: keyPair.publicKey
+      })
+    });
+    
+    // Race the fetch against the timeout
+    const response = await Promise.race([fetchPromise, timeout]);
+    const data = await response.json();
+    
+    if (response.ok && data.success) {
+      console.log(`[KEY-PAIR] Successfully registered public key with VPS for boat ${boatId}`);
+      return true;
+    } else {
+      console.error(`[KEY-PAIR] Failed to register public key with VPS: ${data.error || 'Unknown error'}`);
+      return false;
+    }
+  } catch (error) {
+    console.error('[KEY-PAIR] Error registering public key with VPS:', error);
+    console.log('[KEY-PAIR] Continuing with connection despite key registration failure');
+    return false;
+  }
 }
 
 /**

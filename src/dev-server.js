@@ -111,7 +111,8 @@ async function startDevServer() {
         10
       ),
       requireAuth: process.env.REQUIRE_AUTH === "true",
-      tokenSecret: process.env.TOKEN_SECRET,
+      // Remove tokenSecret to force key-based authentication
+      // tokenSecret: process.env.TOKEN_SECRET,
       vpsUrl: buildVpsUrl(),
       // Add any other needed config here
     };
@@ -123,14 +124,43 @@ async function startDevServer() {
     };
     if (!relayConfig.port || isNaN(relayConfig.port))
       throw new Error("RelayServer: port must be set via env");
-    if (!relayConfig.tokenSecret)
-      throw new Error("RelayServer: tokenSecret must be set via env");
+    // tokenSecret is optional when using key-based authentication
     if (!relayConfig.vpsUrl)
       throw new Error("RelayServer: vpsUrl must be set via env");
 
     // 5. Start relay server
     console.log(`[DEV-SERVER] Starting relay server on port ${relayPort}`);
-    await startRelayServer(relayConfig);
+    console.log(`[DEV-SERVER] VPS URL: ${relayConfig.vpsUrl || 'NOT SET'}`);
+    console.log(`[DEV-SERVER] Token Secret: ${relayConfig.tokenSecret ? '*** (set)' : 'NOT SET'}`);
+    
+    // Use the correct VPS URL
+    relayConfig.vpsUrl = 'ws://compendiumnav.com:3002/relay';
+    console.log(`[DEV-SERVER] Using VPS URL: ${relayConfig.vpsUrl}`);
+    
+    // Remove tokenSecret to force key-based authentication
+    relayConfig.tokenSecret = null;
+    console.log(`[DEV-SERVER] Forcing key-based authentication (no token secret)`);
+    
+    // Set reasonable connection parameters
+    relayConfig.reconnectInterval = 5000; // 5 seconds
+    relayConfig.maxRetries = 5; // Try 5 times
+    
+    const relayServer = await startRelayServer(relayConfig);
+    
+    // Log when the relay server connects to the VPS
+    if (relayServer && relayServer.vpsConnector) {
+      relayServer.vpsConnector.on('connected', () => {
+        console.log(`[DEV-SERVER] Successfully connected to VPS at ${relayConfig.vpsUrl}`);
+      });
+      
+      relayServer.vpsConnector.on('disconnected', () => {
+        console.log(`[DEV-SERVER] Disconnected from VPS`);
+      });
+      
+      relayServer.vpsConnector.on('error', (error) => {
+        console.error(`[DEV-SERVER] VPS connection error:`, error.message);
+      });
+    }
 
     // 6. Start direct server
     console.log(`[DEV-SERVER] Starting direct server on port ${directPort}`);

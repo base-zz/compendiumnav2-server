@@ -5,14 +5,36 @@ dotenv.config({ path: process.env.RELAY_ENV_PATH || ".env.server" });
 
 import { RelayServer } from './RelayServer.js';
 import { startDirectServer } from './DirectServer.js';
+import crypto from 'crypto';
 
 let relayServerInstance = null;
 let directServerInstance = null;
 
+// Verify a signature using a public key
+function verifySignature(message, signature, publicKey) {
+  try {
+    console.log(`[AUTH] Verifying signature for message: ${message}`);
+    const verify = crypto.createVerify('SHA256');
+    verify.update(message);
+    verify.end();
+    const result = verify.verify(publicKey, signature, 'base64');
+    console.log(`[AUTH] Signature verification result: ${result ? 'SUCCESS' : 'FAILED'}`);
+    return result;
+  } catch (error) {
+    console.error('[AUTH] Signature verification error:', error);
+    return false;
+  }
+}
+
 export async function startRelayServer(config = {}) {
   relayServerInstance = new RelayServer(config);
-  // If RelayServer has async init, you could await relayServerInstance.initialize();
-  console.log('[RELAY] Relay server started on port', config.port);
+  // Initialize the relay server (this will connect to the VPS)
+  try {
+    await relayServerInstance.initialize();
+    console.log('[RELAY] Relay server initialized and started on port', config.port);
+  } catch (error) {
+    console.error('[RELAY] Failed to initialize relay server:', error.message);
+  }
   return relayServerInstance;
 }
 
