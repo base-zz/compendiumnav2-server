@@ -105,16 +105,17 @@ SIGNALK_ADAPTER=
 RECONNECT_DELAY=3000
 MAX_RECONNECT_ATTEMPTS=10
 UPDATE_INTERVAL=5000
-VPS_URL=ws://compendiumnav.com
-VPS_PORT=443
+VPS_HOST=compendiumnav.com
+VPS_PATH=/relay
+VPS_WS_PORT=3002
 RELAY_ENV_PATH=.env.server
-CONNECTION_TIMEOUT=30000
+VPS_PING_INTERVAL=25000
+VPS_CONNECTION_TIMEOUT=30000
 MAX_RETRIES=5
 MOCK_MODE=false
 FALLBACK_TO_MOCK=true
-TOKEN_SECRET=$TOKEN_SECRET
 ALLOWED_ORIGINS=*
-VITE_TOKEN_SECRET=$VITE_TOKEN_SECRET
+# Using key-based authentication (no TOKEN_SECRET needed)
 DATABASE_PATH=./signalk_dev.db
 EOF
   echo -e "${GREEN}Created .env file with required parameters${NC}"
@@ -123,9 +124,10 @@ else
   echo -e "${YELLOW}Updating .env file with sensitive values...${NC}"
   cp "$TEMP_DIR/.env" .env.deploy
   
-  # Update token values
-  sed -i "s|^TOKEN_SECRET=.*|TOKEN_SECRET=$TOKEN_SECRET|" .env.deploy
-  sed -i "s|^VITE_TOKEN_SECRET=.*|VITE_TOKEN_SECRET=$VITE_TOKEN_SECRET|" .env.deploy
+  # Remove any TOKEN_SECRET entries to use key-based authentication
+  sed -i "/^TOKEN_SECRET=/d" .env.deploy
+  sed -i "/^VITE_TOKEN_SECRET=/d" .env.deploy
+  echo -e "${GREEN}Removed TOKEN_SECRET to enable secure key-based authentication${NC}"
   
   echo -e "${GREEN}Updated .env file with sensitive values${NC}"
 fi

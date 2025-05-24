@@ -340,6 +340,21 @@ configure_environment() {
     set_env_var "NODE_ENV" "development"  # Use development mode on macOS for better debugging
     set_env_var "FRONTEND_URL" "http://localhost:$HTTP_PORT"
     
+    # VPS connection configuration
+    set_env_var "VPS_HOST" "compendiumnav.com"
+    set_env_var "VPS_PATH" "/relay"
+    
+    # WebSocket connection settings
+    set_env_var "VPS_PING_INTERVAL" "25000"  # 25 seconds between pings
+    set_env_var "VPS_CONNECTION_TIMEOUT" "30000"  # 30 second connection timeout
+    
+    # We're using key-based authentication which is more secure than token-based auth
+    # Remove TOKEN_SECRET if it exists to force key-based authentication
+    if grep -q "^TOKEN_SECRET=" "$env_file"; then
+        sed -i "" "/^TOKEN_SECRET=/d" "$env_file"
+        echo -e "${GREEN}Removed TOKEN_SECRET to enable secure key-based authentication${NC}"
+    fi
+    
     # macOS specific settings
     set_env_var "MACOS" "true"
     

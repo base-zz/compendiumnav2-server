@@ -235,10 +235,20 @@ configure_environment() {
     set_env_var "MDNS_DOMAIN" "$DOMAIN" "$env_file"
     
     # Network configuration
-    set_env_var "VPS_HOST" "$HOSTNAME.$DOMAIN" "$env_file"
+    set_env_var "VPS_HOST" "compendiumnav.com" "$env_file"
     set_env_var "VPS_WS_PORT" "$WS_PORT" "$env_file"
     set_env_var "VPS_PATH" "/relay" "$env_file"
-    set_env_var "TOKEN_SECRET" "$(openssl rand -hex 32)" "$env_file"
+    
+    # WebSocket connection settings
+    set_env_var "VPS_PING_INTERVAL" "25000" "$env_file"  # 25 seconds between pings
+    set_env_var "VPS_CONNECTION_TIMEOUT" "30000" "$env_file"  # 30 second connection timeout
+    
+    # We're using key-based authentication which is more secure than token-based auth
+    # Remove TOKEN_SECRET if it exists to force key-based authentication
+    if grep -q "^TOKEN_SECRET=" "$env_file"; then
+        sed -i "/^TOKEN_SECRET=/d" "$env_file"
+        echo -e "${GREEN}Removed TOKEN_SECRET to enable secure key-based authentication${NC}"
+    fi
     
     # Set avahi-daemon configuration
     configure_avahi
