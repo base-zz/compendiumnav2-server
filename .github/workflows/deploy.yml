@@ -3,6 +3,8 @@ name: Create Deployment Package
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
+    # Allows manual triggering of the workflow
 
 jobs:
   build:
@@ -10,20 +12,28 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     
-    # Update .env file with sensitive values from GitHub Secrets
-    - name: Update .env file with secrets
+    # Configure .env file for key-based authentication and secure connections
+    - name: Configure .env file for secure deployment
       env:
-        TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
-        VITE_TOKEN_SECRET: ${{ secrets.VITE_TOKEN_SECRET }}
+        VPS_HOST: ${{ secrets.VPS_HOST }}
+        VPS_PATH: ${{ secrets.VPS_PATH || '/relay' }}
+        VPS_PING_INTERVAL: ${{ secrets.VPS_PING_INTERVAL || '25000' }}
+        VPS_CONNECTION_TIMEOUT: ${{ secrets.VPS_CONNECTION_TIMEOUT || '30000' }}
       run: |
-        # Update specific values in the .env file
-        if [ -n "$TOKEN_SECRET" ]; then
-          sed -i "s|^TOKEN_SECRET=.*|TOKEN_SECRET=$TOKEN_SECRET|" .env
+        # Remove any TOKEN_SECRET entries to enforce key-based authentication
+        sed -i '/^TOKEN_SECRET=/d' .env
+        
+        # Configure WebSocket connection settings
+        if [ -n "$VPS_HOST" ]; then
+          echo "VPS_HOST=$VPS_HOST" >> .env
         fi
         
-        if [ -n "$VITE_TOKEN_SECRET" ]; then
-          sed -i "s|^VITE_TOKEN_SECRET=.*|VITE_TOKEN_SECRET=$VITE_TOKEN_SECRET|" .env
-        fi
+        echo "VPS_PATH=${VPS_PATH}" >> .env
+        echo "VPS_PING_INTERVAL=${VPS_PING_INTERVAL}" >> .env
+        echo "VPS_CONNECTION_TIMEOUT=${VPS_CONNECTION_TIMEOUT}" >> .env
+        
+        # In production, force WSS by setting port to 443
+        echo "VPS_WS_PORT=443" >> .env
         
         # Show what's in the .env file (without sensitive values)
         echo "Updated .env file with these variables:"
