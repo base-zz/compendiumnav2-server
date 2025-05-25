@@ -64,28 +64,13 @@ jobs:
         path: deployment/compendium-deploy.tar.gz
         retention-days: 7
         
-    # Create a GitHub release with the deployment package
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: deploy-${{ github.run_number }}
-        release_name: Deployment ${{ github.run_number }}
-        body: |
-          Automated deployment package created from commit ${{ github.sha }}
-          Created at $(date -u +'%Y-%m-%d %H:%M:%S UTC')
-        draft: false
-        prerelease: false
-    
-    # Upload deployment package to the release
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./deployment/compendium-deploy.tar.gz
-        asset_name: compendium-deploy.tar.gz
-        asset_content_type: application/gzip
+    # Create a version tag for this deployment
+    - name: Create version tag
+      run: |
+        # Create a version file with details about this deployment
+        echo "Deployment ${{ github.run_number }} created at $(date -u +'%Y-%m-%d %H:%M:%S UTC')" > deployment/version.txt
+        echo "Commit: ${{ github.sha }}" >> deployment/version.txt
+        echo "Build: ${{ github.run_number }}" >> deployment/version.txt
+        
+        # Add this information to the GitHub Actions summary
+        cat deployment/version.txt >> $GITHUB_STEP_SUMMARY
