@@ -58,7 +58,7 @@ jobs:
     
     # Upload the artifact using GitHub's built-in artifact storage
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: compendium-deploy
         path: deployment/compendium-deploy.tar.gz
