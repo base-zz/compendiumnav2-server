@@ -35,7 +35,8 @@ export class VPSConnector extends EventEmitter {
     // Setup config using env vars or provided config
     const mergedConfig = { ...config };
     mergedConfig.vpsUrl = this._buildVpsUrl(config);
-    mergedConfig.tokenSecret = process.env.TOKEN_SECRET;
+    // We're using key-based authentication, so tokenSecret is not needed
+    mergedConfig.tokenSecret = ""; // Empty string for key-based auth
     mergedConfig.reconnectInterval = this._getNumericConfig(
       "VPS_RECONNECT_INTERVAL",
       config.reconnectInterval,
@@ -56,13 +57,6 @@ export class VPSConnector extends EventEmitter {
       config.connectionTimeout,
       30000 // Default to 30 seconds for connection timeout
     );
-    if (!mergedConfig.tokenSecret) {
-      throw new Error(
-        "TOKEN_SECRET must be set in .env or passed via config.\n" +
-          "Add to .env:\nTOKEN_SECRET=your_secure_secret_here\n" +
-          'Or pass as: vpsConnector.initialize({ tokenSecret: "..." })'
-      );
-    }
     this.config = mergedConfig;
   }
 
@@ -70,29 +64,33 @@ export class VPSConnector extends EventEmitter {
     const host = process.env.VPS_HOST;
     const port = process.env.VPS_WS_PORT;
     const path = process.env.VPS_PATH || "/relay";
-    const protocol = process.env.NODE_ENV === "production" ? "wss" : "ws";
-
+    
     if (!host)
       throw new Error("VPS_HOST must be set in the environment or config.");
 
-    if (process.env.NODE_ENV !== "production") {
+    // Always use secure WebSockets (wss) in production
+    if (process.env.NODE_ENV === "production") {
+      // In production, we only allow secure connections
+      const protocol = "wss";
+      
+      // In production, we should use port 443 or default port
+      if (port && port !== "443") {
+        throw new Error(
+          "Production requires port 443 or omit VPS_WS_PORT to use the default port for wss."
+        );
+      }
+      
+      // Omit port for default (443)
+      return port ? `${protocol}://${host}:${port}${path}` : `${protocol}://${host}${path}`;
+    } else {
+      // Development mode
+      const protocol = "ws";
       if (!port) throw new Error("VPS_WS_PORT must be set in development.");
       console.warn(
         "[SECURITY WARNING] Using insecure WebSocket connection for development"
       );
       return `${protocol}://${host}:${port}${path}`;
     }
-
-    // Production
-    if (port && port !== "443" && port !== "80") {
-      throw new Error(
-        "Production allows only port 443 (wss), 80 (ws), or omit VPS_WS_PORT for default."
-      );
-    }
-    // Omit port for default (80/443)
-    return port
-      ? `${protocol}://${host}:${port}${path}`
-      : `${protocol}://${host}${path}`;
   }
 
   _getNumericConfig(envVar, configValue, defaultValue) {
@@ -101,23 +99,12 @@ export class VPSConnector extends EventEmitter {
   }
 
   /**
-   * Generate a token for authentication with the VPS Relay Proxy
+   * Generate an empty token (key-based auth doesn't need tokens)
+   * @private
+   * @returns {string} Empty string as we use key-based authentication
    */
   _generateToken() {
-    // For backward compatibility, generate a JWT token if tokenSecret is provided
-    if (this.config.tokenSecret) {
-      const payload = {
-        boatId,
-        role: "boat-server",
-        iat: Math.floor(Date.now() / 1000),
-      };
-
-      return jwt.sign(payload, this.config.tokenSecret, {
-        expiresIn: "60d", // Token expires in 60 days
-      });
-    }
-    
-    // Return empty string if no token secret (we'll use key-based auth instead)
+    // Key-based authentication doesn't use tokens
     return "";
   }
 
@@ -144,8 +131,8 @@ export class VPSConnector extends EventEmitter {
       time: new Date().toISOString()
     };
     
-    // If we're using key-based auth, sign the message
-    if (!this.config.tokenSecret) {
+    // Always use key-based authentication
+    {
       try {
         // Sign the message with our private key
         const signature = signMessage(`${boatId}:${timestamp}`);
@@ -235,16 +222,16 @@ export class VPSConnector extends EventEmitter {
       return;
     }
 
-    // Log authentication method being used
-    console.log(`[VPS-CONNECTOR] Authentication method: ${this.config.tokenSecret ? 'token-based' : 'key-based'}`);
+    // Always use key-based authentication
+    console.log(`[VPS-CONNECTOR] Authentication method: key-based`);
     
-    // Generate token if using token-based auth
+    // Generate empty token (not used with key-based auth)
     const token = this._generateToken();
-    console.log(`[VPS-CONNECTOR] Token generated: ${token ? 'YES' : 'NO'}`); 
+    console.log(`[VPS-CONNECTOR] Token generated: NO`); 
     
-    // Register the public key if using key-based auth
+    // Register the public key for key-based auth
     let keyRegistrationSuccess = false;
-    if (!this.config.tokenSecret) {
+    {
       const keyPair = getOrCreateKeyPair();
       console.log(`[VPS-CONNECTOR] Key pair available: ${!!keyPair}`);
       if (keyPair) {
@@ -323,8 +310,20 @@ export class VPSConnector extends EventEmitter {
               // Emit a new event type for connection status
               this.emit("connectionStatus", { boatId, clientCount });
             } else if (message.type === "pong") {
-              // Received a pong response
-              console.log(`[VPS-CONNECTOR] Received pong from server`);
+              // Calculate round-trip latency
+              const now = Date.now();
+              const sentTime = message.echo;
+              const latencyMs = now - sentTime;
+              
+              console.log(`[VPS-CONNECTOR] Received pong from server (latency: ${latencyMs}ms)`);
+              
+              // Store recent latency values for potential monitoring
+              this._latencyValues = this._latencyValues || [];
+              this._latencyValues.push(latencyMs);
+              // Keep only the last 10 values
+              if (this._latencyValues.length > 10) {
+                this._latencyValues.shift();
+              }
             } else {
               // Forward other messages
               this.emit("message", message);
@@ -369,12 +368,10 @@ export class VPSConnector extends EventEmitter {
       this.connection.on("error", (error) => {
         console.error("[VPS-CONNECTOR] Connection error:", error.message);
         console.error(`[VPS-CONNECTOR] Failed to connect to VPS at ${this.config.vpsUrl}`);
-        console.error(`[VPS-CONNECTOR] Authentication method: ${this.config.tokenSecret ? 'token-based' : 'key-based'}`); 
-        if (!this.config.tokenSecret) {
-          console.log(`[VPS-CONNECTOR] Using key-based authentication with boat ID: ${boatId}`);
-          const keyPair = getOrCreateKeyPair();
-          console.log(`[VPS-CONNECTOR] Key pair available: ${!!keyPair}`);
-        }
+        console.error(`[VPS-CONNECTOR] Authentication method: key-based`); 
+        console.log(`[VPS-CONNECTOR] Using key-based authentication with boat ID: ${boatId}`);
+        const keyPair = getOrCreateKeyPair();
+        console.log(`[VPS-CONNECTOR] Key pair available: ${!!keyPair}`);
         this.emit("error", error);
         reject(error);
       });

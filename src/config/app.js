@@ -29,61 +29,75 @@ const findAvailablePort = async (defaultPort, maxAttempts = 10) => {
 
 // Async config initialization
 const getConfig = async () => {
-  // Get ports from environment or use defaults
-  const defaultHttpPort = parseInt(process.env.PORT, 10) || 8080;
-  const defaultWsPort = parseInt(process.env.VPS_WS_PORT, 10) || 3009;
+  // Validate required environment variables
+  const requiredVars = [
+    'NODE_ENV',
+    'PORT',
+    'INTERNAL_PORT',
+    'AUTH_PORT',
+    'FRONTEND_URL',
+    'VPS_WS_PORT',
+    'VPS_PATH',
+    'VPS_HOST',
+    'DIRECT_WS_PORT',
+    'DIRECT_WS_HOST',
+    'SIGNALK_URL',
+    'RECONNECT_DELAY',
+    'MAX_RECONNECT_ATTEMPTS',
+    'CONNECTION_TIMEOUT',
+    'MAX_RETRIES',
+    'VPS_PING_INTERVAL',
+    'VPS_CONNECTION_TIMEOUT'
+  ];
   
-  // Find available ports if not explicitly set
-  const [httpPort, wsPort] = await Promise.all([
-    process.env.PORT ? Promise.resolve(defaultHttpPort) : findAvailablePort(defaultHttpPort),
-    process.env.VPS_WS_PORT ? Promise.resolve(defaultWsPort) : findAvailablePort(defaultWsPort)
-  ]);
+  const missingVars = requiredVars.filter(varName => !process.env[varName]);
+  if (missingVars.length > 0) {
+    throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+  }
+
+  // Parse ports from environment
+  const httpPort = parseInt(process.env.PORT, 10);
+  const wsPort = parseInt(process.env.VPS_WS_PORT, 10);
+  
+  if (isNaN(httpPort) || isNaN(wsPort)) {
+    throw new Error('PORT and VPS_WS_PORT must be valid numbers');
+  }
 
   return {
     // Server
-    NODE_ENV: process.env.NODE_ENV || 'development',
+    NODE_ENV: process.env.NODE_ENV,
     PORT: httpPort,
-    INTERNAL_PORT: parseInt(process.env.INTERNAL_PORT, 10) || httpPort,
-    AUTH_PORT: parseInt(process.env.AUTH_PORT, 10) || 3001,
-    FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:5173',
+    INTERNAL_PORT: parseInt(process.env.INTERNAL_PORT, 10),
+    AUTH_PORT: parseInt(process.env.AUTH_PORT, 10),
+    FRONTEND_URL: process.env.FRONTEND_URL,
     DEBUG: process.env.DEBUG === 'true',
-    ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS?.split(',').filter(Boolean) || [
-      'http://localhost:5173',
-      'http://localhost:3000',
-      'http://localhost:8080'
-    ],
-
-    // Authentication
-    TOKEN_SECRET: process.env.TOKEN_SECRET || 'your-secret-key',
-    TOKEN_EXPIRY: parseInt(process.env.TOKEN_EXPIRY, 10) || 86400,
-    REQUIRE_AUTH: process.env.REQUIRE_AUTH === 'true',
+    ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS?.split(',').filter(Boolean),
+    TOKEN_EXPIRY: parseInt(process.env.TOKEN_EXPIRY, 10),
 
     // WebSocket
     WS: {
       VPS_PORT: wsPort,
-      VPS_PATH: process.env.VPS_PATH || '/relay',
-      VPS_HOST: process.env.VPS_HOST || 'localhost',
-      DIRECT_PORT: parseInt(process.env.DIRECT_WS_PORT, 10) || (wsPort + 1),
-      DIRECT_HOST: process.env.DIRECT_WS_HOST || '0.0.0.0',
-      VPS_URL: process.env.VPS_URL || `ws://localhost:${wsPort}`,
-      VPS_PORT: wsPort
+      VPS_PATH: process.env.VPS_PATH,
+      VPS_HOST: process.env.VPS_HOST,
+      DIRECT_PORT: parseInt(process.env.DIRECT_WS_PORT, 10),
+      DIRECT_HOST: process.env.DIRECT_WS_HOST,
+      // VPS_URL is built dynamically based on NODE_ENV, VPS_HOST, VPS_WS_PORT and VPS_PATH
+      // in the VPSConnector._buildVpsUrl method
     },
 
     // SignalK
     SIGNALK: {
-      URL: process.env.SIGNALK_URL || 'http://openplotter.local:3000/signalk',
-      TOKEN: process.env.SIGNALK_TOKEN || '',
-      ADAPTER: process.env.SIGNALK_ADAPTER || '',
-      RECONNECT_DELAY: parseInt(process.env.RECONNECT_DELAY, 10) || 3000,
-      MAX_RECONNECT_ATTEMPTS: parseInt(process.env.MAX_RECONNECT_ATTEMPTS, 10) || 10
+      URL: process.env.SIGNALK_URL,
+      TOKEN: process.env.SIGNALK_TOKEN || '', // Empty string is acceptable for no token
+      ADAPTER: process.env.SIGNALK_ADAPTER || '', // Empty string is acceptable for default adapter
+      RECONNECT_DELAY: parseInt(process.env.RECONNECT_DELAY, 10),
+      MAX_RECONNECT_ATTEMPTS: parseInt(process.env.MAX_RECONNECT_ATTEMPTS, 10)
     },
 
     // Connection
     CONNECTION: {
-      TIMEOUT: parseInt(process.env.CONNECTION_TIMEOUT, 10) || 30000,
-      MAX_RETRIES: parseInt(process.env.MAX_RETRIES, 10) || 5,
-      MOCK_MODE: process.env.MOCK_MODE === 'true',
-      FALLBACK_TO_MOCK: process.env.FALLBACK_TO_MOCK !== 'false'
+      TIMEOUT: parseInt(process.env.CONNECTION_TIMEOUT, 10),
+      MAX_RETRIES: parseInt(process.env.MAX_RETRIES, 10),
     }
   };
 };

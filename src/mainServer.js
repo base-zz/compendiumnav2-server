@@ -86,15 +86,12 @@ async function startServer() {
         process.env.DEFAULT_THROTTLE_RATE || "5000",
         10
       ),
-      requireAuth: process.env.REQUIRE_AUTH === "true",
-      tokenSecret: process.env.TOKEN_SECRET,
       vpsUrl: buildVpsUrl(),
       // Add any other needed config here
     };
     if (!relayConfig.port || isNaN(relayConfig.port))
       throw new Error("RelayServer: port must be set via env");
-    if (!relayConfig.tokenSecret)
-      throw new Error("RelayServer: tokenSecret must be set via env");
+    // tokenSecret is now optional with key-based authentication
     if (!relayConfig.vpsUrl)
       throw new Error("RelayServer: vpsUrl must be set via env");
 

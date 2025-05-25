@@ -14,8 +14,8 @@ const __dirname = dirname(__filename);
 console.log("Loading .env file from:", resolve(__dirname, '../.env'));
 dotenv.config({ path: resolve(__dirname, '../.env') });
 
-// Log the token secret for debugging (remove in production)
-console.log('TOKEN_SECRET:', process.env.TOKEN_SECRET ? '*** (set)' : 'NOT SET');
+// Using key-based authentication now
+console.log('Authentication: key-based');
 
 // --- Helper to build the VPS URL ---
 function buildVpsUrl() {
@@ -30,10 +30,13 @@ function buildVpsUrl() {
       process.env.VPS_WS_PORT !== "443"
         ? `:${process.env.VPS_WS_PORT}`
         : "";
-    const path = process.env.VPS_PATH || "/relay";
+    if (!process.env.VPS_PATH) {
+      throw new Error("VPS_PATH must be set in environment variables");
+    }
+    const path = process.env.VPS_PATH;
     return `${proto}://${host}${port}${path}`;
   }
-  return undefined;
+  throw new Error("VPS_HOST must be set in environment variables");
 }
 
 // --- Bridge canonical state into relay state manager ---
@@ -90,60 +93,69 @@ async function startDevServer() {
     stateServiceDemo.startMockMultipleTanksAndBatteries(5000); // Update every 5 seconds
     console.log("[DEV-SERVER] Started mock data generation for multiple tanks and batteries");
 
-    // 4. Build relay and direct server configs - using 3009 for WebSocket
-    const relayPort = 3008; // Different port for relay
-    const directPort = 3009; // WebSocket server on 3009 to match client
+    // 4. Build relay and direct server configs
+    // Validate required environment variables
+    const requiredVars = [
+      'DEV_RELAY_PORT',
+      'DIRECT_WS_PORT',
+      'DIRECT_WS_HOST',
+      'DEV_SIGNALK_REFRESH_RATE',
+      'DEV_DEFAULT_THROTTLE_RATE',
+      'DEV_MAX_PAYLOAD_SIZE',
+      'RECONNECT_DELAY',
+      'MAX_RETRIES'
+    ];
+    
+    const missingVars = requiredVars.filter(varName => !process.env[varName]);
+    if (missingVars.length > 0) {
+      throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+    }
+    
+    const relayPort = parseInt(process.env.DEV_RELAY_PORT, 10);
+    const directPort = parseInt(process.env.DIRECT_WS_PORT, 10);
+    
+    if (isNaN(relayPort) || isNaN(directPort)) {
+      throw new Error('DEV_RELAY_PORT and DIRECT_WS_PORT must be valid numbers');
+    }
     
     console.log(`[DEV-SERVER] Starting WebSocket server on port ${directPort}`);
     
     // Ensure the relay port is different from the direct port
-    const relayPortInput = relayPort;
-    const relayPortFinal = relayPortInput === directPort ? directPort + 1 : relayPortInput;
+    const relayPortFinal = relayPort === directPort ? directPort + 1 : relayPort;
 
     const relayConfig = {
       port: relayPortFinal,
-      signalKRefreshRate: parseInt(
-        process.env.SIGNALK_REFRESH_RATE || "1000",
-        10
-      ),
-      defaultThrottleRate: parseInt(
-        process.env.DEFAULT_THROTTLE_RATE || "5000",
-        10
-      ),
-      requireAuth: process.env.REQUIRE_AUTH === "true",
-      // Remove tokenSecret to force key-based authentication
-      // tokenSecret: process.env.TOKEN_SECRET,
+      signalKRefreshRate: parseInt(process.env.DEV_SIGNALK_REFRESH_RATE, 10),
+      defaultThrottleRate: parseInt(process.env.DEV_DEFAULT_THROTTLE_RATE, 10),
+      // Key-based authentication is now used exclusively
       vpsUrl: buildVpsUrl(),
-      // Add any other needed config here
     };
 
     const directConfig = {
       port: directPort,
-      host: '0.0.0.0', // Explicitly bind to all interfaces
-      maxPayload: 1024 * 1024 // 1MB default
+      host: process.env.DIRECT_WS_HOST,
+      maxPayload: parseInt(process.env.DEV_MAX_PAYLOAD_SIZE, 10)
     };
     if (!relayConfig.port || isNaN(relayConfig.port))
       throw new Error("RelayServer: port must be set via env");
-    // tokenSecret is optional when using key-based authentication
+    // We only use key-based authentication now
     if (!relayConfig.vpsUrl)
       throw new Error("RelayServer: vpsUrl must be set via env");
 
     // 5. Start relay server
     console.log(`[DEV-SERVER] Starting relay server on port ${relayPort}`);
     console.log(`[DEV-SERVER] VPS URL: ${relayConfig.vpsUrl || 'NOT SET'}`);
-    console.log(`[DEV-SERVER] Token Secret: ${relayConfig.tokenSecret ? '*** (set)' : 'NOT SET'}`);
+    console.log(`[DEV-SERVER] Authentication: key-based`);
     
-    // Use the correct VPS URL
-    relayConfig.vpsUrl = 'ws://compendiumnav.com:3002/relay';
+    // Use the URL from environment configuration
     console.log(`[DEV-SERVER] Using VPS URL: ${relayConfig.vpsUrl}`);
     
-    // Remove tokenSecret to force key-based authentication
-    relayConfig.tokenSecret = null;
-    console.log(`[DEV-SERVER] Forcing key-based authentication (no token secret)`);
+    // Using key-based authentication
+    console.log(`[DEV-SERVER] Using key-based authentication`);
     
-    // Set reasonable connection parameters
-    relayConfig.reconnectInterval = 5000; // 5 seconds
-    relayConfig.maxRetries = 5; // Try 5 times
+    // Set connection parameters from environment
+    relayConfig.reconnectInterval = parseInt(process.env.RECONNECT_DELAY, 10);
+    relayConfig.maxRetries = parseInt(process.env.MAX_RETRIES, 10);
     
     const relayServer = await startRelayServer(relayConfig);
     
@@ -167,7 +179,10 @@ async function startDevServer() {
     await startDirectServerWrapper(directConfig);
 
     // 7. Start HTTP server
-    const PORT = process.env.PORT || 3009;
+    const PORT = parseInt(process.env.PORT, 10);
+    if (isNaN(PORT)) {
+      throw new Error('PORT must be a valid number');
+    }
     const httpServer = http.createServer();
     httpServer.listen(PORT, () => {
       console.log(`[DEV-SERVER] HTTP server listening on port ${PORT}`);

@@ -394,6 +394,8 @@ configure_environment() {
     # VPS connection configuration
     set_env_var "VPS_HOST" "compendiumnav.com"
     set_env_var "VPS_PATH" "/relay"
+    # Force WSS (secure WebSockets) for production
+    set_env_var "VPS_WS_PORT" "443"  # SSL port for secure WebSockets
     
     # WebSocket connection settings
     set_env_var "VPS_PING_INTERVAL" "25000"  # 25 seconds between pings

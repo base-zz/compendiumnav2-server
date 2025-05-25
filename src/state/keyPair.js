@@ -113,11 +113,28 @@ export async function registerPublicKeyWithVPS(vpsUrl) {
     const keyPair = getOrCreateKeyPair();
     const boatId = getOrCreateAppUuid();
     
-    // Extract hostname from the WebSocket URL
-    // Format: ws://hostname:port/path -> http://hostname
-    // Use default HTTP port (80) for the API
-    const hostname = vpsUrl.match(/^ws:\/\/([^:]+)/i)[1];
-    const apiBaseUrl = `http://${hostname}`;
+    // Extract hostname from the WebSocket URL and determine protocol
+    // Format: ws(s)://hostname:port/path -> http(s)://hostname
+    let hostname;
+    let protocol;
+    
+    // Check if it's a secure WebSocket URL (wss://)
+    const secureMatch = vpsUrl.match(/^wss:\/\/([^:/]+)/i);
+    if (secureMatch) {
+      hostname = secureMatch[1];
+      protocol = 'https';
+    } else {
+      // Try to match non-secure WebSocket URL (ws://)
+      const insecureMatch = vpsUrl.match(/^ws:\/\/([^:/]+)/i);
+      if (insecureMatch) {
+        hostname = insecureMatch[1];
+        protocol = 'http';
+      } else {
+        throw new Error(`Invalid WebSocket URL format: ${vpsUrl}`);
+      }
+    }
+    
+    const apiBaseUrl = `${protocol}://${hostname}`;
     console.log(`[KEY-PAIR] API base URL: ${apiBaseUrl}`);
     
     const registrationUrl = `${apiBaseUrl}/api/boat/register-key`;

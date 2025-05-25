@@ -1,7 +1,7 @@
 // src/relay/server/index.js
 
 import dotenv from "dotenv";
-dotenv.config({ path: process.env.RELAY_ENV_PATH || ".env.server" });
+dotenv.config({ path: ".env" });
 
 import { RelayServer } from './RelayServer.js';
 import { startDirectServer } from './DirectServer.js';

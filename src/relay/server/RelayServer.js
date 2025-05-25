@@ -9,7 +9,7 @@ export class RelayServer extends EventEmitter {
 
     // Validate configuration
     if (!config.port) throw new Error("RelayServer: port must be provided in config");
-    // tokenSecret is optional when using key-based authentication
+    // We only use key-based authentication now
     if (!config.vpsUrl) throw new Error("RelayServer: vpsUrl is required");
 
     this.config = {
@@ -29,7 +29,7 @@ export class RelayServer extends EventEmitter {
 
     // Initialize services
     this.vpsConnector = new VPSConnector({
-      tokenSecret: this.config.tokenSecret,
+      // No tokenSecret needed for key-based authentication
       vpsUrl: this.config.vpsUrl,
       reconnectInterval: this.config.vpsReconnectInterval,
       maxRetries: this.config.vpsMaxRetries
@@ -43,7 +43,7 @@ export class RelayServer extends EventEmitter {
 
     // Setup maintenance intervals
     this._maintenanceIntervals = {
-      tokenRefresh: setInterval(() => this._refreshVpsConnection(), 86400000), // 24 hours
+      connectionRefresh: setInterval(() => this._refreshVpsConnection(), 86400000), // 24 hours
       bufferMonitor: setInterval(() => this._monitorBuffer(), 60000) // 1 minute
     };
   }
@@ -52,7 +52,7 @@ export class RelayServer extends EventEmitter {
     try {
       console.log("[RELAY] Initializing relay server");
       console.log(`[RELAY] VPS URL: ${this.config.vpsUrl}`);
-      console.log(`[RELAY] Using token secret: ${this.config.tokenSecret ? 'YES' : 'NO'}`);
+      console.log(`[RELAY] Using authentication: key-based`);
       
       // Connect to VPS
       console.log("[RELAY] Attempting to connect to VPS...");
@@ -217,7 +217,7 @@ export class RelayServer extends EventEmitter {
   }
 
   _refreshVpsConnection() {
-    console.log("[RELAY] Refreshing VPS connection");
+    console.log("[RELAY] Refreshing VPS connection with key-based authentication");
     this.vpsConnector.disconnect();
     this.vpsConnector.connect().catch(error => {
       console.error("[RELAY] VPS reconnection failed:", error);
