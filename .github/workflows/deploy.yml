@@ -4,30 +4,38 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
-    # Allows manual triggering of the workflow
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
     
     # Configure .env file for key-based authentication and secure connections
     - name: Configure .env file for secure deployment
+      env:
+        VPS_HOST: ${{ secrets.VPS_HOST }}
+        VPS_PATH: ${{ secrets.VPS_PATH || '/relay' }}
+        VPS_PING_INTERVAL: ${{ secrets.VPS_PING_INTERVAL || '25000' }}
+        VPS_CONNECTION_TIMEOUT: ${{ secrets.VPS_CONNECTION_TIMEOUT || '30000' }}
       run: |
         # Remove any TOKEN_SECRET entries to enforce key-based authentication
         sed -i '/^TOKEN_SECRET=/d' .env || true
         
         # Configure WebSocket connection settings
-        echo "VPS_PATH=/relay" >> .env
-        echo "VPS_PING_INTERVAL=25000" >> .env
-        echo "VPS_CONNECTION_TIMEOUT=30000" >> .env
+        if [ -n "$VPS_HOST" ]; then
+          echo "VPS_HOST=$VPS_HOST" >> .env
+        fi
+        
+        echo "VPS_PATH=${VPS_PATH}" >> .env
+        echo "VPS_PING_INTERVAL=${VPS_PING_INTERVAL}" >> .env
+        echo "VPS_CONNECTION_TIMEOUT=${VPS_CONNECTION_TIMEOUT}" >> .env
         
         # In production, force WSS by setting port to 443
         echo "VPS_WS_PORT=443" >> .env
         
-        # Show what's in the .env file
+        # Show what's in the .env file (without sensitive values)
         echo "Updated .env file with these variables:"
         cat .env | cut -d= -f1
     
@@ -41,12 +49,43 @@ jobs:
         mkdir -p deployment
         tar -czf deployment/compendium-deploy.tar.gz --exclude=node_modules --exclude=.git --exclude=deployment .
         
-        # Create a simple version info file
-        echo "$(date -u +'%Y%m%d%H%M%S')-$(git rev-parse --short HEAD)" > deployment/version.txt
+        # List the created files
+        ls -la deployment/
+        
+        # Store package info for debugging
+        echo "Deployment package created at $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+        echo "Commit: $(git rev-parse --short HEAD)" >> $GITHUB_STEP_SUMMARY
     
     # Upload the artifact using GitHub's built-in artifact storage
     - name: Upload artifact
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: compendium-deploy
         path: deployment/compendium-deploy.tar.gz
+        retention-days: 7
+        
+    # Create a GitHub release with the deployment package
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: deploy-${{ github.run_number }}
+        release_name: Deployment ${{ github.run_number }}
+        body: |
+          Automated deployment package created from commit ${{ github.sha }}
+          Created at $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+        draft: false
+        prerelease: false
+    
+    # Upload deployment package to the release
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./deployment/compendium-deploy.tar.gz
+        asset_name: compendium-deploy.tar.gz
+        asset_content_type: application/gzip
