@@ -11,7 +11,8 @@ import {
   createBoat, 
   associateUserWithBoat, 
   getBoatsForUser,
-  registerBoatKey
+  registerBoatKey,
+  registerClientKey
 } from './database.js';
 import { 
   hashPassword, 
@@ -68,6 +69,35 @@ router.post("/api/login", async (req, res) => {
   const token = generateToken({ username, boats: userBoats });
   
   res.json({ success: true, token, boats: userBoats });
+});
+
+// KEY-BASED USER LOGIN
+router.post("/api/user-login", async (req, res) => {
+  const { username, password, clientId } = req.body;
+  
+  if (!username || !password) {
+    return res
+      .status(400)
+      .json({ success: false, error: "Username and password required" });
+  }
+  
+  // Validate user credentials
+  const user = await findUserByUsername(username);
+  if (!user || user.passwordHash !== hashPassword(password)) {
+    return res
+      .status(401)
+      .json({ success: false, error: "Invalid credentials" });
+  }
+  
+  // Get user's boats
+  const userBoats = await getBoatsForUser(username);
+  
+  // Return success response with boats but no token
+  res.json({ 
+    success: true, 
+    message: "Login successful",
+    boats: userBoats 
+  });
 });
 
 // BOAT REGISTRATION
@@ -132,6 +162,40 @@ router.post("/api/boat/register-key", async (req, res) => {
   res.json({
     success: true,
     message: "Public key registered successfully",
+    boatId,
+  });
+});
+
+// CLIENT PUBLIC KEY REGISTRATION
+router.post("/api/client/register-key", async (req, res) => {
+  const { clientId, boatId, publicKey } = req.body;
+
+  if (!clientId || !boatId || !publicKey) {
+    return res.status(400).json({
+      success: false,
+      error: "clientId, boatId, and publicKey are required",
+    });
+  }
+
+  // Check if boat exists - if not, create it as an unregistered boat
+  let boat = await findBoatById(boatId);
+  if (!boat) {
+    boat = {
+      boatId,
+      boatName: `Unregistered Boat ${boatId.substring(0, 8)}`,
+      createdAt: new Date().toISOString(),
+      isUnregistered: true,
+    };
+    await createBoat(boat);
+  }
+
+  // Register the client key
+  await registerClientKey(clientId, publicKey, boatId);
+  
+  res.json({
+    success: true,
+    message: "Client public key registered successfully",
+    clientId,
     boatId,
   });
 });
@@ -227,6 +291,23 @@ router.get("/health", (req, res) => {
     version: process.env.npm_package_version,
     uptime: process.uptime(),
   });
+});
+
+// In api-routes.js
+router.post("/api/client-logs", async (req, res) => {
+  const { deviceId, logs } = req.body;
+  
+  // Log to server console
+  console.log(`[CLIENT-LOGS] Received ${logs.length} logs from device ${deviceId}`);
+  
+  // Log each entry to server console
+  logs.forEach(log => {
+    console.log(`[${deviceId}][${log.timestamp}][${log.category}] ${log.message}`, log.data || '');
+  });
+  
+  // You could also store these in a file or database
+  
+  res.json({ success: true });
 });
 
 export default router;

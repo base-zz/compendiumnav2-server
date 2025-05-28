@@ -15,6 +15,7 @@ const db = new Low(adapter, {
   boats: [],
   user_boats: [],
   boat_keys: [],
+  client_keys: [], // New collection for client keys
 });
 
 /**
@@ -28,6 +29,7 @@ export async function initDatabase() {
   if (!db.data.boats) db.data.boats = [];
   if (!db.data.user_boats) db.data.user_boats = [];
   if (!db.data.boat_keys) db.data.boat_keys = [];
+  if (!db.data.client_keys) db.data.client_keys = [];
   
   await db.write();
   console.log("[DB] Database initialized");
@@ -142,4 +144,65 @@ export async function getBoatPublicKey(boatId) {
   await db.read();
   const keyEntry = db.data.boat_keys.find(k => k.boatId === boatId);
   return keyEntry ? keyEntry.publicKey : null;
+}
+
+/**
+ * Register or update a client's public key
+ * @param {string} clientId - Unique identifier for the client
+ * @param {string} publicKey - Client's public key in PEM format
+ * @param {string} boatId - ID of the boat the client is associated with
+ * @returns {Promise<boolean>} - Success status
+ */
+export async function registerClientKey(clientId, publicKey, boatId) {
+  await db.read();
+  
+  // Ensure client_keys exists
+  if (!db.data.client_keys) {
+    db.data.client_keys = [];
+  }
+  
+  // Update or create key entry
+  const existingKeyIndex = db.data.client_keys.findIndex(k => 
+    k.clientId === clientId && k.boatId === boatId
+  );
+  
+  if (existingKeyIndex >= 0) {
+    db.data.client_keys[existingKeyIndex].publicKey = publicKey;
+    db.data.client_keys[existingKeyIndex].updatedAt = new Date().toISOString();
+  } else {
+    db.data.client_keys.push({
+      clientId,
+      boatId,
+      publicKey,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  
+  await db.write();
+  return true;
+}
+
+/**
+ * Get a client's public key for a specific boat
+ * @param {string} clientId - Unique identifier for the client
+ * @param {string} boatId - ID of the boat the client is associated with
+ * @returns {Promise<string|null>} - Public key or null if not found
+ */
+export async function getClientPublicKey(clientId, boatId) {
+  await db.read();
+  const keyEntry = db.data.client_keys.find(k => 
+    k.clientId === clientId && k.boatId === boatId
+  );
+  return keyEntry ? keyEntry.publicKey : null;
+}
+
+/**
+ * Get all client keys for a specific boat
+ * @param {string} boatId - ID of the boat
+ * @returns {Promise<Array>} - Array of client key entries
+ */
+export async function getClientKeysForBoat(boatId) {
+  await db.read();
+  return db.data.client_keys.filter(k => k.boatId === boatId);
 }

@@ -119,7 +119,10 @@ export class VPSConnector extends EventEmitter {
     }
 
     const boatId = getOrCreateAppUuid();
-    console.log(`[VPS-DEBUG] Creating identity message for boat ${boatId}`);
+    console.log(`[VPS-CONNECTOR-DEBUG] Creating identity message for boat ${boatId}`);
+    console.log(`[VPS-CONNECTOR-DEBUG] This boatId must match the one clients are using to connect`);
+    // Store the boatId for reference
+    this.boatId = boatId;
     
     // Create the identity message
     const timestamp = Date.now();
@@ -301,13 +304,18 @@ export class VPSConnector extends EventEmitter {
             if (message.type === "connectionStatus") {
               const { boatId, clientCount } = message;
               console.log(
-                `[VPS-CONNECTOR] Client count for boat ${boatId}: ${clientCount}`
+                `[VPS-CONNECTOR] Received connectionStatus message from VPS: boat ${boatId}, clients: ${clientCount}`
               );
+              
+              // Log the full message for debugging
+              console.log(`[VPS-CONNECTOR] Full connectionStatus message:`, JSON.stringify(message));
               
               // Update our internal client count
               this._clientCount = clientCount;
+              console.log(`[VPS-CONNECTOR] Updated internal client count to ${this._clientCount}`);
 
               // Emit a new event type for connection status
+              console.log(`[VPS-CONNECTOR] Emitting connectionStatus event: boat ${boatId}, clients: ${clientCount}`);
               this.emit("connectionStatus", { boatId, clientCount });
             } else if (message.type === "pong") {
               // Calculate round-trip latency
@@ -478,7 +486,30 @@ _shouldSkipMessage(data) {
 _sendSingle(data) {
   try {
     const payload = typeof data === "string" ? data : JSON.stringify(data);
+    
+    // Extract message details for logging
+    let messageDetails = {};
+    if (typeof data === "object") {
+      messageDetails = {
+        type: data.type,
+        messageId: data.id || 'unknown',
+        timestamp: new Date().toISOString(),
+        dataSize: payload.length
+      };
+      console.log(`[VPS-CONNECTOR] Sending message to VPS:`, messageDetails);
+    } else {
+      console.log(`[VPS-CONNECTOR] Sending raw message to VPS, size: ${payload.length} bytes`);
+    }
+    
     this.connection.send(payload);
+    
+    // Log successful send
+    if (typeof data === "object" && data.type) {
+      console.log(`[VPS-CONNECTOR] Successfully sent ${data.type} message to VPS`);
+    } else {
+      console.log(`[VPS-CONNECTOR] Successfully sent message to VPS`);
+    }
+    
     return true;
   } catch (error) {
     console.error("[VPS-CONNECTOR] Single message send failed:", error);

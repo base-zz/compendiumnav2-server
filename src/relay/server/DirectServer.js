@@ -92,8 +92,9 @@ async function startDirectServer(options = {}) {
     // Wrap the send function to log outgoing messages
     const originalSend = ws.send;
     ws.send = function(data) {
-      const message = data.length > 200 ? data.substring(0, 200) + '...' : data;
-      console.log(`[DIRECT] Sending to ${clientId}:`, message);
+      // Uncomment for debugging - this gets very noisy with frequent state updates
+      // const message = data.length > 200 ? data.substring(0, 200) + '...' : data;
+      // console.log(`[DIRECT] Sending to ${clientId}:`, message);
       originalSend.apply(this, arguments);
     };
     
