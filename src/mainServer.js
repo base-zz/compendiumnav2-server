@@ -1,8 +1,15 @@
 import dotenv from "dotenv";
 import http from "http";
+import express from "express";
+import fetch from 'node-fetch';
 import { stateService, setStateManager } from "./state/StateService.js";
 import { startRelayServer, startDirectServer } from "./relay/server/index.js";
 import { stateManager } from "./relay/core/state/StateManager.js";
+import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
+import { registerVpsRoutes } from "./server/vps/registration.js";
+import debug from 'debug';
+
+const log = debug('compendium:server:main');
 
 // Set up circular dependency
 setStateManager(stateManager);
@@ -98,13 +105,71 @@ async function startServer() {
     // 3. Start relay server
     await startRelayServer(relayConfig);
 
-    // 4. Start HTTP server (if you have an httpServer setup)
-    // If you don't have an httpServer, you can remove/comment this block
-    const PORT = process.env.PORT || 8080;
-    const httpServer = http.createServer();
-    httpServer.listen(PORT, () => {
-      console.log(`[SERVER] Listening on port ${PORT}`);
+    // 4. Create and configure Express app for API endpoints
+    const app = express();
+    app.use(express.json());
+    
+    // Register API routes
+    registerBoatInfoRoutes(app);
+    registerVpsRoutes(app, { vpsUrl: relayConfig.vpsUrl });
+    
+    // Simple health check endpoint
+    app.get('/health', (req, res) => {
+      res.json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        version: process.env.npm_package_version
+      });
     });
+    
+    // Add request logging in development
+    if (process.env.NODE_ENV !== 'production') {
+      app.use((req, res, next) => {
+        log(`${req.method} ${req.path}`);
+        next();
+      });
+    }
+    
+    // 5. Start HTTP server
+    const PORT = process.env.PORT || 8080;
+    const httpServer = http.createServer(app);
+    httpServer.listen(PORT, '0.0.0.0', () => {
+      const host = `http://localhost:${PORT}`;
+      console.log(`[SERVER] HTTP server listening on port ${PORT}`);
+      console.log(`[SERVER] API endpoints:`);
+      console.log(`  - ${host}/api/boat-info - Get boat information`);
+      console.log(`  - ${host}/api/vps/health - VPS connection health`);
+      console.log(`  - ${host}/api/vps/register - Register with VPS`);
+      console.log(`  - ${host}/health - Server health check`);
+    });
+    
+    // Auto-register with VPS on startup if configured
+    if (process.env.VPS_AUTO_REGISTER === 'true') {
+      log('Auto-registration with VPS is enabled');
+      // Small delay to ensure the server is fully up
+      setTimeout(async () => {
+        try {
+          const boatInfo = getBoatInfo();
+          log(`Attempting auto-registration with VPS for boat ${boatInfo.boatId}`);
+          
+          // Auto-register with VPS
+          const response = await fetch(`http://localhost:${PORT}/api/vps/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+          });
+          
+          if (response.ok) {
+            const result = await response.json();
+            log('Auto-registration with VPS successful:', result);
+          } else {
+            const error = await response.json().catch(() => ({}));
+            log('Auto-registration with VPS failed:', error);
+          }
+        } catch (error) {
+          log('Auto-registration with VPS failed:', error);
+        }
+      }, 5000); // 5 second delay
+    }
 
     // 5. Relay state updates to VPS (optional, placeholder for future logic)
     stateService.on("state-updated", (data) => {

@@ -4,9 +4,16 @@ import './module-alias.js';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
+import express from 'express';
 import stateServiceDemo from './state/StateServiceDemo.js';
 import { startRelayServer, startDirectServerWrapper } from './relay/server/index.js';
+import { registerBoatInfoRoutes, getBoatInfo } from './server/api/boatInfo.js';
+import { registerVpsRoutes } from './server/vps/registration.js';
+import debug from 'debug';
 import http from 'http';
+import fetch from 'node-fetch';
+
+const log = debug('compendium:dev-server');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -178,15 +185,271 @@ async function startDevServer() {
     console.log(`[DEV-SERVER] Starting direct server on port ${directPort}`);
     await startDirectServerWrapper(directConfig);
 
-    // 7. Start HTTP server
-    const PORT = parseInt(process.env.PORT, 10);
+    // 7. Create Express app and set up API routes
+    const app = express();
+    
+    // Middleware
+    app.use(express.json());
+    app.use((req, res, next) => {
+      console.log(`[HTTP] ${new Date().toISOString()} ${req.method} ${req.url}`);
+      next();
+    });
+    
+    // Enable CORS for all routes
+    app.use((req, res, next) => {
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+      next();
+    });
+    
+    // Simple root endpoint
+    app.get('/', (req, res) => {
+      res.json({
+        status: 'running',
+        timestamp: new Date().toISOString(),
+        endpoints: [
+          '/api/boat-info',
+          '/api/vps/register',
+          '/api/vps/health'
+        ]
+      });
+    });
+    
+    // Register API routes
+    registerBoatInfoRoutes(app);
+    
+    // Build VPS URL from environment variables
+    const vpsUrl = (() => {
+      if (process.env.VPS_URL) return process.env.VPS_URL;
+      if (process.env.RELAY_SERVER_URL) return process.env.RELAY_SERVER_URL;
+      if (process.env.VPS_HOST) {
+        const proto = process.env.VPS_WS_PORT === "443" ? "https" : "http";
+        const host = process.env.VPS_HOST;
+        const port =
+          process.env.VPS_WS_PORT &&
+          process.env.VPS_WS_PORT !== "80" &&
+          process.env.VPS_WS_PORT !== "443"
+            ? `:${process.env.VPS_WS_PORT}`
+            : "";
+        const path = process.env.VPS_PATH || "/api/register";
+        return `${proto}://${host}${port}${path}`;
+      }
+      return undefined;
+    })();
+    
+    if (vpsUrl) {
+      log(`Using VPS URL: ${vpsUrl}`);
+      registerVpsRoutes(app, { vpsUrl });
+    } else {
+      log('No VPS URL configured. VPS registration will be disabled.');
+    }
+    
+    // 8. Start HTTP server with Express
+    const PORT = parseInt(process.env.PORT || '3000', 10);
     if (isNaN(PORT)) {
       throw new Error('PORT must be a valid number');
     }
-    const httpServer = http.createServer();
-    httpServer.listen(PORT, () => {
-      console.log(`[DEV-SERVER] HTTP server listening on port ${PORT}`);
+    
+    log(`[DEBUG] Configured HTTP server port: ${PORT}`);
+    
+    const httpServer = http.createServer(app);
+    
+    // Add error handler for the HTTP server
+    httpServer.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        log(`[ERROR] Port ${PORT} is already in use. Please check for other running instances.`);
+      } else {
+        log(`[ERROR] HTTP server error: ${error.message}`);
+      }
+      process.exit(1);
     });
+    
+    log(`[DEBUG] Attempting to start HTTP server on port ${PORT}...`);
+    
+    // Start the HTTP server
+    httpServer.listen(PORT, '0.0.0.0', () => {
+      const address = httpServer.address();
+      console.log(`[HTTP] Server started on port ${PORT}`);
+      console.log(`[HTTP] Access the API at http://localhost:${PORT}/`);
+      console.log('\nAvailable endpoints:');
+      console.log(`  GET  http://localhost:${PORT}/api/boat-info`);
+      console.log(`  POST http://localhost:${PORT}/api/vps/register`);
+      console.log(`  GET  http://localhost:${PORT}/api/vps/health\n`);
+    });
+    
+    httpServer.on('error', (error) => {
+      console.error('[HTTP] Server error:', error);
+      if (error.code === 'EADDRINUSE') {
+        console.error(`[ERROR] Port ${PORT} is already in use. Please stop the other process or use a different port.`);
+      }
+      process.exit(1);
+    });
+
+    console.log("[DEV-SERVER] Development server started successfully");
+  } catch (error) {
+}
+    
+const relayPort = parseInt(process.env.DEV_RELAY_PORT, 10);
+const directPort = parseInt(process.env.DIRECT_WS_PORT, 10);
+    
+if (isNaN(relayPort) || isNaN(directPort)) {
+  throw new Error('DEV_RELAY_PORT and DIRECT_WS_PORT must be valid numbers');
+}
+    
+console.log(`[DEV-SERVER] Starting WebSocket server on port ${directPort}`);
+    
+// Ensure the relay port is different from the direct port
+const relayPortFinal = relayPort === directPort ? directPort + 1 : relayPort;
+
+const relayConfig = {
+  port: relayPortFinal,
+  signalKRefreshRate: parseInt(process.env.DEV_SIGNALK_REFRESH_RATE, 10),
+  defaultThrottleRate: parseInt(process.env.DEV_DEFAULT_THROTTLE_RATE, 10),
+  // Key-based authentication is now used exclusively
+  vpsUrl: buildVpsUrl(),
+};
+
+const directConfig = {
+  port: directPort,
+  host: process.env.DIRECT_WS_HOST,
+  maxPayload: parseInt(process.env.DEV_MAX_PAYLOAD_SIZE, 10)
+};
+if (!relayConfig.port || isNaN(relayConfig.port))
+  throw new Error("RelayServer: port must be set via env");
+// We only use key-based authentication now
+if (!relayConfig.vpsUrl)
+  throw new Error("RelayServer: vpsUrl must be set via env");
+
+// 5. Start relay server
+console.log(`[DEV-SERVER] Starting relay server on port ${relayPort}`);
+console.log(`[DEV-SERVER] VPS URL: ${relayConfig.vpsUrl || 'NOT SET'}`);
+console.log(`[DEV-SERVER] Authentication: key-based`);
+    
+// Use the URL from environment configuration
+console.log(`[DEV-SERVER] Using VPS URL: ${relayConfig.vpsUrl}`);
+    
+// Using key-based authentication
+console.log(`[DEV-SERVER] Using key-based authentication`);
+    
+// Set connection parameters from environment
+relayConfig.reconnectInterval = parseInt(process.env.RECONNECT_DELAY, 10);
+relayConfig.maxRetries = parseInt(process.env.MAX_RETRIES, 10);
+  
+const relayServer = await startRelayServer(relayConfig);
+  
+// Log when the relay server connects to the VPS
+if (relayServer && relayServer.vpsConnector) {
+  relayServer.vpsConnector.on('connected', () => {
+    console.log(`[DEV-SERVER] Successfully connected to VPS at ${relayConfig.vpsUrl}`);
+  });
+  
+  relayServer.vpsConnector.on('disconnected', () => {
+    console.log(`[DEV-SERVER] Disconnected from VPS`);
+  });
+  
+  relayServer.vpsConnector.on('error', (error) => {
+    console.error(`[DEV-SERVER] VPS connection error:`, error.message);
+  });
+}
+
+// 6. Start direct server
+console.log(`[DEV-SERVER] Starting direct server on port ${directPort}`);
+await startDirectServerWrapper(directConfig);
+
+// 7. Create Express app and set up API routes
+const app = express();
+  
+// Middleware
+app.use(express.json());
+app.use((req, res, next) => {
+  console.log(`[HTTP] ${new Date().toISOString()} ${req.method} ${req.url}`);
+  next();
+});
+  
+// Enable CORS for all routes
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  next();
+});
+  
+// Simple root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    status: 'running',
+    timestamp: new Date().toISOString(),
+    endpoints: [
+      '/api/boat-info',
+      '/api/vps/register',
+      '/api/vps/health'
+    ]
+  });
+});
+  
+// Register API routes
+registerBoatInfoRoutes(app);
+  
+// Build VPS URL from environment variables
+const vpsUrl = (() => {
+  if (process.env.VPS_URL) return process.env.VPS_URL;
+  if (process.env.RELAY_SERVER_URL) return process.env.RELAY_SERVER_URL;
+  if (process.env.VPS_HOST) {
+    const proto = process.env.VPS_WS_PORT === "443" ? "https" : "http";
+    const host = process.env.VPS_HOST;
+    const port =
+      process.env.VPS_WS_PORT &&
+      process.env.VPS_WS_PORT !== "80" &&
+      process.env.VPS_WS_PORT !== "443"
+        ? `:${process.env.VPS_WS_PORT}`
+        : "";
+    const path = process.env.VPS_PATH || "/api/register";
+    return `${proto}://${host}${port}${path}`;
+  }
+  return undefined;
+})();
+  
+if (vpsUrl) {
+  log(`Using VPS URL: ${vpsUrl}`);
+  registerVpsRoutes(app, { vpsUrl });
+} else {
+  log('No VPS URL configured. VPS registration will be disabled.');
+}
+  
+// 8. Start HTTP server with Express
+const PORT = parseInt(process.env.PORT || '3000', 10);
+if (isNaN(PORT)) {
+  throw new Error('PORT must be a valid number');
+}
+  
+log(`[DEBUG] Configured HTTP server port: ${PORT}`);
+  
+const httpServer = http.createServer(app);
+  
+// Add error handler for the HTTP server
+httpServer.on('error', (error) => {
+  console.error('[HTTP] Server error:', error);
+  if (error.code === 'EADDRINUSE') {
+    console.error(`[ERROR] Port ${PORT} is already in use. Please stop the other process or use a different port.`);
+  } else {
+    console.error(`[ERROR] HTTP server error: ${error.message}`);
+  }
+  process.exit(1);
+});
+  
+log(`[DEBUG] Attempting to start HTTP server on port ${PORT}...`);
+  
+// Start the HTTP server
+httpServer.listen(PORT, '0.0.0.0', () => {
+  const address = httpServer.address();
+  console.log(`[HTTP] Server started on port ${PORT}`);
+  console.log(`[HTTP] Access the API at http://localhost:${PORT}/`);
+  console.log('\nAvailable endpoints:');
+  console.log(`  GET  http://localhost:${PORT}/api/boat-info`);
+  console.log(`  POST http://localhost:${PORT}/api/vps/register`);
+  console.log(`  GET  http://localhost:${PORT}/api/vps/health\n`);
+
+  console.log("[DEV-SERVER] Development server started successfully");
+});
 
     console.log("[DEV-SERVER] Development server started successfully");
   } catch (error) {
@@ -195,4 +458,8 @@ async function startDevServer() {
   }
 }
 
-startDevServer();
+// Enable debug output for our services
+debug.enable('cn2:*');
+
+// Start the dev server
+startDevServer().catch(console.error);

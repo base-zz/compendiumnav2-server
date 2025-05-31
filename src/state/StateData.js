@@ -99,7 +99,59 @@ export const stateData = {
       this.convertSpeedValues();
       this.convertWindValues();
       this.convertAnchorValues();
-      this.convertDepthValues(); // Add this line
+      this.convertDepthValues();
+      this.convertMarineValues();
+    },
+    
+    // Convert marine data values
+    convertMarineValues() {
+      const { current, tides, forecast } = stateData.state().environment.marine || {};
+      
+      // Convert current values
+      if (current) {
+        // Sea level and wave heights
+        ['seaLevelHeightMsl', 'waveHeight', 'windWaveHeight'].forEach(field => {
+          if (current[field]?.value !== null && current[field]?.value !== undefined) {
+            current[field].feet = this.mToFeet(current[field].value);
+            current[field].nauticalMiles = this.mToNauticalMiles(current[field].value);
+          }
+        });
+        
+        // Convert directions from radians to degrees if needed
+        ['waveDirection', 'windWaveDirection'].forEach(field => {
+          if (current[field]?.value !== null && current[field]?.value !== undefined) {
+            current[field].degrees = this.radToDeg(current[field].value);
+          }
+        });
+      }
+      
+      // Convert tide heights
+      if (tides) {
+        ['nextHigh', 'nextLow'].forEach(tide => {
+          if (tides[tide]?.height?.value !== null && tides[tide]?.height?.value !== undefined) {
+            tides[tide].height.feet = this.mToFeet(tides[tide].height.value);
+            tides[tide].height.nauticalMiles = this.mToNauticalMiles(tides[tide].height.value);
+          }
+        });
+      }
+      
+      // Convert forecast values
+      if (forecast) {
+        // Convert sea level and wave heights
+        ['seaLevelHeightMsl', 'waveHeight', 'windWaveHeight'].forEach(field => {
+          if (Array.isArray(forecast[field])) {
+            forecast[`${field}Feet`] = forecast[field].map(val => val !== null ? this.mToFeet(val) : null);
+            forecast[`${field}NauticalMiles`] = forecast[field].map(val => val !== null ? this.mToNauticalMiles(val) : null);
+          }
+        });
+        
+        // Convert directions from radians to degrees if needed
+        ['waveDirection', 'windWaveDirection'].forEach(field => {
+          if (Array.isArray(forecast[field])) {
+            forecast[`${field}Degrees`] = forecast[field].map(val => val !== null ? this.radToDeg(val) : null);
+          }
+        });
+      }
     },
 
     convertAnchorValues() {

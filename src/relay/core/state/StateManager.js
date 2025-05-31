@@ -124,6 +124,40 @@ export class StateManager extends EventEmitter {
    */
   emitFullState() {
     // Always emit full state updates regardless of client count
+    const timestamp = new Date().toISOString();
+    
+    // Log summary of state update
+    const stateSummary = {
+      timestamp,
+      state: {
+        navigation: this.appState.navigation ? {
+          position: this.appState.navigation.position,
+          speedOverGround: this.appState.navigation.speedOverGround,
+          courseOverGround: this.appState.navigation.courseOverGround
+        } : null,
+        environment: this.appState.environment ? {
+          wind: this.appState.environment.wind,
+          depth: this.appState.environment.depth,
+          weather: this.appState.environment.weather ? {
+            current: this.appState.environment.weather.current ? {
+              temperature: this.appState.environment.weather.current.temperature,
+              windSpeed: this.appState.environment.weather.current.windSpeed
+            } : null,
+            _items: this.appState.environment.weather.hourly?.time?.length || 0
+          } : null,
+          marine: this.appState.environment.marine ? {
+            current: this.appState.environment.marine.current ? {
+              seaLevelHeightMsl: this.appState.environment.marine.current.seaLevelHeightMsl,
+              waveHeight: this.appState.environment.marine.current.waveHeight
+            } : null,
+            _items: this.appState.environment.marine.forecast?.time?.length || 0
+          } : null
+        } : null,
+        _clientCount: this._clientCount
+      }
+    };
+    
+    console.log('[StateManager] Emitting full state update:', JSON.stringify(stateSummary, null, 2));
 
     const payload = {
       type: "state:full-update",

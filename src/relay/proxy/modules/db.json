@@ -1,0 +1,109 @@
+GNU nano 7.2                                                                                                                                                                                                                                                                         db.json                                                                                                                                                                                                                                                                                   
+{
+  "users": [
+    {
+      "username": "alice",
+      "passwordHash": "17406e11c3af2ba6ebb2bc008b892892b73fc3e260eb6ef202794a8e507d0c1e",
+      "email": "alice@example.com"
+    },
+    {
+      "username": "bob",
+      "passwordHash": "9f6567a6d8a2eae61a1139b193c981dd6fcc2399f07760dec8de3d469decf5aa",
+      "email": "bob@example.com"
+    },
+    {
+      "username": "basselhajj@gmail.com",
+      "passwordHash": "7265f908f4593a244ff7a65718bbcb8fcc7824ca09d787bacfbbb06bbd946ce2",
+      "email": "basselhajj@gmail.com"
+    }
+  ],
+  "boats": [
+    {
+      "boatId": "56aef797-f589-42a8-a209-3ff44642591c",
+      "name": "AliceBoat",
+      "registeredBy": "alice"
+    },
+    {
+      "boatId": "9c2331ec-128d-4dd9-bcdf-c0f48eb8020e",
+      "name": "TestBoat",
+      "registeredBy": "alice"
+    },
+    {
+      "boatId": "45a6724a-5d43-4a22-b0fa-f3e4114b4ccf",
+      "boatName": "True Colors",
+      "boatType": "Sailboat",
+      "loa": 12.81,
+      "beam": 6.4,
+      "draft": 1.22,
+      "airDraft": 18,
+      "mmsi": "368380870",
+      "registeredBy": "basselhajj@gmail.com",
+      "createdAt": "2025-04-19T21:03:20.827Z"
+    },
+    {
+      "boatId": "d9e81fe5-9ef4-4cdd-906c-f9968145d5a1",
+      "boatName": "Unregistered Boat d9e81fe5",
+      "createdAt": "2025-05-24T21:08:02.176Z",
+      "isUnregistered": true
+    }
+  ],
+  "user_boats": [
+    {
+      "username": "alice",
+      "boatId": "56aef797-f589-42a8-a209-3ff44642591c"
+    },
+    {
+      "username": "alice",
+      "boatId": "9c2331ec-128d-4dd9-bcdf-c0f48eb8020e"
+    },
+    {
+      "username": "basselhajj@gmail.com",
+      "boatId": "45a6724a-5d43-4a22-b0fa-f3e4114b4ccf"
+    },
+    {
+      "username": "basselhajj@gmail.com",
+      "boatId": "d9e81fe5-9ef4-4cdd-906c-f9968145d5a1"
+    }
+  ],
+  "boat_keys": [
+    {
+      "boatId": "45a6724a-5d43-4a22-b0fa-f3e4114b4ccf",
+      "publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2TErj+dIWo8d8PD3L3yA\nohzUjZ56gwHaKsMsV2pYAQH/OsQZedwoTVamE9D8LfmKQfVPb8oifLkIwQkMAIsE\nRupgVVXrzlB0f/Y3rO18RVNTZuX18uoc59waw+4fWg2pd+Y++BaGLDco223P0ARW\nBQzw3PgBnlqsSuPB4bYVP3wnwu1DGJISHXsTxQGeLcGz+aSqSai00E/uCiHY3D3D\nVKaFhD8Ezomh80YbS0RwuFf4OD3Jq50Iz5ak3IS7Bc90gbnDgRYC/7fP6Zj7M8w5\nc7xsA2Zr3kwGTJxVVSInA+1ze+Y2TtgSEmhQxuVF+KtUapYUvCfI8oC3KYa7ujnt\n3QIDAQAB\n-----END PUBLIC KEY-----\n",
+      "createdAt": "2025-05-24T21:08:02.178Z",
+      "updatedAt": "2025-05-29T18:24:20.958Z"
+    },
+    {
+      "boatId": "d9e81fe5-9ef4-4cdd-906c-f9968145d5a1",
+      "publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2TErj+dIWo8d8PD3L3yA\nohzUjZ56gwHaKsMsV2pYAQH/OsQZedwoTVamE9D8LfmKQfVPb8oifLkIwQkMAIsE\nRupgVVXrzlB0f/Y3rO18RVNTZuX18uoc59waw+4fWg2pd+Y++BaGLDco223P0ARW\nBQzw3PgBnlqsSuPB4bYVP3wnwu1DGJISHXsTxQGeLcGz+aSqSai00E/uCiHY3D3D\nVKaFhD8Ezomh80YbS0RwuFf4OD3Jq50Iz5ak3IS7Bc90gbnDgRYC/7fP6Zj7M8w5\nc7xsA2Zr3kwGTJxVVSInA+1ze+Y2TtgSEmhQxuVF+KtUapYUvCfI8oC3KYa7ujnt\n3QIDAQAB\n-----END PUBLIC KEY-----\n",
+      "createdAt": "2025-05-26T01:35:26.719Z",
+      "updatedAt": "2025-05-26T01:40:54.578Z"
+    }
+  ],
+  "client_keys": [
+    {
+      "clientId": "client-d9r6tx89vo7hggpjvbsck6",
+      "boatId": "45a6724a-5d43-4a22-b0fa-f3e4114b4ccf",
+      "publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxRiwwtrfYOXcPX4iGWx7\nHBudwqMTrtPDxyCekElyHbMJn9iszRXT9Cvn41O+UziUYLpu/sc0ThyipYCJX+mu\nZioIX+iKQ4bwPUSQ+PEyTlYD5qkb9F3Z+13X4CJnWi1vUggnz2uBuRnTpv7eea44\nnl4m2js02DY/cxN3n6Zj7WWJokObQfzkcjoDJ3fclVwloYcAI/eS10ZTunHmjfN9\ncP4TXs6rsC+Glf+01IZXDeqHMrmZRDTudU6Xr25OGDPAHiPW+39tE/W9qit5dUn5\nPznBGab6NIoTGiSx+zIIyEsJ6hJiL4xekPb7C53SdHJ8l2vjJCsyFTjdjthWlITG\nRwIDAQAB\n-----END PUBLIC KEY-----",
+      "createdAt": "2025-05-25T17:28:26.503Z",
+      "updatedAt": "2025-05-26T02:33:41.814Z"
+    },
+    {
+      "clientId": "client-8xa8hzr6j54ho2m40sp1pa",
+      "boatId": "45a6724a-5d43-4a22-b0fa-f3e4114b4ccf",
+      "publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAya99BHme2dSgR/ythY3c\nLstVZ/B1wDUdfnYx33v0CfP5dq0yP2MfRADd5eM6jx3RJHCmcMUeSvhX9w5simkv\nNqxHKz3YK7MR2LskB8czh1TX0yj15YXwoSmt4YQ8g+1NVqrYcdxNb1F5V4fEFIab\nV1C5VQcnYhKFUn51SbeLcApxxHzmWKyzFliUmPhKNmdXgJz3Mfm1yntzxZz2W4Q2\nJwmeIYND5lZ01Gx49LqyZPCzchDUqmt7BaaYQlN8EJU+HafLHNyG1/AQyjS8Uql3\nX+9zT5FVUR+MBNF7iUTMbpUdukg9/MZ3cJux13tVClvAadmLIty5hcJ/v1KNZhUk\nAwIDAQAB\n-----END PUBLIC KEY-----",
+      "createdAt": "2025-05-25T17:52:08.266Z",
+      "updatedAt": "2025-05-27T15:53:19.658Z"
+    },
+    {
+      "clientId": "client-5qzigf3yfpt815xg63sajq",
+      "boatId": "45a6724a-5d43-4a22-b0fa-f3e4114b4ccf",
+      "publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqt2Ga+Cty0+pvlInQjhM\nOOhFCPtgX5ZaFhjXKSYZ9Ue9P4YwDpqKFZbbYfS42e+et3XN3v856rmXEoxtiShs\n/Kb3aJlrH39qOK4fVDA+tGsUq7+BwOMr6CeSWi1gLhI40subN/TPUCW2GuQsKnd9\nQMo2fbWsBB9YYjFYPZSx7oZmmuq5pTLdKP6bjNvhpcCtWnv4JbVRj+5cvcoY8L/M\neu+Zy4twGUyntDMLBIS4HRXdxL210Tk+vxB3/hBC68Dzis3KLaUTdNrYMfsHzcny\ntEfXDsZzVIIGRHlWREHc08Mt69VSkTm6ICmNx6QSYyv+As8+rWLJaTnMR1ZNIs9I\nlQIDAQAB\n-----END PUBLIC KEY-----",
+      "createdAt": "2025-05-25T18:15:33.949Z",
+      "updatedAt": "2025-05-25T20:30:17.248Z"
+    }
+  ]
+}
+
+
+
+

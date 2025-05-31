@@ -94,6 +94,74 @@ export function createStateDataModel(unitPreferences = UNIT_PRESETS.IMPERIAL) {
         },
         humidity: { value: null, units: "%", label: "Humidity", displayLabel: "Humidity", description: "Relative Humidity" },
       },
+      marine: {
+        current: {
+          // Sea Level and Tides
+          seaLevelHeightMsl: { value: null, units: unitPreferences.length, label: "MSL", displayLabel: "Mean Sea Level", description: "Height above mean sea level" },
+          
+          // Primary Wave Data
+          waveHeight: { value: null, units: unitPreferences.length, label: "Wave Ht", displayLabel: "Wave Height", description: "Significant Wave Height" },
+          waveDirection: { value: null, units: unitPreferences.angle, label: "Wave Dir", displayLabel: "Wave Direction", description: "Wave Direction" },
+          wavePeriod: { value: null, units: "s", label: "Wave Per", displayLabel: "Wave Period", description: "Wave Period" },
+          
+          // Wind Wave Data
+          windWaveHeight: { value: null, units: unitPreferences.length, label: "Wind Ht", displayLabel: "Wind Wave Height", description: "Wind Wave Height" },
+          windWaveDirection: { value: null, units: unitPreferences.angle, label: "Wind Dir", displayLabel: "Wind Wave Direction", description: "Wind Wave Direction" },
+          windWavePeriod: { value: null, units: "s", label: "Wind Per", displayLabel: "Wind Wave Period", description: "Wind Wave Period" },
+          windWavePeakPeriod: { value: null, units: "s", label: "Peak Per", displayLabel: "Peak Wave Period", description: "Peak Wave Period" },
+          
+          // Metadata
+          time: null,
+          source: { value: null, label: "Source", displayLabel: "Data Source", description: "Data Source" },
+          
+          // Derived/Calculated Fields
+          isTideRising: { value: null, label: "Tide Rising", displayLabel: "Tide Rising", description: "Whether tide is currently rising" },
+          nextTideChange: { 
+            time: null, 
+            type: { value: null, label: "Next", displayLabel: "Next Tide Type", description: "Type of next tide change (high/low)" },
+            height: { value: null, units: unitPreferences.length, label: "Next Ht", displayLabel: "Next Tide Height", description: "Height at next tide change" }
+          }
+        },
+        
+        // Forecast Data (Hourly)
+        forecast: {
+          time: [],
+          seaLevelHeightMsl: [],
+          waveHeight: [],
+          waveDirection: [],
+          wavePeriod: [],
+          windWaveHeight: [],
+          windWaveDirection: [],
+          windWavePeriod: [],
+          windWavePeakPeriod: []
+        },
+        
+        // Tidal Information (Derived from forecast)
+        tides: {
+          nextHigh: {
+            time: null,
+            height: { value: null, units: unitPreferences.length, label: "High", displayLabel: "Next High Tide", description: "Next High Tide" },
+            source: { value: null, label: "Source", displayLabel: "Source", description: "Data Source" }
+          },
+          nextLow: {
+            time: null,
+            height: { value: null, units: unitPreferences.length, label: "Low", displayLabel: "Next Low Tide", description: "Next Low Tide" },
+            source: { value: null, label: "Source", displayLabel: "Source", description: "Data Source" }
+          },
+          current: {
+            state: { 
+              value: null, 
+              label: "Tide", 
+              displayLabel: "Tide State", 
+              description: "Current Tide State (Flood/Ebb)",
+              nextChange: {
+                time: null,
+                type: { value: null, label: "Next", displayLabel: "Next Change Type", description: "Type of next tide change" }
+              }
+            }
+          }
+        }
+      },
     },
     vessel: {
       info: {
