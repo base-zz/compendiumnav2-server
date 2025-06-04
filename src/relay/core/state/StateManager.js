@@ -1,12 +1,11 @@
 import { EventEmitter } from "events";
-import { createStateDataModel } from '../../../shared/stateDataModel.js';
-import { RuleEngine } from './ruleEngine.js';
-import { AllRules } from './allRules.js';
-import { AlertService } from '../services/AlertService.js';
-import { getOrCreateAppUuid } from '../../../server/uniqueAppId.js';
-import { UNIT_PRESETS } from '../../../shared/unitPreferences.js';
-import { recordPatch, recordFullState } from './db.js'
-
+import { createStateDataModel } from "../../../shared/stateDataModel.js";
+import { RuleEngine } from "./ruleEngine.js";
+import { AllRules } from "./allRules.js";
+import { AlertService } from "../services/AlertService.js";
+import { getOrCreateAppUuid } from "../../../server/uniqueAppId.js";
+import { UNIT_PRESETS } from "../../../shared/unitPreferences.js";
+import { recordPatch, recordFullState } from "./db.js";
 
 // import { applyPatch } from 'fast-json-patch';
 import pkg from "fast-json-patch";
@@ -40,17 +39,18 @@ export class StateManager extends EventEmitter {
     super();
     // Initialize with stateData's state which already has all structures
     this.appState = structuredClone(stateData.state);
-    
+
     // Initialize a single rule engine for all rules
     this.ruleEngine = new RuleEngine(AllRules); // For all rules (navigation, alerts, etc.)
-    
+
     // Initialize the alert service
     this.alertService = new AlertService(this);
-    
+
     this.currentProfile = this._createDefaultProfile();
     this._boatId = getOrCreateAppUuid();
     this._clientCount = 0;
-    console.log('[StateManager] UNIQUE_IDENTIFIER_20250505: Constructor initialized');
+    this.tideData = null;
+    this.weatherData = null;
   }
 
   /**
@@ -98,7 +98,6 @@ export class StateManager extends EventEmitter {
       if (RECORD_DATA) {
         recordPatch(validPatch);
       }
-
     } catch (error) {
       console.error("[StateManager] Patch error:", error);
       this.emit("error:patch-error", { error, patch });
@@ -125,39 +124,7 @@ export class StateManager extends EventEmitter {
   emitFullState() {
     // Always emit full state updates regardless of client count
     const timestamp = new Date().toISOString();
-    
-    // Log summary of state update
-    const stateSummary = {
-      timestamp,
-      state: {
-        navigation: this.appState.navigation ? {
-          position: this.appState.navigation.position,
-          speedOverGround: this.appState.navigation.speedOverGround,
-          courseOverGround: this.appState.navigation.courseOverGround
-        } : null,
-        environment: this.appState.environment ? {
-          wind: this.appState.environment.wind,
-          depth: this.appState.environment.depth,
-          weather: this.appState.environment.weather ? {
-            current: this.appState.environment.weather.current ? {
-              temperature: this.appState.environment.weather.current.temperature,
-              windSpeed: this.appState.environment.weather.current.windSpeed
-            } : null,
-            _items: this.appState.environment.weather.hourly?.time?.length || 0
-          } : null,
-          marine: this.appState.environment.marine ? {
-            current: this.appState.environment.marine.current ? {
-              seaLevelHeightMsl: this.appState.environment.marine.current.seaLevelHeightMsl,
-              waveHeight: this.appState.environment.marine.current.waveHeight
-            } : null,
-            _items: this.appState.environment.marine.forecast?.time?.length || 0
-          } : null
-        } : null,
-        _clientCount: this._clientCount
-      }
-    };
-    
-    console.log('[StateManager] Emitting full state update:', JSON.stringify(stateSummary, null, 2));
+
 
     const payload = {
       type: "state:full-update",
@@ -169,11 +136,16 @@ export class StateManager extends EventEmitter {
 
     this.emit("state:full-update", payload);
 
+    // console.log(
+    //   "[StateManager] Emitting full state update:",
+    //   JSON.stringify(payload, null, 2)
+    // );
+
     if (RECORD_DATA) {
       recordFullState(this.appState);
     }
   }
-  
+
   /**
    * Broadcast the current state to all clients.
    * This is an alias for emitFullState for backward compatibility.
@@ -181,28 +153,30 @@ export class StateManager extends EventEmitter {
   broadcastStateUpdate() {
     this.emitFullState();
   }
-  
+
   /**
    * Receive external state update (e.g. from StateService) while preserving anchor state
    * @param {Object} newStateData - The new state data from an external source
    */
   receiveExternalStateUpdate(newStateData) {
     if (!newStateData) {
-      console.warn("[StateManager] Received empty state data from external source");
+      console.warn(
+        "[StateManager] Received empty state data from external source"
+      );
       return;
     }
-    
+
     // Save the current anchor state before replacing
     const currentAnchorState = this.appState.anchor;
-    
+
     // Update the state with the new state
     this.appState = structuredClone(newStateData);
-    
+
     // Restore the anchor state if it exists
     if (currentAnchorState) {
       this.appState.anchor = currentAnchorState;
     }
-    
+
     // Emit the updated state to clients
     this.emitFullState();
   }
@@ -302,7 +276,7 @@ export class StateManager extends EventEmitter {
     if (!this.appState.anchor) {
       console.warn("[StateManager] Anchor missing after update!");
     }
-    
+
     // Evaluate alert rules to check for condition resolutions
     this._evaluateAlertRules();
 
@@ -317,70 +291,136 @@ export class StateManager extends EventEmitter {
   }
 
   updateState(newState, env = {}) {
-    const actions = this.ruleEngine.evaluate(newState, env);
+    try {
+      // Only merge if we have a valid newState
+      if (newState && typeof newState === "object") {
+        // Create a deep copy of the current state to avoid reference issues
+        const currentState = JSON.parse(JSON.stringify(this.appState));
 
-    actions.forEach((action) => {
-      switch (action.type) {
-        case "SET_SYNC_PROFILE":
-          this._applySyncProfile(action.config);
-          break;
-        case "CREW_ALERT":
-          this._sendCrewAlert(action.message);
-          break;
-        case "CREATE_ALERT":
-          this.alertService.createAlert(action.data);
-          break;
-        case "RESOLVE_ALERT":
-          this.alertService.resolveAlertsByTrigger(action.trigger, action.data);
-          break;
+        // Merge the new state with the current state
+        const mergedState = this._deepMerge(currentState, newState);
+
+        // Update the app state
+        this.appState = mergedState;
+
+        // Emit the updated state
+        this.emitFullState();
       }
-    });
 
-    this.emit("profile-updated", {
-      profile: this.currentProfile,
-      boatId: this._boatId,
-      timestamp: Date.now(),
-    });
+      // Evaluate rules with the new state
+      const actions = this.ruleEngine.evaluate(this.appState, env);
+
+      // Process any actions from the rules
+      actions.forEach((action) => {
+        switch (action.type) {
+          case "SET_SYNC_PROFILE":
+            this._applySyncProfile(action.config);
+            break;
+          case "CREW_ALERT":
+            this._sendCrewAlert(action.message);
+            break;
+          case "CREATE_ALERT":
+            this.alertService.createAlert(action.data);
+            break;
+          case "RESOLVE_ALERT":
+            this.alertService.resolveAlertsByTrigger(
+              action.trigger,
+              action.data
+            );
+            break;
+        }
+      });
+
+      // Emit profile updated event
+      this.emit("profile-updated", {
+        profile: this.currentProfile,
+        boatId: this._boatId,
+        timestamp: Date.now(),
+      });
+
+      return true;
+    } catch (error) {
+      console.error("[StateManager] Error in updateState:", error);
+      return false;
+    }
   }
 
   // Add a method to update client count
   updateClientCount(count) {
     const previousCount = this._clientCount;
     this._clientCount = count;
-    
+
     console.log(
       `[StateManager] Client count updated: ${previousCount} -> ${count}`
     );
-    
+
     // If we just got clients after having none, send a full state update
     if (previousCount === 0 && count > 0) {
       console.log("[StateManager] Clients connected, sending full state");
       this.broadcastStateUpdate();
     }
   }
-  
+
   /**
    * Evaluate all alert rules to check for conditions and resolutions
    * @private
    */
+  /**
+   * Deep merge two objects
+   * @private
+   * @param {Object} target - The target object to merge into
+   * @param {Object} source - The source object to merge from
+   * @returns {Object} The merged object
+   */
+  _deepMerge(target, source) {
+    const output = { ...target };
+
+    if (this._isObject(target) && this._isObject(source)) {
+      Object.keys(source).forEach((key) => {
+        if (this._isObject(source[key])) {
+          if (!(key in target)) {
+            Object.assign(output, { [key]: source[key] });
+          } else {
+            output[key] = this._deepMerge(target[key], source[key]);
+          }
+        } else {
+          Object.assign(output, { [key]: source[key] });
+        }
+      });
+    }
+
+    return output;
+  }
+
+  /**
+   * Check if a value is an object
+   * @private
+   * @param {*} item - The value to check
+   * @returns {boolean} True if the value is an object, false otherwise
+   */
+  _isObject(item) {
+    return item && typeof item === "object" && !Array.isArray(item);
+  }
+
   _evaluateAlertRules() {
     // Evaluate all rules against current state using the unified rule engine
     const actions = this.ruleEngine.evaluate(this.appState);
-    
+
     // Filter for alert-related actions only
-    const alertActions = actions.filter(action => 
-      action.type === 'CREATE_ALERT' || action.type === 'RESOLVE_ALERT'
+    const alertActions = actions.filter(
+      (action) =>
+        action.type === "CREATE_ALERT" || action.type === "RESOLVE_ALERT"
     );
-    
+
     // Process alert actions using the AlertService
     const stateChanged = this.alertService.processAlertActions(alertActions);
-    
+
     // Broadcast state update if any changes were made
     if (stateChanged) {
       this.broadcastStateUpdate();
     }
   }
-  
+
   // Alert management has been moved to the AlertService
 
   _applySyncProfile(config) {
@@ -400,6 +440,19 @@ export class StateManager extends EventEmitter {
       ais: { base: 10000 },
     };
   }
+
+  setTideData(data) {
+    this.tideData = data;
+    this.emit('tide:update', data);
+    this.emitFullState(); // Keep state in sync
+  }
+  
+  setWeatherData(data) {
+    this.weatherData = data;
+    this.emit('weather:update', data);
+    this.emitFullState(); // Keep state in sync
+  }
+
 }
 
 const stateData = { state: createStateDataModel(UNIT_PRESETS.IMPERIAL) };

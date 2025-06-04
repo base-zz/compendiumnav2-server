@@ -34,82 +34,173 @@ async function startDirectServer(options = {}) {
     console.error('[DIRECT] WebSocket server error:', error);
   });
 
-  // Handle new connections
+  // Single connection handler for WebSocket connections
   wss.on('connection', (ws, request) => {
     const clientId = Math.random().toString(36).substring(2, 10);
     const clientIp = request.socket.remoteAddress;
     const origin = request.headers.origin || 'unknown';
+    let isAlive = true;
     
     console.log(`[DIRECT] New connection from ${clientIp} (${clientId}), Origin: ${origin}`);
     console.log(`[DIRECT] Active clients: ${wss.clients.size}`);
     
-    // Log WebSocket ready state
-    console.log(`[DIRECT] WebSocket ready state: ${ws.readyState}`);
-
     // Function to get a safe copy of the state
     const getSafeStateCopy = (state) => {
-      // Create a deep copy of the state to avoid modifying the original
-      return JSON.parse(JSON.stringify(state));
+      try {
+        return JSON.parse(JSON.stringify(state));
+      } catch (error) {
+        console.error('[DIRECT] Error cloning state:', error);
+        return {};
+      }
     };
+
+    // Event handlers for state updates
+    const onTideUpdate = (data) => {
+      if (isAlive && ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'tide:update',
+          data
+        }));
+      }
+    };
+    
+    const onWeatherUpdate = (data) => {
+      if (isAlive && ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'weather:update',
+          data
+        }));
+      }
+    };
+
+    const onStateUpdate = (payload) => {
+      if (isAlive && ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify(payload));
+      }
+    };
+
+    // Register event listeners
+    stateManager.on('tide:update', onTideUpdate);
+    stateManager.on('weather:update', onWeatherUpdate);
+    stateManager.on('state:full-update', onStateUpdate);
+    stateManager.on('state:patch', onStateUpdate);
 
     // Function to send initial state
     const sendInitialState = () => {
+      if (!isAlive || ws.readyState !== ws.OPEN) return;
+      
       try {
-        const initialState = getSafeStateCopy(stateManager.getState());
-        
-        console.log(`[DIRECT] Sending initial state to ${clientId}`, JSON.stringify(initialState).substring(0, 200) + '...');
-        
-        if (ws.readyState === ws.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'state:full-update',
-            data: initialState
-          }), (error) => {
-            if (error) {
-              console.error(`[DIRECT] Error sending initial state to ${clientId}:`, error);
-            } else {
-              console.log(`[DIRECT] Successfully sent initial state to ${clientId}`);
-            }
-          });
-        } else {
-          console.error(`[DIRECT] WebSocket not open, readyState: ${ws.readyState}`);
-        }
+        const state = {
+          ...getSafeStateCopy(stateManager.getState()),
+          ...(stateManager.tideData && { tides: stateManager.tideData }),
+          ...(stateManager.weatherData && { forecast: stateManager.weatherData })
+        };
+
+        ws.send(JSON.stringify({
+          type: 'state:full-update',
+          data: state,
+          boatId: stateManager.boatId,
+          timestamp: Date.now()
+        }), (error) => {
+          if (error) {
+            console.error(`[DIRECT] Error sending initial state to ${clientId}:`, error);
+          } else {
+            console.log(`[DIRECT] Sent initial state to ${clientId}`);
+          }
+        });
       } catch (error) {
-        console.error(`[DIRECT] Error getting/sending initial state:`, error);
+        console.error(`[DIRECT] Error preparing initial state:`, error);
       }
     };
     
     // Handle incoming messages
     ws.on('message', (message) => {
+      if (!isAlive) return;
+      
       try {
         const data = JSON.parse(message);
+        
+        // Handle ping messages
+        if (data.type === 'ping') {
+          if (ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'pong',
+              timestamp: Date.now()
+            }));
+          }
+          return;
+        }
+        
+        // Handle anchor state updates
+        if (data.type === 'anchor:update' && data.data) {
+          const success = stateManager.updateAnchorState(data.data);
+          if (ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'anchor:update:ack',
+              success,
+              timestamp: Date.now()
+            }));
+          }
+          return;
+        }
+        
         console.log(`[DIRECT] Received message from ${clientId}:`, data.type || 'unknown type');
-        console.log('[DIRECT] Full message:', JSON.stringify(data, null, 2));
       } catch (error) {
-        console.error(`[DIRECT] Error parsing message from ${clientId}:`, error);
+        console.error(`[DIRECT] Error processing message from ${clientId}:`, error);
       }
     });
-
-    // Wrap the send function to log outgoing messages
-    const originalSend = ws.send;
-    ws.send = function(data) {
-      // Uncomment for debugging - this gets very noisy with frequent state updates
-      // const message = data.length > 200 ? data.substring(0, 200) + '...' : data;
-      // console.log(`[DIRECT] Sending to ${clientId}:`, message);
-      originalSend.apply(this, arguments);
+    
+    // Setup heartbeat
+    const heartbeatInterval = setInterval(() => {
+      if (isAlive && ws.readyState === ws.OPEN) {
+        ws.ping();
+      }
+    }, 30000);
+    
+    // Handle pongs for heartbeat
+    const heartbeat = () => {
+      isAlive = true;
     };
     
-    // Send initial state after a short delay to ensure connection is ready
-    setTimeout(sendInitialState, 100);
+    ws.on('pong', heartbeat);
+    
+    // Send initial state after a short delay
+    const initTimer = setTimeout(sendInitialState, 100);
     
     // Handle client disconnection
-    ws.on('close', () => {
-      console.log(`[DIRECT] Client ${clientIp} (${origin}) disconnected`);
+    const cleanup = () => {
+      if (!isAlive) return;
+      isAlive = false;
+      
+      clearTimeout(initTimer);
+      clearInterval(heartbeatInterval);
+      
+      // Remove all event listeners
+      stateManager.off('tide:update', onTideUpdate);
+      stateManager.off('weather:update', onWeatherUpdate);
+      stateManager.off('state:full-update', onStateUpdate);
+      stateManager.off('state:patch', onStateUpdate);
+      
+      console.log(`[DIRECT] Client ${clientIp} (${clientId}) disconnected`);
       console.log(`[DIRECT] Active clients: ${wss.clients.size}`);
-    });
-
-    // Handle errors
+    };
+    
+    ws.on('close', cleanup);
     ws.on('error', (error) => {
       console.error(`[DIRECT] WebSocket error from ${clientIp} (${origin}):`, error);
+      cleanup();
+    });
+    
+    // Set up connection timeout
+    const connectionTimeout = setTimeout(() => {
+      if (isAlive) {
+        console.log(`[DIRECT] Connection timeout for ${clientId}, terminating`);
+        ws.terminate();
+      }
+    }, 45000); // 45 seconds (longer than 2x the heartbeat interval)
+    
+    ws.once('pong', () => {
+      clearTimeout(connectionTimeout);
     });
   });
   

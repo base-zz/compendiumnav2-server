@@ -43,14 +43,37 @@ class ScheduledService extends BaseService {
       return;
     }
     
-    await super.start();
-    
-    if (this.options.runOnInit) {
-      await this._executeTask();
+    try {
+      this.emit(`service:${this.name}:starting`);
+      this.log('Starting scheduled service');
+      
+      this.isRunning = true;
+      this.lastUpdated = new Date();
+      
+      // Schedule the next run but don't run immediately
+      this._scheduleNextRun(false);
+      
+      this.emit(`service:${this.name}:started`, { timestamp: this.lastUpdated });
+      this.log('Scheduled service started successfully');
+      
+      // If immediate is true, run the first task after the service is fully started
+      if (this.options.immediate) {
+        this.log('Running initial task immediately');
+        await this._executeTask();
+      } else if (this.options.runOnInit) {
+        this.log('Running onInit task');
+        await this._executeTask();
+      }
+      
+    } catch (error) {
+      this.logError('Error starting scheduled service:', error);
+      this.emit(`service:${this.name}:error`, { 
+        error: error.message,
+        code: error.code,
+        timestamp: new Date()
+      });
+      throw error;
     }
-    
-    this._scheduleNextRun(this.options.immediate);
-    this.log('Scheduled service started');
   }
   
   /**

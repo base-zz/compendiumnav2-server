@@ -23,8 +23,9 @@ export class ServiceManager {
 
     // Forward all service events to the central bus
     service.on('*', (event, ...args) => {
-      const eventName = `${name}:${event}`;
-      this.eventBus.emit(eventName, ...args);
+      // const eventName = `${name}:${event}`;
+      // this.eventBus.emit(eventName, ...args);
+      this.eventBus.emit(event, ...args);
       this.eventBus.emit('*', { service: name, event, args });
     });
 

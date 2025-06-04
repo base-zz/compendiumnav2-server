@@ -323,7 +323,7 @@ export class VPSConnector extends EventEmitter {
               const sentTime = message.echo;
               const latencyMs = now - sentTime;
               
-              console.log(`[VPS-CONNECTOR] Received pong from server (latency: ${latencyMs}ms)`);
+              // console.log(`[VPS-CONNECTOR] Received pong from server (latency: ${latencyMs}ms)`);
               
               // Store recent latency values for potential monitoring
               this._latencyValues = this._latencyValues || [];
@@ -357,9 +357,9 @@ export class VPSConnector extends EventEmitter {
             
             // Only log at debug level if ping interval is longer than 10 seconds
             // This reduces log spam for frequent pings
-            if (this.config.pingInterval >= 10000) {
-              console.log(`[VPS-CONNECTOR] Sent ping to keep connection alive (interval: ${this.config.pingInterval/1000}s)`);
-            }
+            // if (this.config.pingInterval >= 10000) {
+            //   console.log(`[VPS-CONNECTOR] Sent ping to keep connection alive (interval: ${this.config.pingInterval/1000}s)`);
+            // }
           }
         }, this.config.pingInterval);
         

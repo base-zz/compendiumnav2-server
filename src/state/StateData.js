@@ -100,12 +100,12 @@ export const stateData = {
       this.convertWindValues();
       this.convertAnchorValues();
       this.convertDepthValues();
-      this.convertMarineValues();
+      // this.convertMarineValues();
     },
     
     // Convert marine data values
     convertMarineValues() {
-      const { current, tides, forecast } = stateData.state().environment.marine || {};
+      const { current, tides, forecast } = stateData.state() || {};
       
       // Convert current values
       if (current) {
@@ -331,6 +331,8 @@ export const stateData = {
       anchor: this.anchor,
       aisTargets: this.aisTargets,
       alerts: this.alerts,
+      tides: this.tides,
+      forecast: this.forecast,
     });
   },
 };

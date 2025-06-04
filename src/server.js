@@ -78,6 +78,24 @@ async function bridgeStateToRelay() {
     stateService.on("state:patch", (msg) => {
       stateManager.applyPatchAndForward(msg.data);
     });
+
+    // Add listeners for tide and weather updates
+    const tidalService = serviceManager.getService("tidal");
+    const weatherService = serviceManager.getService("weather");
+
+    if (tidalService) {
+      tidalService.on("tide:update", (data) => {
+        console.log("[DEV-SERVER2] Received tide update, forwarding to state manager");
+        stateManager.setTideData(data);
+      });
+    }
+
+    if (weatherService) {
+      weatherService.on("weather:update", (data) => {
+        console.log("[DEV-SERVER2] Received weather update, forwarding to state manager");
+        stateManager.setWeatherData(data);
+      });
+    }    
   
     log("State bridge to relay activated");
   }
