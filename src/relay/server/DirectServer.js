@@ -1,5 +1,32 @@
-import { WebSocketServer } from "ws";
+import { WebSocket as WS, WebSocketServer } from 'ws';
+import { createServer } from 'http';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+/**
+ * @typedef {import('ws').WebSocket} WebSocket
+ * @typedef {import('ws').RawData} RawData
+ * @typedef {import('ws').AddressInfo} AddressInfo
+ * @typedef {import('http').Server} HttpServer
+ * @typedef {import('net').Socket} NetSocket
+ *
+ * @typedef {Object} ExtendedWebSocket
+ * @property {string} [clientId]
+ * @property {string} [platform]
+ * @property {string} [role]
+ * @property {NetSocket} [_socket]
+ */
 import { stateManager } from "../core/state/StateManager.js";
+
+/**
+ * @param {Object} [options]
+ * @param {number} [options.port]
+ * @param {string} [options.host]
+ * @param {boolean} [options.noServer]
+ */
+// Get the directory name in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 async function startDirectServer(options = {}) {
   const PORT = options.port || parseInt(process.env.DIRECT_WS_PORT, 10);
@@ -11,22 +38,46 @@ async function startDirectServer(options = {}) {
   // Ensure we're binding to all interfaces for mDNS to work
   console.log(`[DIRECT] Binding WebSocket server to ${HOST}:${PORT}`);
   
+  // Create HTTP server
+  const httpServer = createServer((req, res) => {
+    // Respond to HTTP requests (optional)
+    res.writeHead(200);
+    res.end('Compendium Navigation Server\n');
+  });
+
+  // WebSocket server options
+  /** @type {import('ws').ServerOptions} */
   const serverOptions = {
-    port: PORT,
+    server: httpServer,  // Attach to HTTP server
     host: HOST,
-    maxPayload: options.maxPayload || 1024 * 1024, // 1MB default
+    noServer: options.noServer,
+    maxPayload: 1024 * 1024, // 1MB
     clientTracking: true
   };
 
-  console.log(`[DIRECT] Starting WebSocket server on ${HOST}:${PORT}`);
+  console.log(`[DIRECT] Starting WebSocket server on ws://${HOST}:${PORT}`);
   
+  // Create WebSocket server attached to HTTP
+  /** @type {WebSocketServer} */
   const wss = new WebSocketServer(serverOptions);
   
-  // Log when the server is listening
+  // Start the HTTP server
+  httpServer.listen(PORT, HOST, () => {
+    console.log(`[DIRECT] HTTP server running on http://${HOST}:${PORT}`);
+  });
+  
+  // Store the server instance for later use
+  /** @type {WebSocketServer} */
+  const wsServerInstance = wss;
+  
   wss.on('listening', () => {
     const address = wss.address();
-    console.log(`[DIRECT] WebSocket server listening on ${address.address}:${address.port}`);
-    console.log(`[DIRECT] Server is bound to: ${address.family === 'IPv6' ? 'IPv6' : 'IPv4'}`);
+    if (typeof address === 'string') {
+      console.log(`[DIRECT] WebSocket server listening on ${address}`);
+    } else {
+      console.log(`[DIRECT] WebSocket server listening on ${address.address}:${address.port}`);
+      console.log(`[DIRECT] Server is bound to: ${address.family === 'IPv6' ? 'IPv6' : 'IPv4'}`);
+    }
   });
 
   // Handle connection errors
@@ -35,7 +86,7 @@ async function startDirectServer(options = {}) {
   });
 
   // Single connection handler for WebSocket connections
-  wss.on('connection', (ws, request) => {
+  wss.on('connection', (/** @type {WebSocket & ExtendedWebSocket} */ ws, request) => {
     const clientId = Math.random().toString(36).substring(2, 10);
     const clientIp = request.socket.remoteAddress;
     const origin = request.headers.origin || 'unknown';
@@ -118,7 +169,17 @@ async function startDirectServer(options = {}) {
       if (!isAlive) return;
       
       try {
-        const data = JSON.parse(message);
+        let messageStr;
+        if (typeof message === 'string') {
+          messageStr = message;
+        } else {
+          messageStr = message.toString();
+        }
+        
+        const data = JSON.parse(messageStr);
+        
+        // Store client ID for logging
+        const clientIdentifier = ws.clientId || clientId;
         
         // Handle ping messages
         if (data.type === 'ping') {
@@ -127,6 +188,47 @@ async function startDirectServer(options = {}) {
               type: 'pong',
               timestamp: Date.now()
             }));
+          }
+          return;
+        }
+        
+        // Handle identity messages
+        if (data.type === 'identity') {
+          console.log(`[DIRECT] Received identity message from ${clientId} (${data.platform || 'unknown platform'})`);
+          console.log(`[DIRECT] Identity details:`, {
+            clientId: data.clientId,
+            platform: data.platform,
+            role: data.role,
+            timestamp: new Date().toISOString(),
+            remoteAddress: clientIp
+          });
+          
+          if (data.clientId) {
+            // Store client information on the WebSocket connection
+            ws.clientId = data.clientId;
+            ws.platform = data.platform;
+            ws.role = data.role;
+            
+            console.log(`[DIRECT] Stored client identity: ${data.clientId} (${data.platform || 'unknown platform'})`);
+            
+            // Emit an event to StateManager
+            stateManager.emit('identity:received', {
+              clientId: data.clientId,
+              platform: data.platform,
+              role: data.role,
+              timestamp: Date.now()
+            });
+            
+            // Send acknowledgment
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'identity:ack',
+                status: 'success',
+                timestamp: Date.now()
+              }));
+            }
+          } else {
+            console.warn(`[DIRECT] Received identity message without clientId from ${clientId}`);
           }
           return;
         }
@@ -144,7 +246,7 @@ async function startDirectServer(options = {}) {
           return;
         }
         
-        console.log(`[DIRECT] Received message from ${clientId}:`, data.type || 'unknown type');
+        console.log(`[DIRECT] Received message from ${clientIdentifier}:`, data.type || 'unknown type');
       } catch (error) {
         console.error(`[DIRECT] Error processing message from ${clientId}:`, error);
       }
@@ -212,37 +314,35 @@ async function startDirectServer(options = {}) {
     // Allow all origins in development
     headers.push('Access-Control-Allow-Origin: *');
     headers.push('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-    headers.push('Access-Control-Allow-Headers: Content-Type');
-  });
+    headers.push('Access-Control-Allow-Headers: Content-Type');  });
   
   // Wait for the server to be ready
   await new Promise((resolve) => wss.on('listening', resolve));
   
   // Now it's safe to get the address
   const serverAddress = wss.address();
-  const address = serverAddress.address === '::' ? '0.0.0.0' : serverAddress.address;
-  console.log(`[DIRECT] WebSocket server running on ${address}:${serverAddress.port}`);
+  if (typeof serverAddress === 'string') {
+    console.log(`[DIRECT] WebSocket server running on ${serverAddress}`);
+  } else {
+    const address = serverAddress.address === '::' ? '0.0.0.0' : serverAddress.address;
+    console.log(`[DIRECT] WebSocket server running on ${address}:${serverAddress.port}`);
+  }
 
-  // Broadcast to all clients except specified ones
-  function broadcast(payload, exclude = new Set()) {
-    // console.log(`[DIRECT] Broadcasting ${payload.type} to ${wss.clients.size} clients`);
-    const message = JSON.stringify(payload);
+  // Broadcast to all connected clients
+  function broadcast(message) {
+    if (!wss) return;
     
-    wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN && !exclude.has(client)) {
-        client.send(message, (err) => {
-          if (err) {
-            console.warn("[DIRECT] Broadcast failed:", err);
-            client.terminate();
-          }
-        });
+    const clients = wss.clients;
+    if (!clients || clients.size === 0) return;
+    
+    const messageString = JSON.stringify(message);
+    console.log(`[DIRECT] Broadcasting to ${clients.size} clients: ${messageString}`);
+    
+    clients.forEach((client) => {
+      if (client.readyState === 1) { // 1 = OPEN
+        client.send(messageString);
       }
     });
-    
-    // Log after a short delay to allow send callbacks to complete
-    // setTimeout(() => {
-    //   console.log(`[DIRECT] Broadcast complete`);
-    // }, 50);
   }
 
   // Store handler references for proper cleanup
@@ -267,14 +367,14 @@ async function startDirectServer(options = {}) {
   function getActiveClientCount() {
     let count = 0;
     wss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
+      if (client.readyState === 1) {  // 1 = OPEN
         count++;
       }
     });
     return count;
   }
   
-  wss.on("connection", (ws, req) => {
+  wss.on("connection", (/** @type {WebSocket & ExtendedWebSocket} */ ws, req) => {
     console.log(`[DIRECT] New connection from ${req.socket.remoteAddress}`);
     
     // Log active client count
@@ -299,10 +399,35 @@ async function startDirectServer(options = {}) {
     );
 
     // Handle incoming messages
+    // Type assertion for extended WebSocket properties
+    const extendedWs = /** @type {WebSocket & ExtendedWebSocket} */ (ws);
+    
     ws.on("message", (data) => {
       try {
-        const message = JSON.parse(data);
-        console.log(`[DIRECT] Received message from client: ${message.type}`);
+        // Safely parse message data whether it's a string or buffer
+        const message = JSON.parse(data.toString());
+        const socket = extendedWs._socket;
+        const clientIp = (socket && socket.remoteAddress) ? 
+          socket.remoteAddress : 'unknown';
+        
+        // Log all messages
+        console.log(`[DIRECT] Message: ${message.type} from ${clientIp}`);
+        
+        // Special handling for identity messages
+        if (message.type === 'identity' && message.data) {
+          // Store identity info on the WebSocket connection
+          extendedWs.clientId = message.data.clientId;
+          extendedWs.platform = message.data.platform;
+          extendedWs.role = message.data.role;
+          
+          console.log('[DIRECT] Identity received:', {
+            clientId: extendedWs.clientId,
+            platform: extendedWs.platform,
+            role: extendedWs.role,
+            timestamp: new Date().toISOString(),
+            clientIp: clientIp
+          });
+        }
         
         // Handle ping messages
         if (message.type === 'ping') {
@@ -334,7 +459,7 @@ async function startDirectServer(options = {}) {
 
     // Setup heartbeat
     const heartbeat = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) ws.ping();
+      if (ws.readyState === 1) ws.ping();  // 1 = OPEN
     }, 30000);
 
     // Cleanup on disconnect
@@ -350,6 +475,16 @@ async function startDirectServer(options = {}) {
       console.warn("[DIRECT] Client error:", err);
     });
   });
+
+  // Close all connections
+  function closeAllConnections() {
+    wss.clients.forEach(client => {
+      if (client.readyState === 1) {  // 1 = OPEN
+        client.close(1000, 'Server shutting down');
+      }
+    });
+  }
+
 
   function shutdown() {
     console.log("[DIRECT] Shutting down...");

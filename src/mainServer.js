@@ -2,6 +2,9 @@ import dotenv from "dotenv";
 import http from "http";
 import express from "express";
 import fetch from 'node-fetch';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { stateService, setStateManager } from "./state/StateService.js";
 import { startRelayServer, startDirectServer } from "./relay/server/index.js";
 import { stateManager } from "./relay/core/state/StateManager.js";
@@ -131,17 +134,8 @@ async function startServer() {
     }
     
     // 5. Start HTTP server
-    const PORT = process.env.PORT || 8080;
+    const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000; // Default to 3000 for HTTP
     const httpServer = http.createServer(app);
-    httpServer.listen(PORT, '0.0.0.0', () => {
-      const host = `http://localhost:${PORT}`;
-      console.log(`[SERVER] HTTP server listening on port ${PORT}`);
-      console.log(`[SERVER] API endpoints:`);
-      console.log(`  - ${host}/api/boat-info - Get boat information`);
-      console.log(`  - ${host}/api/vps/health - VPS connection health`);
-      console.log(`  - ${host}/api/vps/register - Register with VPS`);
-      console.log(`  - ${host}/health - Server health check`);
-    });
     
     // Auto-register with VPS on startup if configured
     if (process.env.VPS_AUTO_REGISTER === 'true') {
@@ -170,6 +164,16 @@ async function startServer() {
         }
       }, 5000); // 5 second delay
     }
+    
+    httpServer.listen(PORT, '0.0.0.0', () => {
+      const host = `http://localhost:${PORT}`;
+      console.log(`[SERVER] HTTP server listening on port ${PORT}`);
+      console.log(`[SERVER] API endpoints (HTTP):`);
+      console.log(`  - ${host}/api/boat-info - Get boat information`);
+      console.log(`  - ${host}/api/vps/health - VPS connection health`);
+      console.log(`  - ${host}/api/vps/register - Register with VPS`);
+      console.log(`  - ${host}/health - Server health check`);
+    });
 
     // 5. Relay state updates to VPS (optional, placeholder for future logic)
     stateService.on("state-updated", (data) => {
@@ -190,7 +194,11 @@ async function startServer() {
         if (directServer && directServer.shutdown) {
           directServer.shutdown();
         }
-        httpServer.close(() => process.exit(0));
+        if (httpServer) {
+          httpServer.close(() => process.exit(0));
+        } else {
+          process.exit(0);
+        }
       });
     }
   } catch (err) {

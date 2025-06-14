@@ -1,3 +1,6 @@
+import { createStateDataModel } from '../shared/stateDataModel.js';
+import { UNIT_PRESETS } from '../shared/unitPreferences.js';
+
 function setDeep(obj, path, value) {
   const keys = path.replace(/\[(\d+)\]/g, ".$1").split(".");
   let cur = obj;
@@ -47,8 +50,7 @@ function setDeep(obj, path, value) {
   return obj;
 }
 
-import { createStateDataModel } from '../shared/stateDataModel.js';
-import { UNIT_PRESETS } from '../shared/unitPreferences.js';
+
 
 // Create the base state using the shared model with imperial units as default
 // This matches the client-side default and ensures consistency

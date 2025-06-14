@@ -21,10 +21,11 @@ export class ServiceManager {
       throw new Error(`Service with name '${name}' is already registered`);
     }
 
+    // Store reference to service manager in the service
+    service.serviceManager = this;
+
     // Forward all service events to the central bus
     service.on('*', (event, ...args) => {
-      // const eventName = `${name}:${event}`;
-      // this.eventBus.emit(eventName, ...args);
       this.eventBus.emit(event, ...args);
       this.eventBus.emit('*', { service: name, event, args });
     });
@@ -36,6 +37,11 @@ export class ServiceManager {
 
     this.services.set(name, service);
     console.log(`[ServiceManager] Registered service: ${name} (${service.type})`);
+    
+    // Log dependencies if any
+    if (service._dependencies && service._dependencies.length > 0) {
+      console.log(`[ServiceManager] ${name} depends on: ${service._dependencies.join(', ')}`);
+    }
   }
 
   async startService(name) {
@@ -110,13 +116,21 @@ export class ServiceManager {
   async startAll() {
     const results = { started: [], errors: [] };
     
+    // Get all service names in registration order
+    const serviceNames = Array.from(this.services.keys());
+    
     // Start services in registration order
-    for (const [name] of this.services) {
+    for (const name of serviceNames) {
       try {
         await this.startService(name);
         results.started.push(name);
       } catch (error) {
-        results.errors.push({ name, error });
+        console.error(`[ServiceManager] Failed to start service ${name}:`, error);
+        results.errors.push({ 
+          name, 
+          error: error.message || 'Unknown error',
+          stack: error.stack 
+        });
       }
     }
 
@@ -144,6 +158,63 @@ export class ServiceManager {
 
   getService(name) {
     return this.services.get(name);
+  }
+
+  /**
+   * Wait for a specific service to be ready
+   * @param {string} name - Name of the service to wait for
+   * @param {number} [timeout=10000] - Maximum time to wait in milliseconds
+   * @returns {Promise<void>}
+   */
+  async waitForServiceReady(name, timeout = 10000) {
+    const service = this.services.get(name);
+    if (!service) {
+      throw new Error(`Service '${name}' not found`);
+    }
+
+    // If service has waitUntilReady method, use it
+    if (typeof service.waitUntilReady === 'function') {
+      return service.waitUntilReady(timeout);
+    }
+    
+    // Otherwise, just wait for the service to be running
+    if (service.isRunning) {
+      return Promise.resolve();
+    }
+    
+    // If not running, wait for it to start
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Timed out waiting for service '${name}' to be ready`));
+      }, timeout);
+      
+      const onReady = () => {
+        cleanup();
+        resolve();
+      };
+      
+      const cleanup = () => {
+        clearTimeout(timeoutId);
+        service.off('started', onReady);
+      };
+      
+      service.on('started', onReady);
+    });
+  }
+  
+  /**
+   * Wait for all services to be ready
+   * @param {Object} [options] - Options
+   * @param {number} [options.timeout=10000] - Timeout per service in milliseconds
+   * @param {string[]} [options.services] - Specific services to wait for (default: all)
+   * @returns {Promise<void>}
+   */
+  async waitForAllReady({ timeout = 10000, services } = {}) {
+    const serviceNames = services || Array.from(this.services.keys());
+    await Promise.all(
+      serviceNames.map(name => this.waitForServiceReady(name, timeout))
+    );
   }
 
   getStatus() {

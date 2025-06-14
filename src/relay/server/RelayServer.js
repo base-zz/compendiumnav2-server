@@ -194,9 +194,10 @@ export class RelayServer extends EventEmitter {
             );
             // Update the state manager's client count
             if (this.stateManager) {
-              this.stateManager.incrementClientCount();
+              const newCount = (this.stateManager.clientCount || 0) + 1;
+              this.stateManager.updateClientCount(newCount);
               console.log(
-                `[RELAY-SERVER] Updated client count: ${this.stateManager.clientCount}`
+                `[RELAY-SERVER] Updated client count: ${newCount}`
               );
 
               // Send a full state update to the new client
@@ -229,9 +230,10 @@ export class RelayServer extends EventEmitter {
             );
             // Update the state manager's client count
             if (this.stateManager) {
-              this.stateManager.decrementClientCount();
+              const newCount = Math.max(0, (this.stateManager.clientCount || 1) - 1);
+              this.stateManager.updateClientCount(newCount);
               console.log(
-                `[RELAY-SERVER] Updated client count: ${this.stateManager.clientCount}`
+                `[RELAY-SERVER] Updated client count: ${newCount}`
               );
             }
             break;

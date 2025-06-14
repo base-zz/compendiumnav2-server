@@ -20,9 +20,10 @@ export class NewStateServiceDemo extends ContinuousService {
   constructor() {
     super("newStateServiceDemo"); // Pass the service name to super()
     this._debug = console.log.bind(console, "[NewStateServiceDemo]");
-    const dbPath =
-      process.env.DATABASE_PATH || path.join(__dirname, "../signalk_dev.db");
+    
+    const dbPath = process.env.DATABASE_PATH || path.join(__dirname, "../signalk_dev.db");
     this._debug("Using database at:", dbPath);
+    
     this._db = new sqlite3.Database(dbPath, (err) => {
       if (err) {
         this._debug("Error opening database:", err.message);
@@ -76,62 +77,68 @@ export class NewStateServiceDemo extends ContinuousService {
   async start() {
     await super.start(); // Important: call parent's start
     this._debug("Starting NewStateServiceDemo");
+    this.isReady = false; // Reset ready state when starting
 
-    // Set the position with the correct structure
-    stateData.navigation.position = {
-      latitude: {
-        value: 37.30364,
-        units: "deg",
-        label: "Lat",
-        displayLabel: "Latitude",
-        description: "Latitude",
-      },
-      longitude: {
-        value: -76.454768,
-        units: "deg",
-        label: "Lon",
-        displayLabel: "Longitude",
-        description: "Longitude",
-      },
-      altitude: {
-        value: 0,
-        units: "ft",
-        label: "Alt",
-        displayLabel: "Altitude",
-        description: "Altitude",
-      },
-      timestamp: new Date().toISOString(),
-      source: "manual",
-    };
-
-    // Initialize your service here
-    await this._initializeDatabase();
-    this._loadRecordedData();
-
-    return this;
+    try {
+      // Initialize database connection
+      await this._initializeDatabase();
+      
+      // Load initial state data
+      const initialStateLoaded = await this._loadInitialData();
+      
+      if (!initialStateLoaded) {
+        this._debug("Warning: Could not load initial state from database");
+      }
+      
+      // Start loading recorded data for playback
+      // Don't await this as it's designed to run in the background
+      this._loadRecordedData().catch(err => {
+        this._debug("Error loading recorded data:", err);
+      });
+      
+      // Mark as ready after initial data is loaded
+      this.isReady = true;
+      this.emit('ready');
+      this._debug("NewStateServiceDemo is ready");
+      
+      return this;
+    } catch (error) {
+      this._debug("Error during start:", error);
+      throw error;
+    }
   }
 
   async stop() {
     this._debug("Stopping NewStateServiceDemo");
-
-    // Clean up intervals and connections
-    if (this._playInterval) {
-      clearInterval(this._playInterval);
-      this._playInterval = null;
+    
+    try {
+      await super.stop();
+      this._stopPlayback();
+      this._stopMockMultipleTanksAndBatteries();
+      
+      // Clean up intervals
+      if (this._playInterval) {
+        clearInterval(this._playInterval);
+        this._playInterval = null;
+      }
+      
+      if (this._mockMultipleDataInterval) {
+        clearInterval(this._mockMultipleDataInterval);
+        this._mockMultipleDataInterval = null;
+      }
+      
+      // Close database connection
+      if (this._db) {
+        this._db.close();
+        this._db = null;
+      }
+      
+      this._debug("NewStateServiceDemo stopped");
+      return this;
+    } catch (error) {
+      this._debug("Error during stop:", error);
+      throw error;
     }
-
-    if (this._mockMultipleDataInterval) {
-      clearInterval(this._mockMultipleDataInterval);
-      this._mockMultipleDataInterval = null;
-    }
-
-    if (this._db) {
-      this._db.close();
-      this._db = null;
-    }
-
-    await super.stop(); // Important: call parent's stop
-    return this;
   }
 
   async onError(error) {
@@ -1344,8 +1351,50 @@ export class NewStateServiceDemo extends ContinuousService {
     return true;
   }
 
+  /**
+   * Get the current state
+   * @returns {Object} The current state object
+   */
   getState() {
     return stateData.state;
+  }
+  
+  /**
+   * Wait until the service is ready
+   * @param {number} [timeout=5000] - Maximum time to wait in milliseconds
+   * @returns {Promise<void>}
+   */
+  waitUntilReady(timeout = 5000) {
+    return new Promise((resolve, reject) => {
+      if (this.isReady) {
+        return resolve();
+      }
+
+      const timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error('Timed out waiting for StateService to be ready'));
+      }, timeout);
+
+      const checkReady = () => {
+        if (this.isReady) {
+          cleanup();
+          resolve();
+        }
+      };
+
+      const cleanup = () => {
+        clearTimeout(timeoutId);
+        this.off('ready', checkReady);
+      };
+
+      this.on('ready', checkReady);
+      
+      // Check immediately in case ready state changed before we set up the listener
+      if (this.isReady) {
+        cleanup();
+        resolve();
+      }
+    });
   }
 
   addListener(event, listener) {
@@ -1398,16 +1447,83 @@ export class NewStateServiceDemo extends ContinuousService {
   async _loadInitialData() {
     if (!this._db) {
       this._debug("Database not connected");
-      return;
+      return false;
     }
 
     try {
-      // Load tanks data
+      // First try to load the most recent full state
+      const fullStateRow = await new Promise((resolve) => {
+        this._db.get(
+          "SELECT data FROM full_state ORDER BY timestamp DESC LIMIT 1",
+          (err, row) => {
+            if (err) {
+              this._debug("Error querying full_state:", err.message);
+              resolve(null);
+            } else {
+              resolve(row);
+            }
+          }
+        );
+      });
 
-      this._debug("Initial data loaded successfully");
+      if (fullStateRow && fullStateRow.data) {
+        try {
+          const fullState = JSON.parse(fullStateRow.data);
+          this._debug("Loaded full state from database");
+          
+          // Apply the full state update
+          stateData.batchUpdate(fullState);
+          this._debug("Applied full state to stateData");
+          return true;
+        } catch (error) {
+          this._debug("Error parsing full state:", error);
+          // Continue to try loading from patches if full state fails
+        }
+      }
+
+      this._debug("No valid full state found, will load from patches");
+      
+      // If we get here, we need to load from patches
+      // First check if we have any patches
+      const patchCount = await new Promise((resolve) => {
+        this._db.get(
+          "SELECT COUNT(*) as count FROM sk_patches",
+          (err, row) => resolve(row ? row.count : 0)
+        );
+      });
+
+      if (patchCount === 0) {
+        this._debug("No patches found in database, starting with empty state");
+        return false;
+      }
+
+      // Get the most recent patch that contains navigation data
+      const navPatch = await new Promise((resolve) => {
+        this._db.get(`
+          SELECT patch_json 
+          FROM sk_patches 
+          WHERE patch_json LIKE '%"navigation"%' 
+          ORDER BY timestamp DESC 
+          LIMIT 1
+        `, (err, row) => resolve(row));
+      });
+
+      if (navPatch && navPatch.patch_json) {
+        try {
+          const patchData = JSON.parse(navPatch.patch_json);
+          this._debug("Applying latest navigation patch");
+          stateData.batchUpdate(patchData);
+          return true;
+        } catch (error) {
+          this._debug("Error applying navigation patch:", error);
+          return false;
+        }
+      }
+      
+      return false;
     } catch (error) {
       this._debug("Error loading initial data:", error);
-      throw error; // Re-throw to be caught by the caller
+      return false;
     }
   }
 

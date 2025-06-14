@@ -51,6 +51,34 @@ export class StateManager extends EventEmitter {
     this._clientCount = 0;
     this.tideData = null;
     this.weatherData = null;
+    
+    // Track connected clients
+    this.connectedClients = new Map();
+    
+    // Log when a client connects or disconnects
+    this.on('client:connected', (clientId, platform) => {
+      this._clientCount++;
+      console.log(`[STATEMANAGER] Client connected: ${clientId} (${platform || 'unknown platform'})`);
+      console.log(`[STATEMANAGER] Total clients: ${this._clientCount}`);
+    });
+    
+    this.on('client:disconnected', (clientId) => {
+      this._clientCount = Math.max(0, this._clientCount - 1);
+      console.log(`[STATEMANAGER] Client disconnected: ${clientId}`);
+      console.log(`[STATEMANAGER] Remaining clients: ${this._clientCount}`);
+      this.connectedClients.delete(clientId);
+    });
+    
+    // Log when an identity message is processed
+    this.on('identity:received', (identity) => {
+      console.log('[STATEMANAGER] Identity message received:', JSON.stringify({
+        clientId: identity.clientId,
+        platform: identity.platform,
+        role: identity.role,
+        timestamp: new Date().toISOString(),
+        boatId: this._boatId
+      }, null, 2));
+    });
   }
 
   /**

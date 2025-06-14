@@ -16,6 +16,8 @@ class BaseService extends EventEmitter {
     this.name = name;
     this.type = type;
     this.isRunning = false;
+    this.isReady = false; // Indicates if service is fully initialized
+    this._dependencies = []; // Array of service names this service depends on
     this.lastUpdated = null;
     
     // Set up debug logging
@@ -44,6 +46,41 @@ class BaseService extends EventEmitter {
    * @emits {Error} service:{name}:error - Emitted when an error occurs
    * @returns {Promise<void>}
    */
+  /**
+   * Add a service dependency
+   * @param {string} serviceName - Name of the service to depend on
+   * @returns {BaseService} Returns this for chaining
+   */
+  setServiceDependency(serviceName) {
+    if (!this._dependencies.includes(serviceName)) {
+      this._dependencies.push(serviceName);
+      this.log(`Added dependency on service: ${serviceName}`);
+    }
+    return this; // Allow chaining
+  }
+
+  /**
+   * Wait for all dependencies to be ready
+   * @private
+   * @param {ServiceManager} serviceManager - The service manager instance
+   * @param {number} [timeout=10000] - Timeout in milliseconds
+   */
+  async _waitForDependencies(serviceManager, timeout = 10000) {
+    if (!this._dependencies || this._dependencies.length === 0) {
+      return; // No dependencies to wait for
+    }
+
+    this.log(`Waiting for dependencies: ${this._dependencies.join(', ')}`);
+    await Promise.all(
+      this._dependencies.map(name => 
+        serviceManager.waitForServiceReady(name, timeout)
+          .catch(error => {
+            throw new Error(`Dependency ${name} failed to become ready: ${error.message}`);
+          })
+      )
+    );
+  }
+
   async start() {
     if (this.isRunning) {
       this.log('Service is already running');
@@ -54,11 +91,19 @@ class BaseService extends EventEmitter {
       this.emit(`service:${this.name}:starting`);
       this.log('Starting service');
       
+      // Wait for dependencies before starting
+      if (this.serviceManager) {
+        await this._waitForDependencies(this.serviceManager);
+      }
+      
       this.isRunning = true;
       this.lastUpdated = new Date();
       
+      // Mark as ready after successful start
+      this.isReady = true;
       this.emit(`service:${this.name}:started`, { timestamp: this.lastUpdated });
-      this.log('Service started successfully');
+      this.emit('ready');
+      this.log('Service started successfully and is ready');
     } catch (error) {
       this.logError('Failed to start service:', error);
       this.emit(`service:${this.name}:error`, { 
@@ -88,8 +133,10 @@ class BaseService extends EventEmitter {
       this.log('Stopping service');
       
       this.isRunning = false;
+      this.isReady = false; // No longer ready when stopped
       
       this.emit(`service:${this.name}:stopped`, { timestamp: new Date() });
+      this.emit('stopped');
       this.log('Service stopped successfully');
     } catch (error) {
       this.logError('Error stopping service:', error);
@@ -163,6 +210,42 @@ class BaseService extends EventEmitter {
    */
   emit(event, ...args) {
     return super.emit(event, ...args);
+  }
+  
+  /**
+   * Wait until the service is ready
+   * @param {number} [timeout=5000] - Maximum time to wait in milliseconds
+   * @returns {Promise<void>}
+   */
+  waitUntilReady(timeout = 5000) {
+    if (this.isReady) {
+      return Promise.resolve();
+    }
+    
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Timed out waiting for ${this.name} service to be ready`));
+      }, timeout);
+      
+      const onReady = () => {
+        cleanup();
+        resolve();
+      };
+      
+      const cleanup = () => {
+        clearTimeout(timeoutId);
+        this.off('ready', onReady);
+      };
+      
+      this.on('ready', onReady);
+      
+      // Check again in case ready event was emitted before we set up the listener
+      if (this.isReady) {
+        cleanup();
+        resolve();
+      }
+    });
   }
 }
 

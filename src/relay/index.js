@@ -41,7 +41,36 @@ function verifyToken(token) {
 // --- EXPRESS APP FOR AUTH & BOAT MGMT ---
 const app = express();
 app.use(bodyParser.json());
-app.use(cors());
+//app.use(cors());
+
+// Configure CORS with logging
+console.log('[CORS] Configuring with allowed origins:', ALLOWED_ORIGINS);
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      console.log('[CORS] Allowing request with no origin');
+      return callback(null, true);
+    }
+    
+    // Check if origin is allowed
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      console.log(`[CORS] Allowing request from origin: ${origin}`);
+      return callback(null, true);
+    }
+    
+    // For development, log a warning but still allow the request
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(`[CORS] Warning: Allowing request from unauthorized origin in development: ${origin}`);
+      return callback(null, true);
+    }
+    
+    // In production, block the request
+    console.warn(`[CORS] Blocking request from unauthorized origin: ${origin}`);
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true
+}));
 
 // USER REGISTRATION
 app.post("/api/register", async (req, res) => {
@@ -226,9 +255,20 @@ const clientConnections = new Map(); // boatId -> Set of client connections
 const serverConnections = new Map(); // boatId -> Set of server connections
 
 httpServer.on("upgrade", (req, socket, head) => {
+  const origin = req.headers.origin;
+  const ip = req.socket.remoteAddress;
+  
+  // Log the connection attempt
+  console.log(`[WS] Upgrade request from ${ip}, Origin: ${origin || 'none'}`);
+  
+  // Allow the upgrade but log if origin is not in allowed list
+  if (origin && ALLOWED_ORIGINS.length > 0 && !ALLOWED_ORIGINS.includes(origin)) {
+    console.warn(`[WS] Warning: Connection from unauthorized origin: ${origin}`);
+    // Note: We're still allowing the connection for now, just logging the warning
+  }
+  
   wss.handleUpgrade(req, socket, head, (ws) => {
-    const ip = req.socket.remoteAddress;
-    console.log(`[WS] New connection from ${ip}`);
+    console.log(`[WS] WebSocket connection established from ${ip}`);
     wss.emit("connection", ws, req);
   });
 });

@@ -1,5 +1,11 @@
-import { getDb, getBoatPublicKey, registerBoatKey, registerClientKey, getClientPublicKey } from './database.js';
-import { verifySignature, verifyClientSignature } from './auth.js';
+import {
+  getDb,
+  getBoatPublicKey,
+  registerBoatKey,
+  registerClientKey,
+  getClientPublicKey,
+} from "./database.js";
+import { verifySignature, verifyClientSignature } from "./auth.js";
 
 // Connection tracking using two separate maps
 const clientConnections = new Map(); // boatId -> Set of client connections
@@ -13,31 +19,44 @@ export function handleConnection(ws, req) {
   ws.boatIds = new Set(); // Tracks all boat IDs this connection is subscribed to
   ws.clientId = null; // Will be set for client connections
   const ip = req.socket.remoteAddress;
-  
+
   // Generate a unique connection ID for tracking
   ws.connectionId = Math.random().toString(36).substring(2, 15);
-  
+
   console.log(
     `[WS-DETAILED] New connection from ${ip} with headers:`,
     req.headers
   );
-  console.log(`[WS-CONNECTION-DEBUG] New WebSocket connection established: connectionId=${ws.connectionId}, ip=${ip}`);
-  
+  console.log(
+    `[WS-CONNECTION-DEBUG] New WebSocket connection established: connectionId=${ws.connectionId}, ip=${ip}`
+  );
+
   // Log user agent if available
-  if (req.headers['user-agent']) {
-    console.log(`[WS-CONNECTION-DEBUG] User agent: ${req.headers['user-agent']}`);
+  if (req.headers["user-agent"]) {
+    console.log(
+      `[WS-CONNECTION-DEBUG] User agent: ${req.headers["user-agent"]}`
+    );
   }
 
   ws.on("message", async (msg) => {
+  // Convert Buffer to string if needed
+  const messageString = msg.toString('utf8');
+  
+  // Skip if message is empty
+  if (!messageString.trim()) {
+    console.warn(`[WS] Received empty message from ${ip}`);
+    return;
+  }
+
     let message;
     try {
       message = JSON.parse(msg);
       // Log all incoming messages for debugging
       console.log(`[WS-MSG-DEBUG] Received message from ${ip}:`, {
         type: message.type,
-        clientId: message.clientId || 'unknown',
-        boatId: message.boatId || 'unknown',
-        role: message.role || 'unknown'
+        clientId: message.clientId || "unknown",
+        boatId: message.boatId || "unknown",
+        role: message.role || "unknown",
       });
     } catch (e) {
       console.warn(`[WS] Invalid JSON from ${ip}: ${msg}`, e);
@@ -45,13 +64,23 @@ export function handleConnection(ws, req) {
     }
 
     // Handle boat key registration
-    if (message.type === "register-key" && message.boatId && message.publicKey && !message.clientId) {
+    if (
+      message.type === "register-key" &&
+      message.boatId &&
+      message.publicKey &&
+      !message.clientId
+    ) {
       await handleKeyRegistration(ws, message);
       return;
     }
-    
+
     // Handle client key registration
-    if (message.type === "register-client-key" && message.clientId && message.boatId && message.publicKey) {
+    if (
+      message.type === "register-client-key" &&
+      message.clientId &&
+      message.boatId &&
+      message.publicKey
+    ) {
       await handleClientKeyRegistration(ws, message);
       return;
     }
@@ -59,25 +88,32 @@ export function handleConnection(ws, req) {
     // Handle identity/role declaration
     if (message.type === "identity" && message.role && message.boatId) {
       // Log the full identity message for debugging
-      console.log(`[WS-IDENTITY-DEBUG] Full identity message from ${ip}:`, JSON.stringify(message));
-      
+      console.log(
+        `[WS-IDENTITY-DEBUG] Full identity message from ${ip}:`,
+        JSON.stringify(message)
+      );
+
       console.log(`[WS-DETAILED] Identity message received from ${ip}:`, {
         boatId: message.boatId,
         role: message.role,
-        clientId: message.clientId || 'unknown',
+        clientId: message.clientId || "unknown",
         hasSignature: !!message.signature,
         hasTimestamp: !!message.timestamp,
       });
       await handleIdentity(ws, message);
-      
+
       // If this is a client, automatically subscribe it to the boat
-      if (message.role !== 'boat-server' && message.boatId) {
-        console.log(`[WS-DETAILED] Auto-subscribing client ${message.clientId || 'unknown'} to boat ${message.boatId}`);
+      if (message.role !== "boat-server" && message.boatId) {
+        console.log(
+          `[WS-DETAILED] Auto-subscribing client ${
+            message.clientId || "unknown"
+          } to boat ${message.boatId}`
+        );
         handleSubscription(ws, {
-          type: 'subscribe',
+          type: "subscribe",
           boatId: message.boatId,
           role: message.role,
-          clientId: message.clientId
+          clientId: message.clientId,
         });
       }
       return;
@@ -114,12 +150,12 @@ export function handleConnection(ws, req) {
       const pongMessage = JSON.stringify({
         type: "pong",
         timestamp: Date.now(),
-        echo: message.timestamp // Echo back the original timestamp for latency calculation
+        echo: message.timestamp, // Echo back the original timestamp for latency calculation
       });
       ws.send(pongMessage);
       return;
     }
-    
+
     // Handle regular messages
     if (message.boatId) {
       handleMessageRouting(ws, message, msg);
@@ -132,15 +168,15 @@ export function handleConnection(ws, req) {
       ws.boatIds.forEach((boatId) => {
         // If this is a client disconnecting, notify the server
         if (ws.role !== "boat-server") {
-          const clientId = ws.clientId || 'unknown';
+          const clientId = ws.clientId || "unknown";
           notifyServerOfClientDisconnection(boatId, clientId);
         }
-        
+
         // Then handle the unsubscription
         handleUnsubscription(ws, boatId);
       });
     }
-    
+
     console.log(
       `[WS] Connection closed (${ws.role || "unidentified"} from ${ip})`
     );
@@ -157,7 +193,7 @@ export function handleConnection(ws, req) {
 async function handleKeyRegistration(ws, message) {
   try {
     const success = await registerBoatKey(message.boatId, message.publicKey);
-    
+
     // Send confirmation
     ws.send(
       JSON.stringify({
@@ -185,8 +221,12 @@ async function handleKeyRegistration(ws, message) {
  */
 async function handleClientKeyRegistration(ws, message) {
   try {
-    const success = await registerClientKey(message.clientId, message.publicKey, message.boatId);
-    
+    const success = await registerClientKey(
+      message.clientId,
+      message.publicKey,
+      message.boatId
+    );
+
     // Send confirmation
     ws.send(
       JSON.stringify({
@@ -197,7 +237,9 @@ async function handleClientKeyRegistration(ws, message) {
       })
     );
 
-    console.log(`[WS] Registered client key for client ${message.clientId} on boat ${message.boatId}`);
+    console.log(
+      `[WS] Registered client key for client ${message.clientId} on boat ${message.boatId}`
+    );
   } catch (error) {
     console.error(`[WS] Error registering client key:`, error);
     ws.send(
@@ -244,48 +286,77 @@ async function handleIdentity(ws, message) {
 
   // Auto-subscribe if not already
   if (message.boatId && !ws.boatIds.has(message.boatId)) {
-    console.log(`[WS-DETAILED] Auto-subscribing ${message.role} ${message.clientId || 'unknown'} to boat ${message.boatId}`);
+    console.log(
+      `[WS-DETAILED] Auto-subscribing ${message.role} ${
+        message.clientId || "unknown"
+      } to boat ${message.boatId}`
+    );
     handleSubscription(ws, message);
-  } else if (message.boatId && ws.boatIds.has(message.boatId) && message.role !== 'boat-server' && message.clientId) {
+  } else if (
+    message.boatId &&
+    ws.boatIds.has(message.boatId) &&
+    message.role !== "boat-server" &&
+    message.clientId
+  ) {
     // If already subscribed but this is a client (not boat-server), make sure to notify the server
-    console.log(`[WS-DETAILED] Client ${message.clientId} already subscribed to boat ${message.boatId}, ensuring server notification`);
-    
+    console.log(
+      `[WS-DETAILED] Client ${message.clientId} already subscribed to boat ${message.boatId}, ensuring server notification`
+    );
+
     // Notify the boat server about the client connection
     if (serverConnections.has(message.boatId)) {
       const servers = serverConnections.get(message.boatId);
       let notificationSent = false;
-      
-      console.log(`[WS-DETAILED] Found ${servers.size} server(s) for boat ${message.boatId} to notify about client ${message.clientId} connection`);
-      
+
+      console.log(
+        `[WS-DETAILED] Found ${servers.size} server(s) for boat ${message.boatId} to notify about client ${message.clientId} connection`
+      );
+
       servers.forEach((server) => {
-        console.log(`[WS-DETAILED] Server readyState: ${server.readyState} (1=OPEN, 0=CONNECTING, 2=CLOSING, 3=CLOSED)`);
-        
+        console.log(
+          `[WS-DETAILED] Server readyState: ${server.readyState} (1=OPEN, 0=CONNECTING, 2=CLOSING, 3=CLOSED)`
+        );
+
         if (server.readyState === 1) {
           try {
             const clientConnectedMsg = JSON.stringify({
               type: "client-connected",
               clientId: message.clientId,
               boatId: message.boatId,
-              timestamp: new Date().toISOString()
+              timestamp: new Date().toISOString(),
             });
-            
-            console.log(`[WS-DETAILED] Sending client-connected notification: ${clientConnectedMsg}`);
+
+            console.log(
+              `[WS-DETAILED] Sending client-connected notification: ${clientConnectedMsg}`
+            );
             server.send(clientConnectedMsg);
-            console.log(`[WS-DETAILED] Successfully sent client-connected notification to server for client ${message.clientId}`);
+            console.log(
+              `[WS-DETAILED] Successfully sent client-connected notification to server for client ${message.clientId}`
+            );
             notificationSent = true;
           } catch (error) {
-            console.error(`[WS] Error sending client-connected notification to server:`, error, error.stack);
+            console.error(
+              `[WS] Error sending client-connected notification to server:`,
+              error,
+              error.stack
+            );
           }
         } else {
-          console.log(`[WS-DETAILED] Server not in OPEN state, cannot send notification`);
+          console.log(
+            `[WS-DETAILED] Server not in OPEN state, cannot send notification`
+          );
         }
       });
-      
+
       if (!notificationSent) {
-        console.log(`[WS] No active servers to notify about client ${message.clientId} connection`);
+        console.log(
+          `[WS] No active servers to notify about client ${message.clientId} connection`
+        );
       }
     } else {
-      console.log(`[WS-DETAILED] No server connections found for boat ${message.boatId}, cannot notify about client ${message.clientId} connection`);
+      console.log(
+        `[WS-DETAILED] No server connections found for boat ${message.boatId}, cannot notify about client ${message.clientId} connection`
+      );
     }
   }
 }
@@ -346,33 +417,51 @@ async function handleBoatIdentity(ws, message) {
  * Handle client identity message with signature verification
  */
 async function handleClientIdentity(ws, message) {
-  console.log(`[CLIENT-IDENTITY-DEBUG] Processing client identity for client ${message.clientId} and boat ${message.boatId}`);
-  console.log(`[CLIENT-IDENTITY-DEBUG] Full client identity message:`, JSON.stringify(message));
-  
+  console.log(
+    `[CLIENT-IDENTITY-DEBUG] Processing client identity for client ${message.clientId} and boat ${message.boatId}`
+  );
+  console.log(
+    `[CLIENT-IDENTITY-DEBUG] Full client identity message:`,
+    JSON.stringify(message)
+  );
+
   try {
-    console.log(`[CLIENT-IDENTITY-DEBUG] Looking up public key for client ${message.clientId} on boat ${message.boatId}`);
-    const publicKey = await getClientPublicKey(message.clientId, message.boatId);
+    console.log(
+      `[CLIENT-IDENTITY-DEBUG] Looking up public key for client ${message.clientId} on boat ${message.boatId}`
+    );
+    const publicKey = await getClientPublicKey(
+      message.clientId,
+      message.boatId
+    );
 
     if (!publicKey) {
-      console.warn(`[WS] No client key found for client ${message.clientId} on boat ${message.boatId}`);
+      console.warn(
+        `[WS] No client key found for client ${message.clientId} on boat ${message.boatId}`
+      );
       // Allow connection but log warning - the client should register its key
       ws.role = message.role;
       ws.clientId = message.clientId; // Store client ID on the connection
-      
+
       // Store the boat ID on the connection for easier access
       if (!ws.boatIds) ws.boatIds = new Set();
       if (message.boatId) ws.boatIds.add(message.boatId);
-      
+
       console.log(
         `[WS] ${ws.role} client ${message.clientId} identified for boat ${message.boatId} (NO KEY - INSECURE)`
       );
-      console.log(`[CLIENT-IDENTITY-DEBUG] Client connection properties: role=${ws.role}, clientId=${ws.clientId}, boatIds=${Array.from(ws.boatIds).join(',')}`);
+      console.log(
+        `[CLIENT-IDENTITY-DEBUG] Client connection properties: role=${
+          ws.role
+        }, clientId=${ws.clientId}, boatIds=${Array.from(ws.boatIds).join(",")}`
+      );
     } else {
       // Verify the client signature
       console.log(
         `[AUTH-DETAILED] Found client key for client ${message.clientId} on boat ${message.boatId}, verifying signature`
       );
-      console.log(`[CLIENT-IDENTITY-DEBUG] Public key found, proceeding with signature verification`);
+      console.log(
+        `[CLIENT-IDENTITY-DEBUG] Public key found, proceeding with signature verification`
+      );
 
       const isValid = verifyClientSignature(
         message.clientId,
@@ -383,8 +472,12 @@ async function handleClientIdentity(ws, message) {
       );
 
       if (!isValid) {
-        console.warn(`[WS] Invalid signature from client ${message.clientId} for boat ${message.boatId}`);
-        console.log(`[CLIENT-IDENTITY-DEBUG] Signature verification FAILED, closing connection`);
+        console.warn(
+          `[WS] Invalid signature from client ${message.clientId} for boat ${message.boatId}`
+        );
+        console.log(
+          `[CLIENT-IDENTITY-DEBUG] Signature verification FAILED, closing connection`
+        );
         ws.close(4000, "Authentication failed: Invalid client signature");
         return;
       } else {
@@ -393,15 +486,21 @@ async function handleClientIdentity(ws, message) {
         );
         ws.role = message.role;
         ws.clientId = message.clientId; // Store client ID on the connection
-        
+
         // Store the boat ID on the connection for easier access
         if (!ws.boatIds) ws.boatIds = new Set();
         if (message.boatId) ws.boatIds.add(message.boatId);
-        
+
         console.log(
           `[WS] ${ws.role} client ${message.clientId} authenticated for boat ${message.boatId} (SECURE)`
         );
-        console.log(`[CLIENT-IDENTITY-DEBUG] Client successfully authenticated. Connection properties: role=${ws.role}, clientId=${ws.clientId}, boatIds=${Array.from(ws.boatIds).join(',')}`);
+        console.log(
+          `[CLIENT-IDENTITY-DEBUG] Client successfully authenticated. Connection properties: role=${
+            ws.role
+          }, clientId=${ws.clientId}, boatIds=${Array.from(ws.boatIds).join(
+            ","
+          )}`
+        );
       }
     }
   } catch (error) {
@@ -420,11 +519,13 @@ async function handleClientIdentity(ws, message) {
  */
 function handleSubscription(ws, message) {
   // Handle array of boat IDs
-  const boatIds = Array.isArray(message.boatIds) ? message.boatIds : [message.boatId];
-  
-  boatIds.forEach(boatId => {
+  const boatIds = Array.isArray(message.boatIds)
+    ? message.boatIds
+    : [message.boatId];
+
+  boatIds.forEach((boatId) => {
     if (!boatId) return; // Skip empty boat IDs
-    
+
     ws.boatIds.add(boatId);
 
     // Add to appropriate connection map
@@ -439,54 +540,85 @@ function handleSubscription(ws, message) {
         clientConnections.set(boatId, new Set());
       }
       clientConnections.get(boatId).add(ws);
-      
+
       // Log with client ID if available
-      const clientId = ws.clientId || 'unknown';
+      const clientId = ws.clientId || "unknown";
       if (ws.clientId) {
         console.log(`[WS] Client ${clientId} subscribed to ${boatId}`);
       } else {
         console.log(`[WS] Client subscribed to ${boatId}`);
       }
-      
+
       // Notify the boat server about the new client connection
       if (serverConnections.has(boatId)) {
         const servers = serverConnections.get(boatId);
         let notificationSent = false;
-        
-        console.log(`[WS-DETAILED] Found ${servers.size} server(s) for boat ${boatId} to notify about client ${clientId} connection`);
-        
+
+        console.log(
+          `[WS-DETAILED] Found ${servers.size} server(s) for boat ${boatId} to notify about client ${clientId} connection`
+        );
+
         servers.forEach((server) => {
-          console.log(`[WS-DETAILED] Server readyState: ${server.readyState} (1=OPEN, 0=CONNECTING, 2=CLOSING, 3=CLOSED)`);
-          
+          console.log(
+            `[WS-DETAILED] Server readyState: ${server.readyState} (1=OPEN, 0=CONNECTING, 2=CLOSING, 3=CLOSED)`
+          );
+
           if (server.readyState === 1) {
             try {
               const clientConnectedMsg = JSON.stringify({
                 type: "client-connected",
                 clientId: clientId,
                 boatId: boatId,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
               });
-              
-              console.log(`[WS-DETAILED] Sending client-connected notification: ${clientConnectedMsg}`);
+
+              console.log(
+                `[WS-DETAILED] Sending client-connected notification: ${clientConnectedMsg}`
+              );
               server.send(clientConnectedMsg);
-              console.log(`[WS-DETAILED] Successfully sent client-connected notification to server for client ${clientId}`);
+              console.log(
+                `[WS-DETAILED] Successfully sent client-connected notification to server for client ${clientId}`
+              );
               notificationSent = true;
             } catch (error) {
-              console.error(`[WS] Error sending client-connected notification to server:`, error, error.stack);
+              console.error(
+                `[WS] Error sending client-connected notification to server:`,
+                error,
+                error.stack
+              );
             }
           } else {
-            console.log(`[WS-DETAILED] Server not in OPEN state, cannot send notification`);
+            console.log(
+              `[WS-DETAILED] Server not in OPEN state, cannot send notification`
+            );
           }
         });
-        
+
         if (!notificationSent) {
-          console.log(`[WS] No active servers to notify about client ${clientId} connection`);
+          console.log(
+            `[WS] No active servers to notify about client ${clientId} connection`
+          );
         }
       } else {
-        console.log(`[WS-DETAILED] No server connections found for boat ${boatId}, cannot notify about client ${clientId} connection`);
+        console.log(
+          `[WS-DETAILED] No server connections found for boat ${boatId}, cannot notify about client ${clientId} connection`
+        );
+        if (message.role !== "boat-server" && ws.role !== "boat-server") {
+          try {
+            const statusMessage = JSON.stringify({
+              type: "boat-status",
+              boatId: boatId,
+              status: serverConnections.has(boatId) ? "online" : "offline",
+              timestamp: new Date().toISOString(),
+            });
+            ws.send(statusMessage);
+          } catch (error) {
+            console.error(`[WS] Error sending boat status to client:`, error);
+          }
+        }
       }
     }
-    
+
     updateConnectionStatus(boatId);
   });
 }
@@ -511,26 +643,32 @@ function handleUnsubscription(ws, boatId) {
   }
 
   updateConnectionStatus(boatId);
-  console.log(`[WS] ${ws.role || 'unknown'} unsubscribed from ${boatId}`);
+  console.log(`[WS] ${ws.role || "unknown"} unsubscribed from ${boatId}`);
 }
 
 /**
  * Handle message routing
  */
 function handleMessageRouting(ws, message, rawMsg) {
-const boatId = message.boatId;
-const msgType = message.type || 'unknown';
-const msgSize = rawMsg.length || 0;
+  const boatId = message.boatId;
+  const msgType = message.type || "unknown";
+  const msgSize = rawMsg.length || 0;
 
   // Log detailed message info
-  console.log(`[WS-DETAILED] Routing message: type=${msgType}, boatId=${boatId}, size=${msgSize} bytes`);
-  
+  console.log(
+    `[WS-DETAILED] Routing message: type=${msgType}, boatId=${boatId}, size=${msgSize} bytes`
+  );
+
   // Special logging for full state updates
-  if (msgType === 'state:full-update') {
+  if (msgType === "state:full-update") {
     console.log(`[WS-DETAILED] Routing FULL STATE UPDATE for boat ${boatId}`);
     if (message.data) {
       const stateKeys = Object.keys(message.data);
-      console.log(`[WS-DETAILED] Full state contains ${stateKeys.length} top-level keys: ${stateKeys.join(', ')}`);
+      console.log(
+        `[WS-DETAILED] Full state contains ${
+          stateKeys.length
+        } top-level keys: ${stateKeys.join(", ")}`
+      );
     } else {
       console.warn(`[WS-DETAILED] Full state update has no data property!`);
     }
@@ -542,9 +680,9 @@ const msgSize = rawMsg.length || 0;
       const clients = clientConnections.get(boatId);
       let sentCount = 0;
       let activeClients = 0;
-      
+
       // Count active clients
-      clients.forEach(client => {
+      clients.forEach((client) => {
         if (client.readyState === 1) activeClients++;
       });
 
@@ -554,10 +692,14 @@ const msgSize = rawMsg.length || 0;
           try {
             client.send(rawMsg);
             sentCount++;
-            
+
             // Log client ID if available
-            if (msgType === 'state:full-update') {
-              console.log(`[WS-DETAILED] Sent full state update to client ${client.clientId || 'unknown'}`);
+            if (msgType === "state:full-update") {
+              console.log(
+                `[WS-DETAILED] Sent full state update to client ${
+                  client.clientId || "unknown"
+                }`
+              );
             }
           } catch (error) {
             console.error(`[WS] Error sending message to client:`, error);
@@ -565,9 +707,13 @@ const msgSize = rawMsg.length || 0;
         }
       });
 
-      console.log(`[WS] Server message (${msgType}) routed to ${sentCount}/${activeClients} clients`);
+      console.log(
+        `[WS] Server message (${msgType}) routed to ${sentCount}/${activeClients} clients`
+      );
     } else {
-      console.log(`[WS] No clients to receive server message (${msgType}) for boat ${boatId}`);
+      console.log(
+        `[WS] No clients to receive server message (${msgType}) for boat ${boatId}`
+      );
     }
   }
   // Client sending to server
@@ -576,9 +722,9 @@ const msgSize = rawMsg.length || 0;
       const servers = serverConnections.get(boatId);
       let sentCount = 0;
       let activeServers = 0;
-      
+
       // Count active servers
-      servers.forEach(server => {
+      servers.forEach((server) => {
         if (server.readyState === 1) activeServers++;
       });
 
@@ -594,9 +740,13 @@ const msgSize = rawMsg.length || 0;
         }
       });
 
-      console.log(`[WS] Client message (${msgType}) routed to ${sentCount}/${activeServers} servers`);
+      console.log(
+        `[WS] Client message (${msgType}) routed to ${sentCount}/${activeServers} servers`
+      );
     } else {
-      console.log(`[WS] No servers to receive client message (${msgType}) for boat ${boatId}`);
+      console.log(
+        `[WS] No servers to receive client message (${msgType}) for boat ${boatId}`
+      );
     }
   }
 }
@@ -608,7 +758,7 @@ function notifyServerOfClientDisconnection(boatId, clientId) {
   if (serverConnections.has(boatId)) {
     const servers = serverConnections.get(boatId);
     let notificationSent = false;
-    
+
     servers.forEach((server) => {
       if (server.readyState === 1) {
         try {
@@ -616,20 +766,27 @@ function notifyServerOfClientDisconnection(boatId, clientId) {
             type: "client-disconnected",
             clientId: clientId,
             boatId: boatId,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
           });
-          
+
           server.send(clientDisconnectedMsg);
-          console.log(`[WS-DETAILED] Sent client-disconnected notification to server for client ${clientId}`);
+          console.log(
+            `[WS-DETAILED] Sent client-disconnected notification to server for client ${clientId}`
+          );
           notificationSent = true;
         } catch (error) {
-          console.error(`[WS] Error sending client-disconnected notification to server:`, error);
+          console.error(
+            `[WS] Error sending client-disconnected notification to server:`,
+            error
+          );
         }
       }
     });
-    
+
     if (!notificationSent) {
-      console.log(`[WS] No active servers to notify about client ${clientId} disconnection`);
+      console.log(
+        `[WS] No active servers to notify about client ${clientId} disconnection`
+      );
     }
   }
 }
@@ -638,27 +795,37 @@ function notifyServerOfClientDisconnection(boatId, clientId) {
  * Update connection status
  */
 function updateConnectionStatus(boatId) {
-  console.log(`[VPS-RELAY-DEBUG] Updating connection status for boat ${boatId}`);
-  
+  console.log(
+    `[VPS-RELAY-DEBUG] Updating connection status for boat ${boatId}`
+  );
+
   // Get client count for this boat
   const clientCount = clientConnections.has(boatId)
     ? clientConnections.get(boatId).size
     : 0;
-    
-  console.log(`[VPS-RELAY-DEBUG] Client connections for boat ${boatId}: ${clientCount}`);
-  console.log(`[VPS-RELAY-DEBUG] Client connection details:`, 
-    clientConnections.has(boatId) 
-      ? Array.from(clientConnections.get(boatId)).map(c => ({ 
-          clientId: c.clientId || 'unknown', 
-          readyState: c.readyState 
-        })) 
-      : 'none');
-  
+
+  console.log(
+    `[VPS-RELAY-DEBUG] Client connections for boat ${boatId}: ${clientCount}`
+  );
+  console.log(
+    `[VPS-RELAY-DEBUG] Client connection details:`,
+    clientConnections.has(boatId)
+      ? Array.from(clientConnections.get(boatId)).map((c) => ({
+          clientId: c.clientId || "unknown",
+          readyState: c.readyState,
+        }))
+      : "none"
+  );
+
   // Check if there are any servers for this boat
   const hasServers =
     serverConnections.has(boatId) && serverConnections.get(boatId).size > 0;
-    
-  console.log(`[VPS-RELAY-DEBUG] Server connections for boat ${boatId}: ${serverConnections.has(boatId) ? serverConnections.get(boatId).size : 0}`);
+
+  console.log(
+    `[VPS-RELAY-DEBUG] Server connections for boat ${boatId}: ${
+      serverConnections.has(boatId) ? serverConnections.get(boatId).size : 0
+    }`
+  );
 
   // Notify servers about client connection changes
   if (hasServers) {
@@ -668,23 +835,34 @@ function updateConnectionStatus(boatId) {
       clientCount,
       timestamp: Date.now(),
     });
-    
-    console.log(`[VPS-RELAY-DEBUG] Sending connectionStatus message to servers:`, statusMessage);
+
+    console.log(
+      `[VPS-RELAY-DEBUG] Sending connectionStatus message to servers:`,
+      statusMessage
+    );
 
     let sentCount = 0;
     serverConnections.get(boatId).forEach((server) => {
       if (server.readyState === 1) {
-        console.log(`[VPS-RELAY-DEBUG] Sending connectionStatus to server with readyState: ${server.readyState}`);
+        console.log(
+          `[VPS-RELAY-DEBUG] Sending connectionStatus to server with readyState: ${server.readyState}`
+        );
         server.send(statusMessage);
         sentCount++;
       } else {
-        console.log(`[VPS-RELAY-DEBUG] Skipping server with readyState: ${server.readyState}`);
+        console.log(
+          `[VPS-RELAY-DEBUG] Skipping server with readyState: ${server.readyState}`
+        );
       }
     });
-    
-    console.log(`[VPS-RELAY-DEBUG] Sent connectionStatus to ${sentCount} servers for boat ${boatId}`);
+
+    console.log(
+      `[VPS-RELAY-DEBUG] Sent connectionStatus to ${sentCount} servers for boat ${boatId}`
+    );
   } else {
-    console.log(`[VPS-RELAY-DEBUG] No servers connected for boat ${boatId}, cannot send connectionStatus`);
+    console.log(
+      `[VPS-RELAY-DEBUG] No servers connected for boat ${boatId}, cannot send connectionStatus`
+    );
   }
 
   console.log(
@@ -701,41 +879,41 @@ export function getConnectionStats() {
   const stats = {
     totalClients: 0,
     totalServers: 0,
-    boats: []
+    boats: [],
   };
-  
+
   // Count all unique connections
   const allClientConns = new Set();
   const allServerConns = new Set();
-  
+
   // Process client connections
   for (const [boatId, clients] of clientConnections.entries()) {
-    clients.forEach(client => allClientConns.add(client));
-    
+    clients.forEach((client) => allClientConns.add(client));
+
     const boatStats = {
       boatId,
       clientCount: clients.size,
-      hasServer: serverConnections.has(boatId)
+      hasServer: serverConnections.has(boatId),
     };
-    
+
     stats.boats.push(boatStats);
   }
-  
+
   // Process server connections and add boats with no clients
   for (const [boatId, servers] of serverConnections.entries()) {
-    servers.forEach(server => allServerConns.add(server));
-    
+    servers.forEach((server) => allServerConns.add(server));
+
     if (!clientConnections.has(boatId)) {
       stats.boats.push({
         boatId,
         clientCount: 0,
-        hasServer: true
+        hasServer: true,
       });
     }
   }
-  
+
   stats.totalClients = allClientConns.size;
   stats.totalServers = allServerConns.size;
-  
+
   return stats;
 }

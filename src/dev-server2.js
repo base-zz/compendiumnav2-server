@@ -17,6 +17,8 @@ import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
 import { registerVpsRoutes } from "./server/vps/registration.js";
 import debug from "debug";
 import http from "http";
+import fs from "fs";
+import path from "path";
 import { stateData } from "./state/StateData.js";
 
 const log = debug("compendium:dev-server2");
@@ -356,18 +358,38 @@ async function startDevServer() {
 
     log(`[DEBUG] Configured HTTP server port: ${PORT}`);
 
-    const httpServer = http.createServer(app);
+    // Create HTTP server
+    const server = http.createServer(app);
 
     // Add error handler for the HTTP server
-    httpServer.on("error", (error) => {
-      if (error.code === "EADDRINUSE") {
-        log(
-          `[ERROR] Port ${PORT} is already in use. Please check for other running instances.`
-        );
-      } else {
-        log(`[ERROR] HTTP server error: ${error.message}`);
+    server.on("error", (error) => {
+      // Check if this is a Node.js error with a code property
+      if (error && typeof error === 'object' && 'code' in error) {
+        if (error.code === "EADDRINUSE") {
+          log(
+            `[ERROR] Port ${PORT} is already in use. Please check for other running instances.`
+          );
+          process.exit(1);
+        }
       }
+      
+      // For all other errors, just log the message
+      const errorMessage = error && typeof error === 'object' && 'message' in error 
+        ? error.message 
+        : String(error);
+      log(`[ERROR] HTTP server error: ${errorMessage}`);
       process.exit(1);
+    });
+
+    // Start the server
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`[HTTP] Server started on port ${PORT}`);
+      console.log(`[HTTP] Access the API at http://localhost:${PORT}/`);
+      console.log("\nAvailable endpoints:");
+      console.log(`  GET  http://localhost:${PORT}/api/boat-info`);
+      console.log(`  POST http://localhost:${PORT}/api/vps/register`);
+      console.log(`  GET  http://localhost:${PORT}/api/vps/health\n`);
+      console.log("[DEV-SERVER2] Development server started with HTTP");
     });
 
     // Graceful shutdown handler
@@ -379,7 +401,7 @@ async function startDevServer() {
         await serviceManager.stopAll();
 
         // Close the HTTP server
-        httpServer.close(() => {
+        server.close(() => {
           console.log("[DEV-SERVER2] HTTP server closed");
           process.exit(0);
         });
@@ -400,17 +422,6 @@ async function startDevServer() {
     // Handle shutdown signals
     process.on("SIGTERM", shutdown);
     process.on("SIGINT", shutdown);
-
-    // Start the HTTP server
-    httpServer.listen(PORT, "0.0.0.0", () => {
-      console.log(`[HTTP] Server started on port ${PORT}`);
-      console.log(`[HTTP] Access the API at http://localhost:${PORT}/`);
-      console.log("\nAvailable endpoints:");
-      console.log(`  GET  http://localhost:${PORT}/api/boat-info`);
-      console.log(`  POST http://localhost:${PORT}/api/vps/register`);
-      console.log(`  GET  http://localhost:${PORT}/api/vps/health\n`);
-      console.log("[DEV-SERVER2] Development server started successfully");
-    });
   } catch (error) {
     console.error("[DEV-SERVER2] Failed to start development server:", error);
     process.exit(1);

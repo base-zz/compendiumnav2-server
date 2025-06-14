@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import forge from 'node-forge';
 import fs from 'fs';
 import path from 'path';
 import fetch from 'node-fetch';
@@ -65,20 +65,19 @@ function generateAndSaveKeyPair() {
  * @returns {Object} The generated key pair
  */
 function generateKeyPair(boatId) {
-  // Use the boat ID as a seed for deterministic key generation
-  const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
-    modulusLength: 2048,
-    publicKeyEncoding: {
-      type: 'spki',
-      format: 'pem'
-    },
-    privateKeyEncoding: {
-      type: 'pkcs8',
-      format: 'pem'
-    }
-  });
-  
-  return { publicKey, privateKey };
+  try {
+    // Use node-forge to generate RSA key pair
+    const rsaKeypair = forge.pki.rsa.generateKeyPair({bits: 2048, workers: 2});
+    
+    // Convert to PEM format
+    const privateKey = forge.pki.privateKeyToPem(rsaKeypair.privateKey);
+    const publicKey = forge.pki.publicKeyToPem(rsaKeypair.publicKey);
+    
+    return { privateKey, publicKey };
+  } catch (error) {
+    console.error('Error generating key pair:', error);
+    throw new Error(`Failed to generate key pair: ${error.message}`);
+  }
 }
 
 /**
@@ -88,19 +87,29 @@ function generateKeyPair(boatId) {
  * @returns {string} The signature as a base64 string
  */
 export function signMessage(message, privateKey) {
-  // If privateKey is not provided, get it from the key pair
-  if (!privateKey) {
-    const keyPair = getOrCreateKeyPair();
-    if (!keyPair || !keyPair.privateKey) {
-      throw new Error('No private key available for signing');
+  try {
+    // If privateKey is not provided, get it from the key pair
+    if (!privateKey) {
+      const keyPair = getOrCreateKeyPair();
+      if (!keyPair || !keyPair.privateKey) {
+        throw new Error('No private key available for signing');
+      }
+      privateKey = keyPair.privateKey;
     }
-    privateKey = keyPair.privateKey;
+    
+    // Convert PEM to forge private key
+    const privateKeyObj = forge.pki.privateKeyFromPem(privateKey);
+    
+    // Create message digest and sign
+    const md = forge.md.sha256.create();
+    md.update(message, 'utf8');
+    
+    // Sign and return base64-encoded signature
+    return forge.util.encode64(privateKeyObj.sign(md));
+  } catch (error) {
+    console.error('Error signing message:', error);
+    throw new Error(`Failed to sign message: ${error.message}`);
   }
-  
-  const sign = crypto.createSign('SHA256');
-  sign.update(message);
-  sign.end();
-  return sign.sign(privateKey, 'base64');
 }
 
 /**

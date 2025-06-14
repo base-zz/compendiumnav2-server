@@ -1,4 +1,5 @@
 import ScheduledService from './ScheduledService.js';
+import { UNIT_PRESETS } from '../shared/unitPreferences.js';
 
 export class WeatherService extends ScheduledService {
   constructor(stateService) {
@@ -12,30 +13,77 @@ export class WeatherService extends ScheduledService {
     
     // Set up a default position (can be overridden by state updates)
     this.position = {
-      latitude: 37.7749,  // Default to San Francisco
-      longitude: -122.4194,
+      latitude: null,  // Default to San Francisco
+      longitude: null,
     };
   }
 
-  async run() {
-    console.log('[WeatherService] Fetching weather data...');
+  /**
+   * Wait for position data to become available
+   * @private
+   * @param {number} timeout - Timeout in milliseconds
+   * @returns {Promise<{latitude: number, longitude: number}>}
+   */
+  async _waitForPosition(timeout = 60000) {
+    const startTime = Date.now();
+    let lastLogTime = 0;
+    const logInterval = 5000; // Log every 5 seconds
     
-    try {
-      let position = this.position;
-      
-      // Try to get position from state service if available
+    while (Date.now() - startTime < timeout) {
       try {
-        const statePosition = this.stateService?.getState()?.navigation?.position;
-        if (statePosition?.latitude?.value && statePosition?.longitude?.value) {
-          position = {
-            latitude: statePosition.latitude.value,
-            longitude: statePosition.longitude.value
+        const state = this.stateService.getState();
+        const position = state?.navigation?.position;
+        
+        if (position?.latitude?.value && position?.longitude?.value) {
+          return {
+            latitude: position.latitude.value,
+            longitude: position.longitude.value
           };
         }
+        
+        // Log progress periodically
+        const now = Date.now();
+        if (now - lastLogTime >= logInterval) {
+          console.log(`[WeatherService] Waiting for position data... (${Math.round((now - startTime) / 1000)}s elapsed)`);
+          lastLogTime = now;
+        }
+        
+        // Wait for a bit before checking again
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
       } catch (error) {
-        console.warn('[WeatherService] Could not get position from state, using default:', error.message);
+        console.error('[WeatherService] Error checking position:', error.message);
+        // Continue waiting even if there's an error checking position
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
+    }
+    
+    throw new Error(`Timed out waiting for position data after ${timeout}ms`);
+  }
+
+  async run() {
+    console.log('[WeatherService] Starting weather data fetch...');
+    
+    try {
+      // Wait for state service to be ready with a longer timeout
+      if (!this.stateService?.isReady) {
+        console.log('[WeatherService] Waiting for state service to be ready...');
+        try {
+          await this.stateService.waitUntilReady(30000); // 30 second timeout
+          console.log('[WeatherService] State service is now ready');
+        } catch (error) {
+          console.error('[WeatherService] Error waiting for state service:', error.message);
+          throw error;
+        }
+      }
+
+      // Wait for position data with retry logic
+      console.log('[WeatherService] Waiting for position data...');
+      const position = await this._waitForPosition(60000); // 60 second timeout for position
+      console.log(`[WeatherService] Got position: ${position.latitude}, ${position.longitude}`);
       
+      // Fetch weather data with the obtained position
+      console.log('[WeatherService] Fetching weather data...');
       const weatherData = await this.fetchWeatherData(position.latitude, position.longitude);
       
       // Emit the weather update event
@@ -49,19 +97,65 @@ export class WeatherService extends ScheduledService {
     }
   }
   
+  /**
+   * Get the current unit preferences from state or use defaults
+   * @private
+   */
+  async _getUnitPreferences() {
+    try {
+      // Try to get preferences from state
+      const state = this.stateService?.getState();
+      if (state?.preferences?.units) {
+        return state.preferences.units;
+      }
+      // Fall back to imperial defaults if no preferences found
+      return UNIT_PRESETS.IMPERIAL;
+    } catch (error) {
+      console.warn('[WeatherService] Could not get unit preferences, using defaults:', error.message);
+      return UNIT_PRESETS.IMPERIAL;
+    }
+  }
+
   async fetchWeatherData(latitude, longitude) {
     try {
+      // Get user's unit preferences
+      const unitPrefs = await this._getUnitPreferences();
+      const isMetric = unitPrefs?.temperature === '°C';
+      
       const params = new URLSearchParams({
         latitude: latitude,
         longitude: longitude,
-        daily: ["weather_code", "temperature_2m_max", "temperature_2m_min", "sunrise", "sunset", "daylight_duration", "sunshine_duration", "uv_index_max", "uv_index_clear_sky_max", "rain_sum", "snowfall_sum", "showers_sum", "precipitation_sum", "precipitation_hours", "precipitation_probability_max", "wind_speed_10m_max", "wind_direction_10m_dominant", "wind_gusts_10m_max"],
-        hourly: ["temperature_2m", "relative_humidity_2m", "dew_point_2m", "apparent_temperature", "precipitation_probability", "precipitation", "rain", "showers", "snowfall", "snow_depth", "cloud_cover", "cloud_cover_low", "cloud_cover_mid", "cloud_cover_high", "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m"],
-        current: ["temperature_2m", "relative_humidity_2m", "apparent_temperature", "is_day", "precipitation", "rain", "showers", "weather_code", "cloud_cover", "pressure_msl", "surface_pressure", "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m"],
+        // Current weather conditions
+        current: [
+          'temperature_2m', 'relative_humidity_2m', 'apparent_temperature',
+          'is_day', 'precipitation', 'rain', 'showers', 'weather_code',
+          'cloud_cover', 'pressure_msl', 'surface_pressure',
+          'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m'
+        ].join(','),
+        // Hourly forecast
+        hourly: [
+          'temperature_2m', 'relative_humidity_2m', 'dew_point_2m',
+          'apparent_temperature', 'precipitation_probability', 'precipitation',
+          'rain', 'showers', 'snowfall', 'snow_depth', 'cloud_cover',
+          'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high',
+          'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m'
+        ].join(','),
+        // Daily forecast
+        daily: [
+          'weather_code', 'temperature_2m_max', 'temperature_2m_min',
+          'sunrise', 'sunset', 'daylight_duration', 'sunshine_duration',
+          'uv_index_max', 'uv_index_clear_sky_max', 'rain_sum', 'snowfall_sum',
+          'precipitation_sum', 'precipitation_hours', 'precipitation_probability_max',
+          'wind_speed_10m_max', 'wind_direction_10m_dominant', 'wind_gusts_10m_max'
+        ].join(','),
+        // Set units based on preferences
+        temperature_unit: isMetric ? 'celsius' : 'fahrenheit',
+        wind_speed_unit: isMetric ? 'kmh' : 'mph',
+        precipitation_unit: isMetric ? 'mm' : 'inch',
         timezone: 'auto',
-        wind_speed_unit: 'kn',
-        temperature_unit: 'fahrenheit',
-        precipitation_unit: 'inch',
-        timeformat: 'iso8601'
+        timeformat: 'iso8601',
+        // Always request wind in knots for marine applications
+        wind_speed_unit: 'kn'
       });
 
       // console.log(`[WeatherService] Fetching weather data from: ${this.baseUrl}?${params.toString()}`);

@@ -1,5 +1,6 @@
 import ScheduledService from "./ScheduledService.js";
 import { fetchWeatherApi } from "openmeteo";
+import { UNIT_PRESETS } from '../shared/unitPreferences.js';
 
 export class TidalService extends ScheduledService {
   constructor(stateService) {
@@ -18,56 +19,141 @@ export class TidalService extends ScheduledService {
     };
   }
 
+  /**
+   * Get the current unit preferences from state or use defaults
+   * @private
+   */
+  async _getUnitPreferences() {
+    try {
+      // Try to get preferences from state
+      const state = this.stateService?.getState();
+      if (state?.preferences?.units) {
+        return state.preferences.units;
+      }
+      // Fall back to imperial defaults if no preferences found
+      return UNIT_PRESETS.IMPERIAL;
+    } catch (error) {
+      console.warn('[TidalService] Could not get unit preferences, using defaults:', error.message);
+      return UNIT_PRESETS.IMPERIAL;
+    }
+  }
+
+  /**
+   * Wait for position data to become available
+   * @private
+   * @param {number} timeout - Timeout in milliseconds
+   * @returns {Promise<{latitude: number, longitude: number}>}
+   */
+  async _waitForPosition(timeout = 60000) {
+    const startTime = Date.now();
+    let lastLogTime = 0;
+    const logInterval = 5000; // Log every 5 seconds
+    
+    while (Date.now() - startTime < timeout) {
+      try {
+        const state = this.stateService.getState();
+        const position = state?.navigation?.position;
+        
+        if (position?.latitude?.value && position?.longitude?.value) {
+          return {
+            latitude: position.latitude.value,
+            longitude: position.longitude.value
+          };
+        }
+        
+        // Log progress periodically
+        const now = Date.now();
+        if (now - lastLogTime >= logInterval) {
+          console.log(`[TidalService] Waiting for position data... (${Math.round((now - startTime) / 1000)}s elapsed)`);
+          lastLogTime = now;
+        }
+        
+        // Wait for a bit before checking again
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+      } catch (error) {
+        console.error('[TidalService] Error checking position:', error.message);
+        // Continue waiting even if there's an error checking position
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    throw new Error(`Timed out waiting for position data after ${timeout}ms`);
+  }
+
   async run() {
-    console.log("[TidalService] Fetching tidal data...");
+    console.log("[TidalService] Starting tidal data fetch...");
 
     try {
-      const position = this.stateService.getState().navigation?.position;
-      // console.log("TIDAL POSTITION", position);
-      if (
-        !position ||
-        !position.latitude?.value ||
-        !position.longitude?.value
-      ) {
-        throw new Error("Position data not available");
+      // Wait for state service to be ready with a longer timeout
+      if (!this.stateService?.isReady) {
+        console.log("[TidalService] Waiting for state service to be ready...");
+        try {
+          await this.stateService.waitUntilReady(30000); // 30 second timeout
+          console.log("[TidalService] State service is now ready");
+        } catch (error) {
+          console.error("[TidalService] Error waiting for state service:", error.message);
+          throw error;
+        }
       }
 
+      // Wait for position data with retry logic
+      console.log("[TidalService] Waiting for position data...");
+      const position = await this._waitForPosition(60000); // 60 second timeout for position
+      console.log(`[TidalService] Got position: ${position.latitude}, ${position.longitude}`);
+
+      // Get user's unit preferences
+      const unitPrefs = await this._getUnitPreferences();
+      const isMetric = unitPrefs?.length === 'm'; // Check if using metric for length
+
       const params = {
-        latitude: position.latitude.value,
-        longitude: position.longitude.value,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        // Daily forecast
         daily: [
-          "wave_height_max",
-          "wave_direction_dominant",
-          "wave_period_max",
-          "wind_wave_height_max",
-          "wind_wave_direction_dominant",
+          'wave_height_max',
+          'wave_direction_dominant',
+          'wave_period_max',
+          'wind_wave_height_max',
+          'wind_wave_direction_dominant',
+          'swell_wave_height_max',
+          'swell_wave_direction_dominant'
         ],
+        // Hourly forecast
         hourly: [
-          "wave_height",
-          "wave_direction",
-          "wave_period",
-          "wind_wave_peak_period",
-          "wind_wave_height",
-          "wind_wave_direction",
-          "wind_wave_period",
-          "swell_wave_height",
-          "swell_wave_direction",
-          "swell_wave_period",
-          "swell_wave_peak_period",
-          "sea_level_height_msl",
-          "sea_surface_temperature",
-          "ocean_current_velocity",
-          "ocean_current_direction",
+          'wave_height',
+          'wave_direction',
+          'wave_period',
+          'wind_wave_peak_period',
+          'wind_wave_height',
+          'wind_wave_direction',
+          'wind_wave_period',
+          'swell_wave_height',
+          'swell_wave_direction',
+          'swell_wave_period',
+          'swell_wave_peak_period',
+          'sea_level_height_msl',
+          'sea_surface_temperature',
+          'ocean_current_velocity',
+          'ocean_current_direction'
         ],
+        // Current conditions
         current: [
-          "wave_height",
-          "wave_direction",
-          "wave_period",
-          "sea_level_height_msl",
-          "sea_surface_temperature",
-          "ocean_current_velocity",
-          "ocean_current_direction",
+          'wave_height',
+          'wave_direction',
+          'wave_period',
+          'sea_level_height_msl',
+          'sea_surface_temperature',
+          'ocean_current_velocity',
+          'ocean_current_direction'
         ],
+        // Set units based on preferences
+        temperature_unit: unitPrefs?.temperature === '°C' ? 'celsius' : 'fahrenheit',
+        wind_speed_unit: 'kn', // Always use knots for marine applications
+        wave_height_unit: isMetric ? 'm' : 'ft',
+        current_velocity_unit: isMetric ? 'kmh' : 'mph',
+        timezone: 'auto',
+        timeformat: 'iso8601'
       };
 
       // console.log(

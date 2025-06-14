@@ -10,7 +10,10 @@ import { startRelayServer, startDirectServerWrapper } from './relay/server/index
 import { registerBoatInfoRoutes, getBoatInfo } from './server/api/boatInfo.js';
 import { registerVpsRoutes } from './server/vps/registration.js';
 import debug from 'debug';
+import https from 'https';
 import http from 'http';
+import fs from 'fs';
+import { join } from 'path';
 import fetch from 'node-fetch';
 
 const log = debug('compendium:dev-server');
@@ -244,42 +247,63 @@ async function startDevServer() {
       log('No VPS URL configured. VPS registration will be disabled.');
     }
     
-    // 8. Start HTTP server with Express
-    const PORT = parseInt(process.env.PORT || '3000', 10);
+    // 8. Start HTTPS server with Express
+    const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
     if (isNaN(PORT)) {
       throw new Error('PORT must be a valid number');
     }
     
-    log(`[DEBUG] Configured HTTP server port: ${PORT}`);
+    log(`[DEBUG] Configured HTTPS server port: ${PORT}`);
     
-    const httpServer = http.createServer(app);
+    // SSL configuration
+    const sslDir = join(__dirname, '../../../ssl');
+    const sslOptions = {
+      key: fs.readFileSync(join(sslDir, 'compendium.local.key')),
+      cert: fs.readFileSync(join(sslDir, 'compendium.local.cert')),
+      requestCert: false,
+      rejectUnauthorized: false // Set to true in production with valid certificates
+    };
     
-    // Add error handler for the HTTP server
-    httpServer.on('error', (error) => {
-      if (error.code === 'EADDRINUSE') {
+    const httpsServer = https.createServer(sslOptions, app);
+    
+    // Add error handler for the HTTPS server
+    httpsServer.on('error', (error) => {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'EADDRINUSE') {
         log(`[ERROR] Port ${PORT} is already in use. Please check for other running instances.`);
       } else {
-        log(`[ERROR] HTTP server error: ${error.message}`);
+        log(`[ERROR] HTTPS server error: ${error?.message || 'Unknown error'}`);
       }
       process.exit(1);
     });
     
-    log(`[DEBUG] Attempting to start HTTP server on port ${PORT}...`);
+    log(`[DEBUG] Attempting to start HTTPS server on port ${PORT}...`);
     
-    // Start the HTTP server
-    httpServer.listen(PORT, '0.0.0.0', () => {
-      const address = httpServer.address();
-      console.log(`[HTTP] Server started on port ${PORT}`);
-      console.log(`[HTTP] Access the API at http://localhost:${PORT}/`);
-      console.log('\nAvailable endpoints:');
-      console.log(`  GET  http://localhost:${PORT}/api/boat-info`);
-      console.log(`  POST http://localhost:${PORT}/api/vps/register`);
-      console.log(`  GET  http://localhost:${PORT}/api/vps/health\n`);
+    // Start the HTTPS server
+    httpsServer.listen(PORT, '0.0.0.0', () => {
+      const address = httpsServer.address();
+      console.log(`[HTTPS] Server started on port ${PORT}`);
+      console.log(`[HTTPS] Access the API at https://localhost:${PORT}/`);
+      console.log('\nAvailable endpoints (HTTPS):');
+      console.log(`  GET  https://localhost:${PORT}/api/boat-info`);
+      console.log(`  POST https://localhost:${PORT}/api/vps/register`);
+      console.log(`  GET  https://localhost:${PORT}/api/vps/health\n`);
     });
     
-    httpServer.on('error', (error) => {
-      console.error('[HTTP] Server error:', error);
-      if (error.code === 'EADDRINUSE') {
+    // Redirect HTTP to HTTPS (optional, for development)
+    if (process.env.NODE_ENV === 'production') {
+      const httpApp = express();
+      httpApp.use((req, res) => {
+        res.redirect(301, `https://${req.headers.host}${req.url}`);
+      });
+      const httpServer = http.createServer(httpApp);
+      httpServer.listen(80, '0.0.0.0');
+      console.log('[HTTP] HTTP server listening on port 80 (redirecting to HTTPS)');
+    }
+    
+    // Error handling for HTTPS server
+    httpsServer.on('error', (error) => {
+      console.error('[HTTPS] Server error:', error);
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'EADDRINUSE') {
         console.error(`[ERROR] Port ${PORT} is already in use. Please stop the other process or use a different port.`);
       }
       process.exit(1);
@@ -415,43 +439,42 @@ if (vpsUrl) {
   log('No VPS URL configured. VPS registration will be disabled.');
 }
   
-// 8. Start HTTP server with Express
-const PORT = parseInt(process.env.PORT || '3000', 10);
-if (isNaN(PORT)) {
-  throw new Error('PORT must be a valid number');
-}
-  
-log(`[DEBUG] Configured HTTP server port: ${PORT}`);
-  
-const httpServer = http.createServer(app);
-  
-// Add error handler for the HTTP server
-httpServer.on('error', (error) => {
-  console.error('[HTTP] Server error:', error);
-  if (error.code === 'EADDRINUSE') {
-    console.error(`[ERROR] Port ${PORT} is already in use. Please stop the other process or use a different port.`);
-  } else {
-    console.error(`[ERROR] HTTP server error: ${error.message}`);
-  }
-  process.exit(1);
-});
-  
-log(`[DEBUG] Attempting to start HTTP server on port ${PORT}...`);
-  
-// Start the HTTP server
-httpServer.listen(PORT, '0.0.0.0', () => {
-  const address = httpServer.address();
-  console.log(`[HTTP] Server started on port ${PORT}`);
-  console.log(`[HTTP] Access the API at http://localhost:${PORT}/`);
-  console.log('\nAvailable endpoints:');
-  console.log(`  GET  http://localhost:${PORT}/api/boat-info`);
-  console.log(`  POST http://localhost:${PORT}/api/vps/register`);
-  console.log(`  GET  http://localhost:${PORT}/api/vps/health\n`);
-
-  console.log("[DEV-SERVER] Development server started successfully");
-});
-
-    console.log("[DEV-SERVER] Development server started successfully");
+  try {
+    // 8. Start HTTP server with Express
+    const PORT = parseInt(process.env.PORT || '3000', 10);
+    if (isNaN(PORT)) {
+      throw new Error('PORT must be a valid number');
+    }
+    
+    log(`[DEBUG] Configured HTTP server port: ${PORT}`);
+    
+    const httpServer = http.createServer(app);
+    
+    // Add error handler for the HTTP server
+    httpServer.on('error', (error) => {
+      console.error('[HTTP] Server error:', error);
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'EADDRINUSE') {
+        console.error(`[ERROR] Port ${PORT} is already in use. Please stop the other process or use a different port.`);
+      } else {
+        console.error(`[ERROR] HTTP server error: ${error?.message || 'Unknown error'}`);
+      }
+      process.exit(1);
+    });
+    
+    log(`[DEBUG] Attempting to start HTTP server on port ${PORT}...`);
+    
+    // Start the HTTP server
+    httpServer.listen(PORT, '0.0.0.0', () => {
+      const address = httpServer.address();
+      console.log(`[HTTP] Server started on port ${PORT}`);
+      console.log(`[HTTP] Access the API at http://localhost:${PORT}/`);
+      console.log('\nAvailable endpoints:');
+      console.log(`  GET  http://localhost:${PORT}/api/boat-info`);
+      console.log(`  POST http://localhost:${PORT}/api/vps/register`);
+      console.log(`  GET  http://localhost:${PORT}/api/vps/health\n`);
+      
+      console.log("[DEV-SERVER] Development server started successfully");
+    });
   } catch (error) {
     console.error("[DEV-SERVER] Failed to start development server:", error);
     process.exit(1);

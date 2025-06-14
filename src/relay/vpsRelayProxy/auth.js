@@ -1,5 +1,6 @@
-import crypto from "crypto";
-import jwt from "jsonwebtoken";
+import forge from 'node-forge';
+import jwt from 'jsonwebtoken';
+import crypto from 'crypto'; // Keep for other crypto operations if needed
 
 const TOKEN_SECRET = process.env.TOKEN_SECRET;
 
@@ -54,12 +55,20 @@ export function generateResetToken(username) {
  */
 export function verifySignature(message, signature, publicKey) {
   try {
-    const verify = crypto.createVerify("SHA256");
-    verify.update(message);
-    verify.end();
-    return verify.verify(publicKey, signature, "base64");
+    // Convert PEM to forge public key
+    const publicKeyObj = forge.pki.publicKeyFromPem(publicKey);
+    
+    // Create message digest
+    const md = forge.md.sha256.create();
+    md.update(message, 'utf8');
+    
+    // Verify the signature
+    return publicKeyObj.verify(
+      md.digest().bytes(),
+      forge.util.decode64(signature)
+    );
   } catch (error) {
-    console.error("Signature verification error:", error);
+    console.error('Signature verification error:', error);
     return false;
   }
 }
@@ -69,8 +78,8 @@ export function verifySignature(message, signature, publicKey) {
  * @param {string} clientId - Unique identifier for the client
  * @param {string} boatId - ID of the boat the client is associated with
  * @param {string} timestamp - Timestamp of the message
- * @param {string} signature - Signature to verify
- * @param {string} publicKey - Client's public key
+ * @param {string} signature - Signature to verify (base64 encoded)
+ * @param {string} publicKey - Client's public key in PEM format
  * @returns {boolean} - Whether the signature is valid
  */
 export function verifyClientSignature(clientId, boatId, timestamp, signature, publicKey) {
@@ -78,11 +87,18 @@ export function verifyClientSignature(clientId, boatId, timestamp, signature, pu
     // The message format is "clientId:boatId:timestamp"
     const message = `${clientId}:${boatId}:${timestamp}`;
     
-    const verify = crypto.createVerify("SHA256");
-    verify.update(message);
-    verify.end();
+    // Convert PEM to forge public key
+    const publicKeyObj = forge.pki.publicKeyFromPem(publicKey);
     
-    const isValid = verify.verify(publicKey, signature, "base64");
+    // Create message digest
+    const md = forge.md.sha256.create();
+    md.update(message, 'utf8');
+    
+    // Verify the signature
+    const isValid = publicKeyObj.verify(
+      md.digest().bytes(),
+      forge.util.decode64(signature)
+    );
     
     if (!isValid) {
       console.warn(`[AUTH] Invalid signature for client ${clientId} and boat ${boatId}`);
