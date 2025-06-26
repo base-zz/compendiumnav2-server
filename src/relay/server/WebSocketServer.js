@@ -2,6 +2,19 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 import { v4 as uuidv4 } from 'uuid';
 
+// Extended WebSocket type with custom properties
+/**
+ * @typedef {Object} ExtendedWebSocket
+ * @property {string} [userId]
+ * @property {string} [vesselId]
+ * @property {boolean} [isAlive]
+ * @property {string} [clientId]
+ * @property {import('net').Socket} [_socket]
+ */
+
+// Extend the WebSocket type with our custom properties
+/** @typedef {WebSocket & ExtendedWebSocket} ClientWebSocket */
+
 /**
  * RelayWebSocketServer
  * 
@@ -38,13 +51,12 @@ export class RelayWebSocketServer {
     this.server = new WebSocketServer({
       server: httpServer,
       path: this.options.path,
-      // Enable ping/pong
       clientTracking: true,
-      // Set ping interval to 30 seconds
-      pingInterval: 30000,
-      // Set ping timeout to 10 seconds
-      pingTimeout: 10000
+      // ping/pong is handled manually in _setupPingInterval
     });
+    
+    // Set up ping interval after server is created
+    this._setupPingInterval();
     
     // Start HTTP server
     return new Promise((resolve, reject) => {
@@ -65,9 +77,6 @@ export class RelayWebSocketServer {
    * Set up WebSocket event handlers
    */
   _setupEventHandlers() {
-    // Set up ping interval
-    this._setupPingInterval();
-    
     // Listen for state events from the RelayServer's StateManager
     // This ensures that anchor updates and other state changes are broadcast to clients
     this.relayServer.stateManager.on('state:patch', (payload) => {
@@ -80,7 +89,7 @@ export class RelayWebSocketServer {
       this._broadcastToSubscribers(payload);
     });
     
-    this.server.on('connection', (ws, req) => {
+    this.server.on('connection', (/** @type {ClientWebSocket} */ ws, req) => {
       const clientId = uuidv4();
       
       // Extract token from URL parameters
@@ -134,26 +143,60 @@ export class RelayWebSocketServer {
       
       // Handle client messages
       ws.on('message', (message) => {
-        console.log(`[WS] Received raw message from client ${clientId}:`, message.toString());
-        console.log(`[WS] Message type:`, typeof message);
-        console.log(`[WS] Message length:`, message.length);
+        let parsedMessage;
+        let rawMessage;
         
         try {
-          const data = JSON.parse(message);
-          console.log(`[WS] Parsed message from client ${clientId}:`, JSON.stringify(data));
-          console.log(`[WS] Message type:`, data.type);
-          console.log(`[WS] Message action:`, data.action);
-          console.log(`[WS] Message data:`, JSON.stringify(data.data));
-          this._handleClientMessage(clientId, data);
+          // Log raw message details
+          if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
+            rawMessage = message.toString();
+            console.log(`[WS] Received buffer message from client ${clientId}:`, rawMessage);
+            parsedMessage = JSON.parse(rawMessage);
+          } else if (typeof message === 'string') {
+            rawMessage = message;
+            console.log(`[WS] Received string message from client ${clientId}:`, rawMessage);
+            parsedMessage = JSON.parse(rawMessage);
+          } else if (typeof message === 'object' && message !== null) {
+            // Already parsed (can happen with some WebSocket libraries)
+            parsedMessage = message;
+            rawMessage = JSON.stringify(parsedMessage);
+            console.log(`[WS] Received object message from client ${clientId}:`, parsedMessage);
+          } else {
+            console.warn(`[WS] Received unknown message type from client ${clientId}:`, typeof message, message);
+            return;
+          }
+          
+          // Log detailed message info
+          console.log(`[WS] Message details:`, {
+            clientId,
+            type: parsedMessage.type || 'unknown',
+            action: parsedMessage.action || 'none',
+            hasData: !!parsedMessage.data,
+            rawLength: rawMessage ? rawMessage.length : 0,
+            messageId: parsedMessage.id || 'none',
+            timestamp: new Date().toISOString()
+          });
+          
+          // Log full message for specific types
+          if (parsedMessage.type === 'anchor:update' || parsedMessage.type === 'command') {
+            console.log(`[WS] Full ${parsedMessage.type} message:`, JSON.stringify(parsedMessage, null, 2));
+          }
+          
+          this._handleClientMessage(clientId, parsedMessage);
         } catch (error) {
-          console.error(`[WS] Error parsing message from client ${clientId}:`, error);
+          console.error(`[WS] Error processing message from client ${clientId}:`, error);
           console.error(`[WS] Error message:`, error.message);
           console.error(`[WS] Error stack:`, error.stack);
-          ws.send(JSON.stringify({
-            type: 'error',
-            message: 'Invalid message format',
-            timestamp: Date.now()
-          }));
+          console.error(`[WS] Raw message that caused error:`, rawMessage || message);
+          
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'error',
+              error: 'Invalid message format',
+              details: error.message,
+              timestamp: Date.now()
+            }));
+          }
         }
       });
       
@@ -185,8 +228,14 @@ export class RelayWebSocketServer {
   _handleClientMessage(clientId, message) {
     const { type, action, data } = message;
     
-    if (process.env.DEBUG === 'true') {
-      console.log(`[WS-DEBUG] Received message from client ${clientId}:`, JSON.stringify(message));
+    // Always log message details in debug mode or for certain message types
+    if (process.env.DEBUG === 'true' || type === 'anchor:update' || type === 'command') {
+      console.log(`[WS-DEBUG] Processing ${type} message from client ${clientId}:`, {
+        action,
+        hasData: !!data,
+        messageId: message.id || 'none',
+        timestamp: new Date().toISOString()
+      });
     }
     
     switch (type) {
@@ -278,9 +327,15 @@ export class RelayWebSocketServer {
    * Send data to all clients
    */
   _sendToAllClients(message) {
-    this.wss.clients.forEach(client => {
+    if (!this.server) {
+      console.warn('[WS] Cannot send to all clients: WebSocket server not initialized');
+      return;
+    }
+    
+    const messageString = JSON.stringify(message);
+    this.server.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(message));
+        client.send(messageString);
       }
     });
   }

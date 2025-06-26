@@ -1116,14 +1116,15 @@ export class AlertService {
         if (!action || typeof action !== 'object') return;
         
         try {
-          if (action.type === 'CREATE_ALERT' && action.alertData) {
+          if (action.type === 'CREATE_ALERT' && (action.alertData || action.data)) {
             // Get alert data if it's a function
-            const alertData = typeof action.alertData === 'function'
-              ? action.alertData(this.stateManager.getState ? this.stateManager.getState() : this.stateManager.appState)
-              : action.alertData;
+            const alertData = (action.alertData || action.data);
+            const resolvedAlertData = typeof alertData === 'function'
+              ? alertData(this.stateManager.getState ? this.stateManager.getState() : this.stateManager.appState)
+              : alertData;
             
             if (alertData) {
-              this.createAlert(alertData);
+              this.createAlert(resolvedAlertData);
               stateChanged = true;
             }
           } else if (action.type === 'RESOLVE_ALERTS' && action.trigger) {

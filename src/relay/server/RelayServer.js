@@ -1,5 +1,5 @@
 import EventEmitter from "events";
-import { stateManager } from "../core/state/StateManager.js";
+import { StateManager2 } from "../core/state/StateManager2.js";
 import { syncOrchestrator } from "./core/sync/SyncOrchestrator.js";
 import { VPSConnector } from "./services/VPSConnector.js";
 
@@ -13,8 +13,11 @@ export class RelayServer extends EventEmitter {
     // We only use key-based authentication now
     if (!config.vpsUrl) throw new Error("RelayServer: vpsUrl is required");
 
+    /** @type {{vpsUrl: string, port: number, host: string, vpsReconnectInterval: number, vpsMaxRetries: number}} */
     this.config = {
-      ...config,
+      vpsUrl: config.vpsUrl,
+      port: config.port,
+      host: config.host || 'localhost',
       vpsReconnectInterval: config.vpsReconnectInterval || 5000,
       vpsMaxRetries: config.vpsMaxRetries || 10,
     };
@@ -23,7 +26,7 @@ export class RelayServer extends EventEmitter {
     this._stateVersion = 0;
     this._messageBuffer = [];
     this._maxBufferSize = 100;
-    this.stateManager = stateManager;
+    this.stateManager = new StateManager2();
 
     // Client management
     this.clients = new Map();
@@ -34,6 +37,9 @@ export class RelayServer extends EventEmitter {
       vpsUrl: this.config.vpsUrl,
       reconnectInterval: this.config.vpsReconnectInterval,
       maxRetries: this.config.vpsMaxRetries,
+      // Add missing properties that VPSConnector expects
+      port: this.config.port,
+      host: this.config.host
     });
 
     this.syncOrchestrator = syncOrchestrator;
@@ -275,6 +281,19 @@ export class RelayServer extends EventEmitter {
           case "weather:update":
             console.log(`[RELAY-SERVER] Forwarding weather update to clients`);
             this.emit("weather:update", message.data);
+            break;
+
+          case "anchor:update":
+            console.log(`[RELAY-SERVER] Processing anchor:update message:`, JSON.stringify(message.data, null, 2));
+            try {
+              const success = this.stateManager.updateAnchorState(message.data);
+              console.log(`[RELAY-SERVER] Anchor update ${success ? 'succeeded' : 'failed'}`);
+              // Optionally emit an event for listeners
+              this.emit("anchor:update", { success, data: message.data });
+            } catch (error) {
+              console.error('[RELAY-SERVER] Error processing anchor update:', error);
+              this.emit("error:anchor-update", { error, data: message.data });
+            }
             break;
 
           default:

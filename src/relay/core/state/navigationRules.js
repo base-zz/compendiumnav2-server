@@ -7,6 +7,7 @@
 export const NavigationRules = [
   // Rule for vessel underway at high speed
   {
+    type: 'navigation',
     name: 'High Speed Navigation',
     condition: (state) => state.speed > 10 && state.navigationStatus === 'UNDERWAY',
     action: {
@@ -29,6 +30,7 @@ export const NavigationRules = [
   
   // Rule for vessel at anchor
   {
+    type: 'navigation',
     name: 'At Anchor',
     condition: (state) => state.anchorStatus === 'DOWN',
     action: {
@@ -52,6 +54,7 @@ export const NavigationRules = [
   
   // Default rule for normal operation
   {
+    type: 'navigation',
     name: 'Default Operation',
     condition: () => true, // Always matches as a fallback
     action: {

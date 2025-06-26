@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 import { serviceManager } from "./services/ServiceManager.js";
 // import { stateService } from "./state/StateService.js";
 import { startRelayServer, startDirectServer } from "./relay/server/index.js";
-import { stateManager } from "./relay/core/state/StateManager.js";
+import { stateManager2 as stateManager } from "./relay/core/state/StateManager2.js";
 import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
 import { registerVpsRoutes } from "./server/vps/registration.js";
 import { TidalService } from "./services/TidalService.js";
@@ -70,6 +70,9 @@ async function bridgeStateToRelay() {
     // Get the registered service instance
     const stateService = serviceManager.getService('state');
     
+    // Pass initial state into StateManager2
+    stateManager.initialState = stateService.getState();
+
     // Bridge NewStateService events to relay stateManager
     stateService.on("state:full-update", (msg) => {
       stateManager.receiveExternalStateUpdate(msg.data);

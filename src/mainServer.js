@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { stateService, setStateManager } from "./state/StateService.js";
 import { startRelayServer, startDirectServer } from "./relay/server/index.js";
-import { stateManager } from "./relay/core/state/StateManager.js";
+import { stateManager2 as stateManager } from "./relay/core/state/StateManager2.js";
 import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
 import { registerVpsRoutes } from "./server/vps/registration.js";
 import debug from 'debug';
@@ -64,7 +64,6 @@ async function bridgeStateToRelay() {
       stateManager.applyPatchAndForward(msg.data);
     });
     console.log(".    [SERVER] Initiated StateService patch listener");
-
     console.log("     [SERVER] All Server bridges activated.");
   } catch (err) {
     console.error("[SERVER] !!!!!! Failed to set up state bridge:", err);
@@ -75,6 +74,9 @@ async function startServer() {
   try {
     // 0. Start StateService (SignalK, data ingestion)
     await stateService.initialize();
+
+    // Pass initial state into StateManager2
+    stateManager.initialState = stateService.getState();
 
     // 1. Bridge canonical state into relay state manager
     await bridgeStateToRelay();

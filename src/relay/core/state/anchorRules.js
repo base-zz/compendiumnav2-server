@@ -32,8 +32,165 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 }
 
 export const AnchorRules = [
+  // Anchor Deployed Rule
+  {
+    type: 'anchor',
+    name: 'Anchor Deployed Notification',
+    condition: (currentState, previousState, env) => {
+      // For backward compatibility, handle case where only state is passed
+      if (!previousState && currentState && currentState.anchor) {
+        previousState = { anchor: {} };
+      } else if (!previousState) {
+        previousState = {};
+      }
+      try {
+        console.log('\n[ANCHOR RULES] ===== Evaluating anchor deployed rule =====');
+        console.log('[ANCHOR RULES] Current state:', {
+          anchorDeployed: currentState?.anchor?.anchorDeployed,
+          hasAnchorLocation: !!currentState?.anchor?.anchorLocation,
+          hasDropLocation: !!currentState?.anchor?.anchorDropLocation
+        });
+        console.log('[ANCHOR RULES] Previous state:', {
+          anchorDeployed: previousState?.anchor?.anchorDeployed,
+          hasAnchorLocation: !!previousState?.anchor?.anchorLocation,
+          hasDropLocation: !!previousState?.anchor?.anchorDropLocation
+        });
+        
+        // Check if anchor was just deployed
+        const anchorState = currentState?.anchor || {};
+        const prevAnchorState = previousState?.anchor || {};
+
+        // Check if anchor was just deployed
+        const wasDeployed = prevAnchorState.anchorDeployed === true;
+        const isDeployed = anchorState.anchorDeployed === true;
+        const justDeployed = !wasDeployed && isDeployed;
+
+        // Check if we have valid position data
+        const hasPosition = anchorState.anchorLocation?.position?.latitude && 
+                          anchorState.anchorLocation?.position?.longitude;
+        
+        // Check if we have valid drop position data (optional for deployment)
+        const hasDropPosition = anchorState.anchorDropLocation?.position?.latitude &&
+                              anchorState.anchorDropLocation?.position?.longitude;
+
+        console.log(`[ANCHOR RULES] Deployment check - was: ${wasDeployed}, is: ${isDeployed}, just deployed: ${justDeployed}`);
+        console.log(`[ANCHOR RULES] Position data - current: ${hasPosition} (${JSON.stringify(anchorState.anchorLocation?.position)})`);
+        console.log(`[ANCHOR RULES] Drop position - current: ${hasDropPosition} (${JSON.stringify(anchorState.anchorDropLocation?.position)})`);
+
+        // Log the full evaluation
+        const ruleTriggered = justDeployed && hasPosition;
+        
+        if (ruleTriggered) {
+          console.log('[ANCHOR RULES] ✅ Anchor deployed condition MET:', {
+            current: { 
+              deployed: anchorState.anchorDeployed, 
+              timestamp: anchorState.timestamp,
+              position: anchorState.anchorLocation?.position
+            },
+            previous: { 
+              deployed: prevAnchorState.anchorDeployed, 
+              timestamp: prevAnchorState.timestamp 
+            },
+            hasPosition,
+            justDeployed
+          });
+        } else {
+          console.log('[ANCHOR RULES] ❌ Anchor deployed condition NOT met:', {
+            reason: !anchorState.anchorDeployed ? 'anchor not deployed' : 
+                   !hasPosition ? 'missing position data' :
+                   !justDeployed ? 'anchor was already deployed' : 'unknown reason',
+            currentDeployed: anchorState.anchorDeployed,
+            previousDeployed: prevAnchorState.anchorDeployed,
+            hasPosition,
+            justDeployed,
+            timestampsMatch: anchorState.timestamp === prevAnchorState.timestamp,
+            currentPosition: anchorState.anchorLocation?.position,
+            previousPosition: prevAnchorState.anchorLocation?.position
+          });
+        }
+
+        // Trigger if anchor was just deployed and we have position data
+        return ruleTriggered;
+      } catch (error) {
+        console.error('[ANCHOR RULES] Error in anchor deployed condition:', error);
+        return false;
+      }
+    },
+    action: {
+      type: 'CREATE_ALERT',
+      alertData: (state) => {
+        const anchorState = state.anchor || {};
+        const isMetric = state.units?.distance === 'meters';
+        const unitLabel = isMetric ? 'm' : 'ft';
+        const position = anchorState.anchorLocation?.position;
+        const positionStr = position ? 
+          `(${position.latitude.toFixed(6)}, ${position.longitude.toFixed(6)})` : 'unknown position';
+        
+        return {
+          type: 'system',
+          category: 'navigation',
+          source: 'anchor_monitor',
+          level: 'info',
+          label: 'Anchor Deployed',
+          message: `Anchor deployed at ${positionStr} with ${anchorState.rode?.amount || 'unknown'} ${unitLabel} of rode`,
+          trigger: 'anchor_deployed',
+          data: {
+            position: anchorState.anchorLocation?.position,
+            rodeLength: anchorState.rode?.amount,
+            timestamp: anchorState.timestamp || new Date().toISOString()
+          },
+          phoneNotification: true,
+          sticky: false,
+          autoResolvable: true
+        };
+      }
+    }
+  },
+  
+  // Anchor Retrieved Rule
+  {
+    type: 'anchor',
+    name: 'Anchor Retrieved Notification',
+    condition: (state, prevState) => {
+      // Check if anchor was just retrieved
+      const anchorState = state.anchor || {};
+      const prevAnchorState = prevState?.anchor || {};
+      
+      return !anchorState.anchorDeployed && 
+             prevAnchorState.anchorDeployed;
+    },
+    action: {
+      type: 'CREATE_ALERT',
+      alertData: (state) => {
+        const anchorState = state.anchor || {};
+        const prevAnchorState = state.prevState?.anchor || {};
+        const position = prevAnchorState.anchorLocation?.position;
+        const positionStr = position ? 
+          `(${position.latitude.toFixed(6)}, ${position.longitude.toFixed(6)})` : 'unknown position';
+        
+        return {
+          type: 'system',
+          category: 'navigation',
+          source: 'anchor_monitor',
+          level: 'info',
+          label: 'Anchor Retrieved',
+          message: `Anchor retrieved from ${positionStr}`,
+          trigger: 'anchor_retrieved',
+          data: {
+            position: position,
+            timestamp: anchorState.timestamp || new Date().toISOString()
+          },
+          phoneNotification: true,
+          sticky: false,
+          autoResolvable: true
+        };
+      }
+    }
+  },
+  
   // Critical Range Detection Rule
   {
+    type: 'anchor',
     name: 'Critical Range Detection',
     condition: (state) => {
       // Check if anchor is deployed
@@ -107,6 +264,7 @@ export const AnchorRules = [
   
   // Critical Range Resolution Rule
   {
+    type: 'anchor',
     name: 'Critical Range Resolution',
     condition: (state) => {
       // Check if we have active critical range alerts
@@ -165,6 +323,155 @@ export const AnchorRules = [
   
   // Anchor Dragging Detection Rule
   {
+    type: 'anchor',
+    name: 'Anchor Dragging Detection',
+    condition: (state) => {
+      // Check if anchor is deployed
+      const anchorState = state.anchor || {};
+      if (!anchorState.anchorDeployed || !anchorState.anchorLocation?.position) {
+        return false;
+      }
+      
+      // Get current position and anchor position
+      const boatPosition = state.position || {};
+      const anchorPosition = anchorState.anchorLocation.position;
+      const rodeLength = anchorState.rode?.amount || 0;
+      const maxExpectedRadius = rodeLength * 1.5; // 50% more than rode length
+      
+      // If missing data, rule doesn't apply
+      if (!boatPosition.latitude || !boatPosition.longitude || rodeLength <= 0) {
+        return false;
+      }
+      
+      // Calculate distance between boat and anchor
+      const distance = calculateDistance(
+        boatPosition.latitude,
+        boatPosition.longitude,
+        anchorPosition.latitude,
+        anchorPosition.longitude
+      );
+      
+      // Check if there's already an active alert for this condition
+      const hasActiveAlert = state.alerts?.active?.some(
+        alert => alert.trigger === 'anchor_dragging' && !alert.acknowledged
+      );
+      
+      // Rule triggers when distance exceeds max expected radius and no active alert exists
+      return distance > maxExpectedRadius && !hasActiveAlert;
+    },
+    action: {
+      type: 'CREATE_ALERT',
+      alertData: (state) => {
+        const anchorState = state.anchor || {};
+        const boatPosition = state.position || {};
+        const anchorPosition = anchorState.anchorLocation?.position;
+        const rodeLength = anchorState.rode?.amount || 0;
+        const isMetric = state.units?.distance === 'meters';
+        const unitLabel = isMetric ? 'm' : 'ft';
+        
+        // Calculate current distance
+        const distance = calculateDistance(
+          boatPosition.latitude,
+          boatPosition.longitude,
+          anchorPosition.latitude,
+          anchorPosition.longitude
+        );
+        
+        // Calculate bearing from anchor to current position
+        const toRad = (value) => (value * Math.PI) / 180;
+        const lat1 = toRad(anchorPosition.latitude);
+        const lon1 = toRad(anchorPosition.longitude);
+        const lat2 = toRad(boatPosition.latitude);
+        const lon2 = toRad(boatPosition.longitude);
+        
+        const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
+        const x = Math.cos(lat1) * Math.sin(lat2) - 
+                 Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
+        const bearing = ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+        
+        return {
+          type: 'system',
+          category: 'safety',
+          source: 'anchor_monitor',
+          level: 'critical',
+          label: 'Anchor Dragging!',
+          message: `Anchor has moved ${Math.round(distance)}${unitLabel} from set position (${rodeLength}${unitLabel} rode)`,
+          trigger: 'anchor_dragging',
+          data: {
+            distance: Math.round(distance),
+            rodeLength: rodeLength,
+            bearingFromSet: Math.round(bearing),
+            position: { 
+              lat: boatPosition.latitude, 
+              lng: boatPosition.longitude 
+            },
+            anchorPosition: {
+              lat: anchorPosition.latitude,
+              lng: anchorPosition.longitude
+            },
+            timestamp: new Date().toISOString(),
+            units: unitLabel
+          },
+          phoneNotification: true,
+          sticky: true,
+          autoResolvable: true,
+          repeatInterval: 60000 // Repeat every minute if still dragging
+        };
+      }
+    }
+  },
+  
+  // Anchor Dragging Resolution Rule
+  {
+    type: 'anchor',
+    name: 'Anchor Dragging Resolved',
+    condition: (state, prevState) => {
+      // Check if we have an active anchor dragging alert
+      const hasActiveAlert = state.alerts?.active?.some(
+        alert => alert.trigger === 'anchor_dragging' && !alert.acknowledged
+      );
+      
+      // If no active alert, nothing to resolve
+      if (!hasActiveAlert) {
+        return false;
+      }
+      
+      // Get current state
+      const anchorState = state.anchor || {};
+      const boatPosition = state.position || {};
+      const anchorPosition = anchorState.anchorLocation?.position;
+      const rodeLength = anchorState.rode?.amount || 0;
+      const maxExpectedRadius = rodeLength * 1.2; // 20% more than rode length
+      
+      // If missing data, can't determine if resolved
+      if (!anchorState.anchorDeployed || !anchorPosition || !boatPosition.latitude || rodeLength <= 0) {
+        return false;
+      }
+      
+      // Calculate current distance
+      const distance = calculateDistance(
+        boatPosition.latitude,
+        boatPosition.longitude,
+        anchorPosition.latitude,
+        anchorPosition.longitude
+      );
+      
+      // Consider resolved if back within expected radius
+      return distance <= maxExpectedRadius;
+    },
+    action: {
+      type: 'RESOLVE_ALERTS',
+      trigger: 'anchor_dragging',
+      resolutionData: (state) => ({
+        message: 'Anchor is no longer dragging',
+        timestamp: new Date().toISOString()
+      })
+    }
+  },
+  
+  // Original Anchor Dragging Detection Rule
+  {
+    type: 'anchor',
     name: 'Anchor Dragging Detection',
     condition: (state) => {
       // Check if anchor is deployed
@@ -239,6 +546,7 @@ export const AnchorRules = [
   
   // AIS Proximity Detection Rule
   {
+    type: 'anchor',
     name: 'AIS Proximity Detection',
     condition: (state) => {
       // Check if anchor is deployed
@@ -326,6 +634,7 @@ export const AnchorRules = [
   
   // AIS Proximity Resolution Rule
   {
+    type: 'anchor',
     name: 'AIS Proximity Resolution',
     condition: (state) => {
       // Check if we have active AIS proximity alerts

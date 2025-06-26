@@ -3,14 +3,39 @@ import { fetchWeatherApi } from "openmeteo";
 import { UNIT_PRESETS } from '../shared/unitPreferences.js';
 
 export class TidalService extends ScheduledService {
+  /** @type {Object} */
+  stateService;
+  
+  /** @type {string} */
+  baseUrl;
+  
+  /** @type {{latitude: number, longitude: number}} */
+  position;
+  
+  /** @type {NodeJS.Timeout|null} */
+  _updateTimeout;
+  
+  /** @type {boolean} */
+  _isRunning;
+  
+  /** @type {Promise|null} */
+  _currentFetch;
   constructor(stateService) {
     super("tidal", {
       interval: 7200000, // 2 hours
       immediate: true,
       runOnInit: true
     });
+    
+    if (!stateService || typeof stateService.getState !== 'function') {
+      throw new Error('stateService must be provided and implement getState()');
+    }
+    
     this.stateService = stateService;
     this.baseUrl = "https://marine-api.open-meteo.com/v1/marine";
+    this._isRunning = false;
+    this._currentFetch = null;
+    this._updateTimeout = null;
 
     // Set up a default position (can be overridden by setPosition)
     this.position = {
@@ -39,6 +64,22 @@ export class TidalService extends ScheduledService {
   }
 
   /**
+   * Wait for state service to be ready
+   * @private
+   * @param {number} timeout - Timeout in ms
+   */
+  async _waitForStateServiceReady(timeout = 10000) {
+    if (this.stateService.isReady) return;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Timeout waiting for state service to be ready")), timeout);
+      this.stateService.once && this.stateService.once("ready", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  /**
    * Wait for position data to become available
    * @private
    * @param {number} timeout - Timeout in milliseconds
@@ -51,26 +92,36 @@ export class TidalService extends ScheduledService {
     
     while (Date.now() - startTime < timeout) {
       try {
+        // Get the current state
         const state = this.stateService.getState();
+
+        // Check if we have valid position data
         const position = state?.navigation?.position;
-        
-        if (position?.latitude?.value && position?.longitude?.value) {
-          return {
-            latitude: position.latitude.value,
-            longitude: position.longitude.value
-          };
+        if (position?.latitude?.value != null && position?.longitude?.value != null) {
+          const lat = Number(position.latitude.value);
+          const lon = Number(position.longitude.value);
+          
+          // Validate the position values
+          if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+            console.log(`[TidalService] Got valid position: ${lat}, ${lon}`);
+            return { latitude: lat, longitude: lon };
+          }
         }
         
-        // Log progress periodically
+        // Log every 5 seconds
         const now = Date.now();
         if (now - lastLogTime >= logInterval) {
-          console.log(`[TidalService] Waiting for position data... (${Math.round((now - startTime) / 1000)}s elapsed)`);
+          console.log(`[TidalService] Waiting for valid position data... (${Math.round((now - startTime) / 1000)}s elapsed)`);
+          console.log('[TidalService] Current position state:', JSON.stringify({
+            hasPosition: !!position,
+            latitude: position?.latitude,
+            longitude: position?.longitude
+          }, null, 2));
           lastLogTime = now;
         }
         
         // Wait for a bit before checking again
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
       } catch (error) {
         console.error('[TidalService] Error checking position:', error.message);
         // Continue waiting even if there's an error checking position
@@ -78,29 +129,50 @@ export class TidalService extends ScheduledService {
       }
     }
     
-    throw new Error(`Timed out waiting for position data after ${timeout}ms`);
+    const errorMsg = `Timed out waiting for position data after ${timeout}ms`;
+    console.error(`[TidalService] ${errorMsg}`);
+    throw new Error(errorMsg);
   }
 
   async run() {
+    if (this._currentFetch) {
+      console.log('[TidalService] Update already in progress, returning existing promise');
+      return this._currentFetch;
+    }
+    
     console.log("[TidalService] Starting tidal data fetch...");
-
+    
     try {
-      // Wait for state service to be ready with a longer timeout
-      if (!this.stateService?.isReady) {
-        console.log("[TidalService] Waiting for state service to be ready...");
+      // Wait for state service to be ready before proceeding
+      // await this._waitForStateServiceReady();
+      // Create a promise that resolves when the current fetch completes
+      this._currentFetch = (async () => {
         try {
-          await this.stateService.waitUntilReady(30000); // 30 second timeout
-          console.log("[TidalService] State service is now ready");
-        } catch (error) {
-          console.error("[TidalService] Error waiting for state service:", error.message);
-          throw error;
-        }
-      }
+          // Check if state service is available and has getState method
+          if (!this.stateService || typeof this.stateService.getState !== 'function') {
+            throw new Error('State service is not properly initialized');
+          }
+          
+          // If the state service has an initialization method, call it
+          if (typeof this.stateService.initialize === 'function') {
+            console.log("[TidalService] Initializing state service...");
+            try {
+              await this.stateService.initialize();
+              console.log("[TidalService] State service is now ready");
+            } catch (error) {
+              console.error("[TidalService] Error initializing state service:", error.message);
+              throw error;
+            }
+          }
 
-      // Wait for position data with retry logic
-      console.log("[TidalService] Waiting for position data...");
-      const position = await this._waitForPosition(60000); // 60 second timeout for position
-      console.log(`[TidalService] Got position: ${position.latitude}, ${position.longitude}`);
+          // Wait for position data with retry logic
+          console.log("[TidalService] Waiting for position data...");
+          const position = await this._waitForPosition(60000); // 60 second timeout for position
+          console.log(`[TidalService] Got position: ${position.latitude}, ${position.longitude}`);
+          
+          if (!position?.latitude || !position?.longitude) {
+            throw new Error('Invalid position data received');
+          }
 
       // Get user's unit preferences
       const unitPrefs = await this._getUnitPreferences();
@@ -290,8 +362,14 @@ export class TidalService extends ScheduledService {
       console.log(`[TidalService] Emitted 'tide:update' event with data:`, 
         Object.keys(marineData).join(', '));
 
-      // Return the data that was stored in the state
-      return marineData;
+          // Return the data that was stored in the state
+          return marineData;
+        } finally {
+          this._currentFetch = null;
+        }
+      })();
+      
+      return await this._currentFetch;
     } catch (error) {
       console.error("[TidalService] Error fetching tidal data:", error);
       throw error;

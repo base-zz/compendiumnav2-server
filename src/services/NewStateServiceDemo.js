@@ -1,16 +1,7 @@
-/**
- * StateServiceDemo
- *
- * This is a demo implementation of StateService that replays recorded boat data
- * from SQLite database instead of generating fake data. It provides realistic
- * state updates using actual recorded data that can be used for development and testing.
- */
-
 import path from "path";
 import { fileURLToPath } from "url";
-import { stateData } from "../state/StateData.js";
-import { stateManager } from "../relay/core/state/StateManager.js";
 import sqlite3 from "sqlite3";
+import { stateData } from "../state/StateData.js";
 import ContinuousService from "./ContinuousService.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,1446 +9,746 @@ const __dirname = path.dirname(__filename);
 
 export class NewStateServiceDemo extends ContinuousService {
   constructor() {
-    super("newStateServiceDemo"); // Pass the service name to super()
-    this._debug = console.log.bind(console, "[NewStateServiceDemo]");
-    
-    const dbPath = process.env.DATABASE_PATH || path.join(__dirname, "../signalk_dev.db");
-    this._debug("Using database at:", dbPath);
-    
-    this._db = new sqlite3.Database(dbPath, (err) => {
-      if (err) {
-        this._debug("Error opening database:", err.message);
-      } else {
-        this._debug("Database connection established");
-      }
-    });
-    this._currentIndex = 0;
-    this._data = [];
-    this._isPlaying = false;
-    this._playInterval = null;
-    this._mockMultipleDataInterval = null;
-    this._hasSentInitialState = false; // Track if initial state has been sent
+    super("newStateServiceDemo");
+    this.log = console.log.bind(console, "[StateService]");
 
-    // Pagination parameters for data loading
-    this._batchSize = 1000; // Number of records to load at once
-    this._currentBatch = 0; // Current batch number
-    this._hasMoreData = true; // Flag to indicate if there's more data to load
-    this._totalDataCount = 0; // Total number of records in the database
-
-    // Initial values for persistent mock data
-    this._mockTankLevels = {
-      freshWater1: 100,
-      freshWater2: 95,
-      wasteWater1: 10,
-      wasteWater2: 15,
-      blackWater1: 20,
-      blackWater2: 25,
+    // Configuration
+    this.config = {
+      dbPath:
+        process.env.DATABASE_PATH || path.join(__dirname, "../signalk_dev.db"),
+      batchSize: 1000,
+      defaultPlaybackSpeed: 1.0,
+      mockDataUpdateInterval: 5000,
     };
 
-    this._mockFuelLevels = {
-      fuel1: 90,
-      fuel2: 85,
+    // State
+    this.db = null;
+    this.recordedData = [];
+    this.currentIndex = 0;
+    this.isPlaying = false;
+    this.playbackInterval = null;
+    this.playbackSpeed = 1.0;
+    this.isReady = false;
+    this.mockDataInterval = null;
+
+    // Mock data state
+    this.mockState = {
+      tanks: {
+        freshWater1: { level: 100 },
+        freshWater2: { level: 95 },
+        wasteWater1: { level: 10 },
+        wasteWater2: { level: 15 },
+        blackWater1: { level: 20 },
+        blackWater2: { level: 25 },
+      },
+      batteries: {
+        battery1: { level: 95, voltage: 12.5, current: 5.2 },
+        battery2: { level: 90, voltage: 12.3, current: 4.8 },
+        battery3: { level: 85, voltage: 12.4, current: 5.0 },
+        battery4: { level: 80, voltage: 12.2, current: 4.5 },
+      },
     };
 
-    this._mockEngineHours = {
-      engine1: 1200,
-      engine2: 1100,
-    };
-
-    this._mockBatteryLevels = {
-      battery1: 95,
-      battery2: 90,
-      battery3: 85,
-      battery4: 80,
-    };
-
-    this._loadRecordedData();
+    // Initialize state data structures
+    this._initializeState();
   }
 
+  /**
+   * Initialize the state data structures according to Signal K specification
+   * @private
+   */
+  _initializeState() {
+    try {
+      // Ensure we have the required state data structure
+      if (!stateData) {
+        throw new Error("stateData is not available");
+      }
+
+      // Initialize the full Signal K state structure if it doesn't exist
+      if (!stateData.vessels) {
+        stateData.vessels = {};
+      }
+
+      // Ensure we have a self vessel
+      const vesselId = "self";
+      if (!stateData.vessels[vesselId]) {
+        stateData.vessels[vesselId] = {};
+      }
+
+      // Initialize navigation structure
+      if (!stateData.vessels[vesselId].navigation) {
+        stateData.vessels[vesselId].navigation = {};
+      }
+
+      // Initialize position structure
+      if (!stateData.vessels[vesselId].navigation.position) {
+        stateData.vessels[vesselId].navigation.position = {
+          latitude: null,
+          longitude: null,
+          altitude: 0,
+          timestamp: null,
+          source: "demo",
+          $source: "demo",
+          pgn: 129025,
+          sxtype: "GNSS",
+        };
+      }
+
+      // Initialize course structure
+      if (!stateData.vessels[vesselId].navigation.courseOverGroundTrue) {
+        stateData.vessels[vesselId].navigation.courseOverGroundTrue = {
+          value: null,
+          timestamp: null,
+          $source: "demo",
+          pgn: 129026,
+        };
+      }
+
+      // Initialize speed structure
+      if (!stateData.vessels[vesselId].navigation.speedOverGround) {
+        stateData.vessels[vesselId].navigation.speedOverGround = {
+          value: null,
+          timestamp: null,
+          $source: "demo",
+          pgn: 128259,
+        };
+      }
+
+      this.log("State initialized with Signal K structure");
+      this.log("State structure:", {
+        hasVessels: !!stateData.vessels,
+        hasSelfVessel: !!(stateData.vessels && stateData.vessels.self),
+        hasPosition: !!stateData.vessels?.self?.navigation?.position,
+        hasBatchUpdate: typeof stateData.batchUpdate === "function",
+      });
+    } catch (error) {
+      this.log("Error initializing state:", error);
+      throw error;
+    }
+
+    // Mock data state
+    this.mockState = {
+      tanks: {
+        freshWater1: { level: 100 },
+        freshWater2: { level: 95 },
+        wasteWater1: { level: 10 },
+        wasteWater2: { level: 15 },
+        blackWater1: { level: 20 },
+        blackWater2: { level: 25 },
+      },
+      batteries: {
+        battery1: { level: 95, voltage: 12.5, current: 5.2 },
+        battery2: { level: 90, voltage: 12.3, current: 4.8 },
+        battery3: { level: 85, voltage: 12.4, current: 5.0 },
+        battery4: { level: 80, voltage: 12.2, current: 4.5 },
+      },
+      engines: {
+        engine1: {
+          running: false,
+          rpm: 0,
+          hours: 1200,
+          temp: 70,
+          oilPressure: 0,
+        },
+        engine2: {
+          running: false,
+          rpm: 0,
+          hours: 1100,
+          temp: 70,
+          oilPressure: 0,
+        },
+      },
+    };
+  }
+
+  // ====================
+  // Lifecycle Methods
+  // ====================
+
   async start() {
-    await super.start(); // Important: call parent's start
-    this._debug("Starting NewStateServiceDemo");
-    this.isReady = false; // Reset ready state when starting
+    await super.start();
+    this.log(`[StateService] Starting service at ${new Date().toISOString()}`);
+    this.isReady = false;
 
     try {
       // Initialize database connection
       await this._initializeDatabase();
-      
+
       // Load initial state data
       const initialStateLoaded = await this._loadInitialData();
-      
+
       if (!initialStateLoaded) {
-        this._debug("Warning: Could not load initial state from database");
+        this.log("Warning: Could not load initial state from database");
+        // Initialize with default state structure
+        this._initializeState();
       }
-      
-      // Start loading recorded data for playback
-      // Don't await this as it's designed to run in the background
-      this._loadRecordedData().catch(err => {
-        this._debug("Error loading recorded data:", err);
-      });
-      
+
       // Mark as ready after initial data is loaded
       this.isReady = true;
-      this.emit('ready');
-      this._debug("NewStateServiceDemo is ready");
-      
-      return this;
+      this.emit("ready");
+
+      // Log initial state before loading any data
+      this.log("[StateService] Initial state before loading data:", {
+        hasStateData: !!stateData,
+        hasVessels: !!(stateData && stateData.vessels),
+        hasSelfVessel: !!(
+          stateData &&
+          stateData.vessels &&
+          stateData.vessels.self
+        ),
+      });
+
+      this.isReady = true;
+      this.emit && this.emit("ready");
+
+      return true;
     } catch (error) {
-      this._debug("Error during start:", error);
+      this.log("Error starting service:", error);
+      this.isReady = false;
       throw error;
     }
   }
 
   async stop() {
-    this._debug("Stopping NewStateServiceDemo");
-    
-    try {
-      await super.stop();
-      this._stopPlayback();
-      this._stopMockMultipleTanksAndBatteries();
-      
-      // Clean up intervals
-      if (this._playInterval) {
-        clearInterval(this._playInterval);
-        this._playInterval = null;
-      }
-      
-      if (this._mockMultipleDataInterval) {
-        clearInterval(this._mockMultipleDataInterval);
-        this._mockMultipleDataInterval = null;
-      }
-      
-      // Close database connection
-      if (this._db) {
-        this._db.close();
-        this._db = null;
-      }
-      
-      this._debug("NewStateServiceDemo stopped");
-      return this;
-    } catch (error) {
-      this._debug("Error during stop:", error);
-      throw error;
-    }
-  }
-
-  async onError(error) {
-    this._debug("Error in NewStateServiceDemo:", error);
-    // Handle errors here
-    await super.onError(error);
-  }
-
-  // Method to generate mock data for multiple tanks and battery banks
-  generateMockMultipleTanksAndBatteries() {
-    // Update tank levels (decrease MUCH more slowly over time)
-    // Reduced decrease rates by a factor of 10 for fresh water tanks
-    this._mockTankLevels.freshWater1 = Math.max(
-      0,
-      this._mockTankLevels.freshWater1 - (0.02 + Math.random() * 0.03)
-    );
-    this._mockTankLevels.freshWater2 = Math.max(
-      0,
-      this._mockTankLevels.freshWater2 - (0.01 + Math.random() * 0.02)
-    );
-
-    // Waste and black water tanks increase over time (also more slowly)
-    // Reduced increase rates by a factor of 5 for waste/black water tanks
-    this._mockTankLevels.wasteWater1 = Math.min(
-      100,
-      this._mockTankLevels.wasteWater1 + (0.02 + Math.random() * 0.04)
-    );
-    this._mockTankLevels.wasteWater2 = Math.min(
-      100,
-      this._mockTankLevels.wasteWater2 + (0.01 + Math.random() * 0.03)
-    );
-    this._mockTankLevels.blackWater1 = Math.min(
-      100,
-      this._mockTankLevels.blackWater1 + (0.02 + Math.random() * 0.03)
-    );
-    this._mockTankLevels.blackWater2 = Math.min(
-      100,
-      this._mockTankLevels.blackWater2 + (0.01 + Math.random() * 0.02)
-    );
-
-    // Update fuel levels (decrease when engines are running)
-    const engine1Running = Math.random() > 0.3; // 70% chance engine 1 is running
-    const engine2Running = Math.random() > 0.5; // 50% chance engine 2 is running
-
-    if (engine1Running) {
-      this._mockFuelLevels.fuel1 = Math.max(
-        0,
-        this._mockFuelLevels.fuel1 - (0.1 + Math.random() * 0.2)
-      );
-    }
-
-    if (engine2Running) {
-      this._mockFuelLevels.fuel2 = Math.max(
-        0,
-        this._mockFuelLevels.fuel2 - (0.05 + Math.random() * 0.15)
-      );
-    }
-
-    // Update engine hours (increase when running)
-    if (engine1Running) {
-      this._mockEngineHours.engine1 += 0.01 + Math.random() * 0.005; // Small increments for hours
-    }
-
-    if (engine2Running) {
-      this._mockEngineHours.engine2 += 0.01 + Math.random() * 0.005;
-    }
-
-    // Update battery levels (discharge/charge based on usage)
-    // House batteries (1 & 2) discharge more when engines are off
-    if (!engine1Running && !engine2Running) {
-      // Discharging
-      this._mockBatteryLevels.battery1 = Math.max(
-        20,
-        this._mockBatteryLevels.battery1 - (0.2 + Math.random() * 0.3)
-      );
-      this._mockBatteryLevels.battery2 = Math.max(
-        30,
-        this._mockBatteryLevels.battery2 - (0.1 + Math.random() * 0.2)
-      );
-    } else {
-      // Charging
-      this._mockBatteryLevels.battery1 = Math.min(
-        100,
-        this._mockBatteryLevels.battery1 + (0.3 + Math.random() * 0.4)
-      );
-      this._mockBatteryLevels.battery2 = Math.min(
-        100,
-        this._mockBatteryLevels.battery2 + (0.2 + Math.random() * 0.3)
-      );
-    }
-
-    // Engine start batteries (3 & 4) discharge slightly when engines are off
-    if (!engine1Running) {
-      this._mockBatteryLevels.battery3 = Math.max(
-        50,
-        this._mockBatteryLevels.battery3 - (0.05 + Math.random() * 0.1)
-      );
-    } else {
-      this._mockBatteryLevels.battery3 = Math.min(
-        100,
-        this._mockBatteryLevels.battery3 + (0.2 + Math.random() * 0.3)
-      );
-    }
-
-    if (!engine2Running) {
-      this._mockBatteryLevels.battery4 = Math.max(
-        50,
-        this._mockBatteryLevels.battery4 - (0.05 + Math.random() * 0.1)
-      );
-    } else {
-      this._mockBatteryLevels.battery4 = Math.min(
-        100,
-        this._mockBatteryLevels.battery4 + (0.2 + Math.random() * 0.3)
-      );
-    }
-
-    // Create the mock data object with updated values
-    const mockData = {
-      vessel: {
-        systems: {
-          // Electrical system with 4 battery banks
-          electrical: {
-            battery1: {
-              voltage: {
-                value: parseFloat(
-                  (11.5 + this._mockBatteryLevels.battery1 / 20).toFixed(1)
-                ),
-                units: "V",
-              },
-              current: {
-                value: parseFloat(
-                  (engine1Running || engine2Running
-                    ? 5 + Math.random() * 5
-                    : -2 - Math.random() * 3
-                  ).toFixed(1)
-                ),
-                units: "A",
-              },
-              capacity: {
-                value: Math.round(this._mockBatteryLevels.battery1),
-                units: "%",
-                threshold: 20, // Alert threshold value
-                thresholdOperator: "LESS_THAN", // Alert when level is LESS THAN threshold
-              },
-            },
-            battery2: {
-              voltage: {
-                value: parseFloat(
-                  (11.5 + this._mockBatteryLevels.battery2 / 20).toFixed(1)
-                ),
-                units: "V",
-              },
-              current: {
-                value: parseFloat(
-                  (engine1Running || engine2Running
-                    ? 3 + Math.random() * 4
-                    : -1 - Math.random() * 2
-                  ).toFixed(1)
-                ),
-                units: "A",
-              },
-              capacity: {
-                value: Math.round(this._mockBatteryLevels.battery2),
-                units: "%",
-                threshold: 20, // Alert threshold value
-                thresholdOperator: "LESS_THAN", // Alert when level is LESS THAN threshold
-              },
-            },
-            battery3: {
-              voltage: {
-                value: parseFloat(
-                  (11.8 + this._mockBatteryLevels.battery3 / 25).toFixed(1)
-                ),
-                units: "V",
-              },
-              current: {
-                value: parseFloat(
-                  (engine1Running
-                    ? 2 + Math.random() * 3
-                    : -0.5 - Math.random() * 0.5
-                  ).toFixed(1)
-                ),
-                units: "A",
-              },
-              capacity: {
-                value: Math.round(this._mockBatteryLevels.battery3),
-                units: "%",
-                threshold: 20, // Alert threshold value
-                thresholdOperator: "LESS_THAN", // Alert when level is LESS THAN threshold
-              },
-            },
-            battery4: {
-              voltage: {
-                value: parseFloat(
-                  (11.8 + this._mockBatteryLevels.battery4 / 25).toFixed(1)
-                ),
-                units: "V",
-              },
-              current: {
-                value: parseFloat(
-                  (engine2Running
-                    ? 2 + Math.random() * 3
-                    : -0.5 - Math.random() * 0.5
-                  ).toFixed(1)
-                ),
-                units: "A",
-              },
-              capacity: {
-                value: Math.round(this._mockBatteryLevels.battery4),
-                units: "%",
-                threshold: 20, // Alert threshold value
-                thresholdOperator: "LESS_THAN", // Alert when level is LESS THAN threshold
-              },
-            },
-          },
-          // Propulsion system with 2 engines and 2 fuel tanks
-          propulsion: {
-            engine1: {
-              rpm: {
-                value: engine1Running
-                  ? Math.floor(700 + Math.random() * 2300)
-                  : 0,
-                units: "rpm",
-              },
-              hours: {
-                value: parseFloat(this._mockEngineHours.engine1.toFixed(1)),
-                units: "hours",
-              },
-              temperature: {
-                value: parseFloat(
-                  (engine1Running
-                    ? 170 + Math.random() * 20
-                    : 70 + Math.random() * 10
-                  ).toFixed(1)
-                ),
-                units: "°F",
-              },
-              oilPressure: {
-                value: parseFloat(
-                  (engine1Running ? 40 + Math.random() * 20 : 0).toFixed(1)
-                ),
-                units: "psi",
-              },
-            },
-            engine2: {
-              rpm: {
-                value: engine2Running
-                  ? Math.floor(700 + Math.random() * 2300)
-                  : 0,
-                units: "rpm",
-              },
-              hours: {
-                value: parseFloat(this._mockEngineHours.engine2.toFixed(1)),
-                units: "hours",
-              },
-              temperature: {
-                value: parseFloat(
-                  (engine2Running
-                    ? 175 + Math.random() * 15
-                    : 70 + Math.random() * 10
-                  ).toFixed(1)
-                ),
-                units: "°F",
-              },
-              oilPressure: {
-                value: parseFloat(
-                  (engine2Running ? 45 + Math.random() * 15 : 0).toFixed(1)
-                ),
-                units: "psi",
-              },
-            },
-            fuel1: {
-              level: {
-                value: Math.round(this._mockFuelLevels.fuel1),
-                units: "%",
-              },
-              rate: {
-                value: parseFloat(
-                  (engine1Running ? 1.5 + Math.random() * 2.5 : 0).toFixed(1)
-                ),
-                units: "gal/h",
-              },
-              economy: {
-                value: parseFloat(
-                  (engine1Running ? 0.8 + Math.random() * 1.2 : 0).toFixed(1)
-                ),
-                units: "nm/gal",
-              },
-            },
-            fuel2: {
-              level: {
-                value: Math.round(this._mockFuelLevels.fuel2),
-                units: "%",
-              },
-              rate: {
-                value: parseFloat(
-                  (engine2Running ? 1.2 + Math.random() * 2.0 : 0).toFixed(1)
-                ),
-                units: "gal/h",
-              },
-              economy: {
-                value: parseFloat(
-                  (engine2Running ? 1.0 + Math.random() * 1.0 : 0).toFixed(1)
-                ),
-                units: "nm/gal",
-              },
-            },
-          },
-          // Multiple water tanks
-          tanks: {
-            freshWater1: {
-              value: Math.round(this._mockTankLevels.freshWater1),
-              units: "%",
-              label: "Water 1",
-              displayLabel: "Fresh Water 1",
-              description: "Fresh Water 1 Level",
-              fluidType: "water",
-              threshold: 20, // Alert threshold value
-              thresholdOperator: "LESS_THAN", // Alert when level is LESS THAN threshold
-            },
-            freshWater2: {
-              value: Math.round(this._mockTankLevels.freshWater2),
-              units: "%",
-              label: "Water 2",
-              displayLabel: "Fresh Water 2",
-              description: "Fresh Water 2 Level",
-              fluidType: "water",
-              threshold: 20, // Alert threshold value
-              thresholdOperator: "LESS_THAN", // Alert when level is LESS THAN threshold
-            },
-            wasteWater1: {
-              value: Math.round(this._mockTankLevels.wasteWater1),
-              units: "%",
-              label: "Waste 1",
-              displayLabel: "Waste Water 1",
-              description: "Waste Water 1 Level",
-              fluidType: "waste",
-              threshold: 80, // Alert threshold value
-              thresholdOperator: "GREATER_THAN", // Alert when level is GREATER THAN threshold
-            },
-            wasteWater2: {
-              value: Math.round(this._mockTankLevels.wasteWater2),
-              units: "%",
-              label: "Waste 2",
-              displayLabel: "Waste Water 2",
-              description: "Waste Water 2 Level",
-              fluidType: "waste",
-              threshold: 80, // Alert threshold value
-              thresholdOperator: "GREATER_THAN", // Alert when level is GREATER THAN threshold
-            },
-            blackWater1: {
-              value: Math.round(this._mockTankLevels.blackWater1),
-              units: "%",
-              label: "Black 1",
-              displayLabel: "Black Water 1",
-              description: "Black Water 1 Level",
-              fluidType: "black",
-              threshold: 80, // Alert threshold value
-              thresholdOperator: "GREATER_THAN", // Alert when level is GREATER THAN threshold
-            },
-            blackWater2: {
-              value: Math.round(this._mockTankLevels.blackWater2),
-              units: "%",
-              label: "Black 2",
-              displayLabel: "Black Water 2",
-              description: "Black Water 2 Level",
-              fluidType: "black",
-              threshold: 80, // Alert threshold value
-              thresholdOperator: "GREATER_THAN", // Alert when level is GREATER THAN threshold
-            },
-          },
-        },
-      },
-      tides: {},
-      forecast: {},
-    };
-
-    // Create a complete update object with all our data
-    // We'll use a single batchUpdate call to ensure atomic updates
-    const completeUpdate = {
-      vessel: {
-        systems: {
-          tanks: {},
-          electrical: {},
-        },
-      },
-    };
-
-    // Add all tank data to the update object
-    const mockTanks = mockData.vessel.systems.tanks;
-    for (const tankKey in mockTanks) {
-      completeUpdate.vessel.systems.tanks[tankKey] = mockTanks[tankKey];
-      // console.log(`   Adding tank ${tankKey} to update:`, JSON.stringify(mockTanks[tankKey], null, 2));
-    }
-
-    // Add all electrical/battery data to the update object
-    const mockElectrical = mockData.vessel.systems.electrical;
-    for (const batteryKey in mockElectrical) {
-      completeUpdate.vessel.systems.electrical[batteryKey] =
-        mockElectrical[batteryKey];
-      // console.log(`   Adding battery ${batteryKey} to update:`, JSON.stringify(mockElectrical[batteryKey], null, 2));
-    }
-
-    // Add the rest of the mock data (excluding tanks and electrical which we've already handled)
-    const mockDataWithoutSpecial = JSON.parse(JSON.stringify(mockData));
-    delete mockDataWithoutSpecial.vessel.systems.tanks;
-    delete mockDataWithoutSpecial.vessel.systems.electrical;
-
-    // Merge the mockDataWithoutSpecial into our completeUpdate
-    Object.assign(completeUpdate, mockDataWithoutSpecial);
-
-    // First, ensure the state structure exists
-    if (!stateData.vessel) stateData.vessel = {};
-    if (!stateData.vessel.systems) stateData.vessel.systems = {};
-    if (!stateData.vessel.systems.tanks) stateData.vessel.systems.tanks = {};
-    if (!stateData.vessel.systems.electrical)
-      stateData.vessel.systems.electrical = {};
-
-    // Create a deep clone of the mock data to avoid reference issues
-    const mockDataClone = JSON.parse(JSON.stringify(mockData));
-
-    // Update tanks in stateData first
-    for (const tankKey in mockDataClone.vessel.systems.tanks) {
-      if (!stateData.vessel.systems.tanks[tankKey]) {
-        stateData.vessel.systems.tanks[tankKey] = {};
-      }
-      Object.assign(
-        stateData.vessel.systems.tanks[tankKey],
-        mockDataClone.vessel.systems.tanks[tankKey]
-      );
-    }
-
-    // Update electrical/battery data in stateData
-    for (const batteryKey in mockDataClone.vessel.systems.electrical) {
-      if (batteryKey.startsWith("battery")) {
-        if (!stateData.vessel.systems.electrical[batteryKey]) {
-          stateData.vessel.systems.electrical[batteryKey] = {
-            voltage: { value: 0, units: "V" },
-            current: { value: 0, units: "A" },
-            capacity: { value: 0, units: "%" },
-          };
-        }
-        Object.assign(
-          stateData.vessel.systems.electrical[batteryKey],
-          mockDataClone.vessel.systems.electrical[batteryKey]
-        );
-      }
-    }
-
-    // Now update the state manager with the complete state
-    stateManager.applyPatchAndForward({
-      vessel: {
-        systems: {
-          tanks: stateData.vessel.systems.tanks,
-          electrical: stateData.vessel.systems.electrical,
-        },
-      },
-    });
-
-    // Emit the state update
-    this.emit("state:patch", {
-      data: {
-        vessel: {
-          systems: {
-            tanks: stateData.vessel.systems.tanks,
-            electrical: stateData.vessel.systems.electrical,
-          },
-        },
-      },
-    });
-  }
-
-  // Start periodic updates of tank and battery data
-  startMockMultipleTanksAndBatteries(intervalMs = 5000) {
-    // Clear any existing interval
-    if (this._mockMultipleDataInterval) {
-      clearInterval(this._mockMultipleDataInterval);
-    }
-
-    // Set up periodic updates
-    this._mockMultipleDataInterval = setInterval(() => {
-      this.generateMockMultipleTanksAndBatteries();
-    }, intervalMs);
-
-    // Generate initial data
-    this.generateMockMultipleTanksAndBatteries();
-
-    this._debug("Started mock data for multiple tanks and batteries");
-  }
-
-  // Stop periodic updates
-  stopMockMultipleTanksAndBatteries() {
-    if (this._mockMultipleDataInterval) {
-      clearInterval(this._mockMultipleDataInterval);
-      this._mockMultipleDataInterval = null;
-      this._debug("Stopped mock data for multiple tanks and batteries");
-    }
-  }
-
-  async _createFilteredTable() {
-    try {
-      this._debug("Creating filtered patches table...");
-
-      // First, check the structure of the original table
-      const tableInfo = await new Promise((resolve, reject) => {
-        this._db.all("PRAGMA table_info(sk_patches)", (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        });
-      });
-
-      // Build the CREATE TABLE statement based on the original table
-      const columns = tableInfo
-        .map((col) => {
-          let columnDef = `"${col.name}" ${col.type}`;
-          if (col.pk) columnDef += " PRIMARY KEY";
-          if (col.notnull) columnDef += " NOT NULL";
-          if (col.dflt_value !== null)
-            columnDef += ` DEFAULT ${col.dflt_value}`;
-          return columnDef;
-        })
-        .join(",");
-
-      // Create the filtered table with the same structure
-      await new Promise((resolve, reject) => {
-        this._db.run(
-          `
-          CREATE TABLE IF NOT EXISTS sk_patches_filtered (${columns})
-        `,
-          (err) => {
-            if (err) reject(err);
-            else resolve();
-          }
-        );
-      });
-
-      // Clear existing data in the filtered table
-      await new Promise((resolve, reject) => {
-        this._db.run("DELETE FROM sk_patches_filtered", (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-
-      // Get the column names for the INSERT statement
-      const columnNames = tableInfo.map((col) => `"${col.name}"`).join(",");
-
-      // First, ensure we have the JSON1 extension loaded
-      await new Promise((resolve, reject) => {
-        this._db.get('SELECT json("{}")', (err) => {
-          if (err) {
-            console.error("JSON1 extension not available:", err);
-            reject(new Error("SQLite JSON1 extension is required"));
-          } else {
-            resolve();
-          }
-        });
-      });
-
-      // Copy only patches with valid position data to the filtered table
-      await new Promise((resolve, reject) => {
-        this._db.run(
-          `
-          INSERT INTO sk_patches_filtered (${columnNames})
-          SELECT ${columnNames}
-          FROM (
-            SELECT ${columnNames},
-                   json_extract(patch_json, '$.navigation.position.latitude.value') as lat,
-                   json_extract(patch_json, '$.navigation.position.longitude.value') as lng
-            FROM sk_patches
-          )
-          WHERE lat IS NOT NULL 
-            AND lng IS NOT NULL
-            AND lat != 'null'
-            AND lng != 'null'
-        `,
-          (err) => {
-            if (err) {
-              console.error("Error filtering patches:", err);
-              reject(err);
-            } else {
-              resolve();
-            }
-          }
-        );
-      });
-
-      // Log how many records we've filtered
-      await new Promise((resolve) => {
-        this._db.get(
-          "SELECT COUNT(*) as count FROM sk_patches_filtered",
-          (err, row) => {
-            if (!err) {
-              console.log(
-                `[StateServiceDemo] Filtered table now contains ${
-                  row?.count || 0
-                } records with valid position data`
-              );
-            }
-            resolve();
-          }
-        );
-      });
-
-      this._debug("Created filtered patches table with non-null values");
-      return true;
-    } catch (error) {
-      this._debug("Error creating filtered table:", error.message);
-      return false;
-    }
-  }
-
-  async showFirst100FilteredRecords() {
-    try {
-      if (!this._db) {
-        console.error("Database connection not established");
-        return;
-      }
-
-      console.log("\n=== Database Information ===");
-
-      // Get database info
-      const dbInfo = await new Promise((resolve) => {
-        this._db.get("PRAGMA database_list", (err, row) => {
-          if (err) {
-            console.error("Error getting database info:", err.message);
-            resolve({});
-          } else {
-            resolve(row || {});
-          }
-        });
-      });
-
-      console.log("Database file:", dbInfo.file || "in-memory");
-      console.log("\n=== Table Information ===");
-
-      // Check if filtered table exists or create it
-      const tableExists = await new Promise((resolve) => {
-        this._db.get(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='sk_patches_filtered'",
-          (err, row) => {
-            if (err) {
-              console.error("Error checking for filtered table:", err.message);
-              resolve(false);
-            } else {
-              resolve(!!row);
-            }
-          }
-        );
-      });
-
-      if (!tableExists) {
-        console.log("Filtered table does not exist. Creating it first...");
-        await this._createFilteredTable();
-      }
-
-      // Get table info
-      const tableInfo = await new Promise((resolve) => {
-        this._db.all("PRAGMA table_info(sk_patches_filtered)", (err, rows) => {
-          if (err) {
-            console.error("Error getting table info:", err.message);
-            resolve([]);
-          } else {
-            resolve(rows || []);
-          }
-        });
-      });
-
-      console.log("\nFiltered Table Structure:");
-      console.table(tableInfo);
-
-      // Get record counts
-      const counts = await new Promise((resolve) => {
-        this._db.get(
-          `SELECT 
-            (SELECT COUNT(*) FROM sk_patches) as total_records,
-            (SELECT COUNT(*) FROM sk_patches_filtered) as filtered_records`,
-          (err, row) => {
-            if (err) {
-              console.error("Error getting record counts:", err.message);
-              resolve({ total_records: 0, filtered_records: 0 });
-            } else {
-              resolve(row || { total_records: 0, filtered_records: 0 });
-            }
-          }
-        );
-      });
-
-      console.log("\n=== Record Counts ===");
-      console.log(`Total records in original table: ${counts.total_records}`);
-      console.log(`Records in filtered table: ${counts.filtered_records}`);
-      console.log(
-        `Filtered out: ${
-          counts.total_records - counts.filtered_records
-        } records`
-      );
-
-      // Get first 100 records
-      console.log("\n=== First 100 Records ===");
-      const records = await new Promise((resolve) => {
-        this._db.all(
-          "SELECT * FROM sk_patches_filtered ORDER BY timestamp ASC LIMIT 100",
-          [],
-          (err, rows) => {
-            if (err) {
-              console.error("Error fetching records:", err.message);
-              resolve([]);
-            } else {
-              resolve(rows || []);
-            }
-          }
-        );
-      });
-
-      console.log("\nFirst 100 records from filtered table:");
-      console.log("--------------------------------------");
-      records.forEach((record, index) => {
-        console.log(`\nRecord ${index + 1}:`);
-        console.log(`ID: ${record.id}`);
-        console.log(`Timestamp: ${record.timestamp}`);
-        console.log("Patch JSON:");
-        try {
-          const patchData = JSON.parse(record.patch_json);
-          console.log(JSON.stringify(patchData, null, 2));
-
-          // Show first few values for quick inspection
-          if (patchData && typeof patchData === "object") {
-            const firstValues = Object.entries(patchData)
-              .slice(0, 3) // Show first 3 values
-              .map(([key, value]) => {
-                const valStr =
-                  typeof value === "object"
-                    ? JSON.stringify(value).substring(0, 50) + "..."
-                    : value;
-                return `${key}: ${valStr}`;
-              });
-            console.log("First values:", firstValues.join(", "));
-          }
-        } catch (e) {
-          console.error("Error parsing patch JSON:", e.message);
-          console.log(
-            "Raw data:",
-            record.patch_json?.substring(0, 200) + "..."
-          );
-        }
-      });
-
-      return records;
-    } catch (error) {
-      console.error("Error showing filtered records:", error);
-      return [];
-    }
-  }
-
-  async _filterNullPositionData(state) {
-    if (!state?.navigation?.position) {
-      return state;
-    }
-
-    const { position } = state.navigation;
-    const hasNullPosition =
-      position.latitude?.value === null ||
-      position.longitude?.value === null ||
-      position.latitude === null ||
-      position.longitude === null;
-
-    if (hasNullPosition) {
-      // Create a deep copy of the state without modifying the original
-      const newState = JSON.parse(JSON.stringify(state));
-      // Only remove the position data, keep the rest of the navigation data
-      if (newState.navigation) {
-        delete newState.navigation.position;
-      }
-      return newState;
-    }
-
-    return state;
-  }
-
-  async _loadRecordedData() {
-    try {
-      // First, verify the database connection
-      if (!this._db) {
-        this._debug("Database connection not established");
-        return;
-      }
-
-      // Check if filtered table exists, create it if it doesn't
-      const filteredTableCheck = await new Promise((resolve) => {
-        this._db.get(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='sk_patches_filtered'",
-          (err, row) => {
-            if (err) {
-              this._debug("Error checking for filtered table:", err.message);
-              resolve(false);
-            } else {
-              resolve(!!row);
-            }
-          }
-        );
-      });
-
-      if (!filteredTableCheck) {
-        this._debug("Creating filtered patches table...");
-        await this._createFilteredTable();
-      }
-
-      // Get total count of records from the filtered table
-      const countResult = await new Promise((resolve) => {
-        this._db.get(
-          "SELECT COUNT(*) as count FROM sk_patches_filtered",
-          [],
-          (err, row) => {
-            if (err) {
-              this._debug(
-                "Error counting records in filtered table:",
-                err.message
-              );
-              resolve({ count: 0 });
-            } else {
-              resolve(row || { count: 0 });
-            }
-          }
-        );
-      });
-
-      this._totalDataCount = countResult.count;
-      this._debug("Total records in filtered table:", this._totalDataCount);
-
-      if (this._totalDataCount === 0) {
-        this._debug("No records found in the filtered table");
-        return;
-      }
-
-      // Load a batch of records
-      const offset = this._currentBatch * this._batchSize;
-      const limit = this._batchSize;
-
-      // Query the filtered table
-      const rows = await new Promise((resolve) => {
-        this._db.all(
-          `SELECT * FROM sk_patches_filtered 
-           ORDER BY timestamp ASC 
-           LIMIT ? OFFSET ?`,
-          [limit, offset],
-          (err, rows) => {
-            if (err) {
-              this._debug(
-                "Error fetching records from filtered table:",
-                err.message
-              );
-              resolve([]);
-            } else {
-              resolve(rows || []);
-            }
-          }
-        );
-      });
-
-      // If we got fewer rows than the batch size, we've reached the end
-      if (rows.length < this._batchSize) {
-        this._hasMoreData = false;
-      }
-
-      // Parse the JSON data
-      const dataPoints = [];
-      for (const row of rows) {
-        try {
-          if (row && row.patch_json) {
-            dataPoints.push({
-              type: "patch",
-              timestamp: row.timestamp,
-              data: JSON.parse(row.patch_json),
-              originalTimestamp: new Date(row.timestamp).getTime(),
-            });
-          }
-        } catch (parseError) {
-          this._debug("Error parsing row data:", parseError);
-        }
-      }
-
-      // Append new data points
-      this._data =
-        this._currentBatch === 0 ? dataPoints : [...this._data, ...dataPoints];
-      this._currentBatch++;
-
-      this._debug(
-        `Loaded batch ${this._currentBatch}: ${dataPoints.length} records. Total in memory: ${this._data.length}`
-      );
-
-      // If this is the first batch and we have data, start playback
-      if (this._currentBatch === 1 && this._data.length > 0) {
-        this.startPlayback();
-      } else if (this._data.length === 0) {
-        this._debug("No valid data points found in the database");
-      }
-    } catch (error) {
-      this._debug("Error loading recorded data:", error);
-    }
-  }
-
-  async _playNext() {
-    try {
-      // Check if we have any data to play
-      if (!this._data || this._data.length === 0) {
-        this._debug("No data available for playback");
-        await this._loadRecordedData();
-        return;
-      }
-
-      // Check if we're near the end of the current batch and need to load more data
-      if (this._hasMoreData && this._currentIndex >= this._data.length * 0.9) {
-        await this._loadRecordedData();
-      }
-
-      // If we've reached the end of all data, loop back to the beginning
-      if (this._currentIndex >= this._data.length) {
-        this._debug("Reached end of data, looping back to beginning");
-        this._currentIndex = 0;
-        this._currentBatch = 0; // Reset batch counter to reload from the beginning
-        this._startTime = Date.now(); // Reset start time when looping
-
-        // Clear old data to free up memory before loading the first batch again
-        this._data = [];
-        await this._loadRecordedData();
-        return; // Exit early as we need to wait for the next tick
-      }
-
-      const dataPoint = this._data[this._currentIndex];
-      this._currentIndex++;
-
-      if (!dataPoint || !dataPoint.data) {
-        this._debug(
-          "Invalid data point encountered at index",
-          this._currentIndex - 1
-        );
-        return;
-      }
-
-
-
-      // IMPORTANT: Save the current tanks structure before applying updates
-      const currentTanks = JSON.parse(JSON.stringify(stateData.vessel?.systems?.tanks || {}));
-
-      try {
-        // Update stateData with the new data point
-        stateData.batchUpdate(dataPoint.data);
-
-        // Ensure the vessel systems structure exists
-        if (!stateData.vessel) stateData.vessel = {};
-        if (!stateData.vessel.systems) stateData.vessel.systems = {};
-
-        // Restore the tanks structure
-        stateData.vessel.systems.tanks = currentTanks;
-        stateData.tides = currentTides;
-        stateData.forecast = currentForecast;
-        // Ensure the electrical structure has individual batteries
-        if (!stateData.vessel.systems.electrical) {
-          stateData.vessel.systems.electrical = {};
-        }
-
-        // Add or update individual battery objects if they don't exist
-        const batteryData = {
-          battery1: {
-            voltage: { value: 12.5, units: "V" },
-            current: { value: 5.2, units: "A" },
-            capacity: { value: 95, units: "%" },
-          },
-          battery2: {
-            voltage: { value: 12.3, units: "V" },
-            current: { value: 4.8, units: "A" },
-            capacity: { value: 90, units: "%" },
-          },
-          battery3: {
-            voltage: { value: 12.4, units: "V" },
-            current: { value: 5.0, units: "A" },
-            capacity: { value: 85, units: "%" },
-          },
-          battery4: {
-            voltage: { value: 12.2, units: "V" },
-            current: { value: 4.5, units: "A" },
-            capacity: { value: 80, units: "%" },
-          },
-        };
-
-        // Update or add individual battery objects
-        for (const [batteryId, battery] of Object.entries(batteryData)) {
-          if (!stateData.vessel.systems.electrical[batteryId]) {
-            stateData.vessel.systems.electrical[batteryId] = {};
-          }
-          Object.assign(
-            stateData.vessel.systems.electrical[batteryId],
-            battery
-          );
-        }
-
-        // Remove the batteries object if it exists
-        if (stateData.vessel.systems.electrical.batteries) {
-          delete stateData.vessel.systems.electrical.batteries;
-        }
-
-        // Remove old tank structure keys if they exist
-        try {
-          if (stateData.vessel.systems.tanks.freshWater)
-            delete stateData.vessel.systems.tanks.freshWater;
-          if (stateData.vessel.systems.tanks.wasteWater)
-            delete stateData.vessel.systems.tanks.wasteWater;
-          if (stateData.vessel.systems.tanks.blackWater)
-            delete stateData.vessel.systems.tanks.blackWater;
-        } catch (error) {
-          this._debug(
-            "Error removing old tank structure keys during playback:",
-            error.message
-          );
-        }
-
-        // For patches, we need to be more careful to preserve the patch structure
-        if (dataPoint.type === "patch") {
-          // For patches, we only want to emit the specific changes in the patch
-          // but we need to make sure our tank modifications are included if the patch affects tanks
-          const patchData = JSON.parse(JSON.stringify(dataPoint.data));
-
-          // If the patch includes tank data, make sure it has our updated tank structure
-          if (patchData.vessel?.systems?.tanks) {
-            patchData.vessel.systems.tanks = JSON.parse(
-              JSON.stringify(stateData.vessel.systems.tanks)
-            );
-          }
-
-          this.emit("state:patch", { data: patchData });
-        } else {
-          console.log("[NewStateServiceDemo] !!!!!!!!!!!!!! Created a clean copy of the state with the correct structure");
-          // Create a clean copy of the state with the correct structure
-          const fullStateData = {
-            navigation: JSON.parse(JSON.stringify(stateData.navigation || {})),
-            environment: JSON.parse(
-              JSON.stringify(stateData.environment || {})
-            ),
-            vessel: {
-              ...JSON.parse(JSON.stringify(stateData.vessel || {})),
-              systems: {
-                ...(stateData.vessel?.systems || {}),
-                // Ensure tanks structure is preserved
-                tanks: JSON.parse(
-                  JSON.stringify(stateData.vessel?.systems?.tanks || {})
-                ),
-                // Create electrical structure with individual batteries
-                electrical: (() => {
-                  const electrical = {};
-
-                  // Add individual battery objects
-                  for (const [key, value] of Object.entries(
-                    stateData.vessel?.systems?.electrical || {}
-                  )) {
-                    if (
-                      key.startsWith("battery") &&
-                      typeof value === "object"
-                    ) {
-                      electrical[key] = { ...value };
-                    }
-                  }
-
-                  // If no batteries found, create default ones
-                  if (Object.keys(electrical).length === 0) {
-                    electrical.battery1 = {
-                      voltage: { value: 12.5, units: "V" },
-                      current: { value: 5.2, units: "A" },
-                      capacity: { value: 95, units: "%" },
-                    };
-                    electrical.battery2 = {
-                      voltage: { value: 12.3, units: "V" },
-                      current: { value: 4.8, units: "A" },
-                      capacity: { value: 90, units: "%" },
-                    };
-                    electrical.battery3 = {
-                      voltage: { value: 12.4, units: "V" },
-                      current: { value: 5.0, units: "A" },
-                      capacity: { value: 85, units: "%" },
-                    };
-                    electrical.battery4 = {
-                      voltage: { value: 12.2, units: "V" },
-                      current: { value: 4.5, units: "A" },
-                      capacity: { value: 80, units: "%" },
-                    };
-                  }
-
-                  return electrical;
-                })(),
-              },
-            },
-            anchor: JSON.parse(JSON.stringify(stateData.anchor || {})),
-            aisTargets: JSON.parse(JSON.stringify(stateData.aisTargets || {})),
-            alerts: JSON.parse(JSON.stringify(stateData.alerts || {})),
-            tides: JSON.parse(JSON.stringify(stateData.tides || {})),
-            forecast: JSON.parse(JSON.stringify(stateData.forecast || {})),
-          };
-
-          // Only send full-update on first state
-          if (!this._hasSentInitialState) {
-            const filteredState = this._removeNullValues(fullStateData);
-            const stateWithFilteredPositions =
-              this._filterNullPositionData(filteredState);
-            this.emit("state:full-update", {
-              data: stateWithFilteredPositions,
-            });
-            this._hasSentInitialState = true;
-            this._debug("Initial state update sent");
-          } else {
-            // For subsequent updates, emit the patch data
-            if (dataPoint.data) {
-              this.emit("state:patch", { data: dataPoint.data });
-              this._debug("Sent patch update");
-            }
-          }
-        }
-
-        // Calculate when the next item should be played
-        // We need to handle the case where we're at the end of the current data
-        let nextIndex = this._currentIndex;
-        if (nextIndex >= this._data.length) {
-          nextIndex = 0; // Loop back to beginning if we're at the end
-        }
-
-        const nextDataPoint = this._data[nextIndex];
-        const timeDiff =
-          nextDataPoint.originalTimestamp - dataPoint.originalTimestamp;
-
-        // Schedule the next playback
-        this._playInterval = setTimeout(() => {
-          this._playNext();
-        }, timeDiff / this._playbackSpeedMultiplier);
-      } catch (error) {
-        this._debug("Error in _playNext:", error.message);
-      }
-    } catch (error) {
-      this._debug("Error in _playNext outer block:", error.message);
-    }
-  }
-
-  async startPlayback(playbackSpeed = 1.0) {
-    if (this._isPlaying) return;
-
-    this._isPlaying = true;
-    this._playbackSpeedMultiplier = playbackSpeed;
-    this._startTime = Date.now();
-    this._currentIndex = 0;
-
-    // Start the mock tank data generation to ensure we have consistent tank data during playback
-    // Use a faster update interval during playback to ensure tank data is current
-    this.startMockMultipleTanksAndBatteries(10000);
-
-    // Generate initial mock data immediately to ensure tanks are set up before first playback
-    this.generateMockMultipleTanksAndBatteries();
-
-    // Start with the first data point
-    await this._playNext();
-
-    this._debug(
-      `Started playback of recorded data at ${playbackSpeed}x speed with mock tank data enabled`
-    );
-  }
-
-  // Add new method to control playback speed
-  setPlaybackSpeed(speed) {
-    if (!this._isPlaying) return;
-
-    this._playbackSpeedMultiplier = speed;
-    // Reset current interval to apply new speed
-    if (this._playInterval) {
-      clearTimeout(this._playInterval);
-      this._playNext();
-    }
-
-    this._debug(`Playback speed changed to ${speed}x`);
-  }
-
-  stopPlayback() {
-    if (!this._isPlaying) return;
-
-    this._isPlaying = false;
-    if (this._playInterval) {
-      clearInterval(this._playInterval);
-      this._playInterval = null;
-    }
-
-    // Stop the mock tank data generation when playback stops
-    this.stopMockMultipleTanksAndBatteries();
-
-    this._debug(
-      "Stopped playback of recorded data and mock tank data generation"
-    );
-  }
-
-  // Add methods that match the real StateService interface
-  async initialize() {
-    this._debug("Initializing demo state service with recorded data");
-    await this._loadRecordedData();
-    this.startPlayback();
-    return this;
-  }
-
-  async connect() {
-    this._debug("Connecting demo state service");
-    return true;
-  }
-
-  disconnect() {
-    this._debug("Disconnecting demo state service");
+    this.log("Stopping State Service");
     this.stopPlayback();
-    return true;
-  }
+    this.stopMockDataUpdates();
 
-  /**
-   * Get the current state
-   * @returns {Object} The current state object
-   */
-  getState() {
-    return stateData.state;
-  }
-  
-  /**
-   * Wait until the service is ready
-   * @param {number} [timeout=5000] - Maximum time to wait in milliseconds
-   * @returns {Promise<void>}
-   */
-  waitUntilReady(timeout = 5000) {
-    return new Promise((resolve, reject) => {
-      if (this.isReady) {
-        return resolve();
-      }
-
-      const timeoutId = setTimeout(() => {
-        cleanup();
-        reject(new Error('Timed out waiting for StateService to be ready'));
-      }, timeout);
-
-      const checkReady = () => {
-        if (this.isReady) {
-          cleanup();
-          resolve();
-        }
-      };
-
-      const cleanup = () => {
-        clearTimeout(timeoutId);
-        this.off('ready', checkReady);
-      };
-
-      this.on('ready', checkReady);
-      
-      // Check immediately in case ready state changed before we set up the listener
-      if (this.isReady) {
-        cleanup();
-        resolve();
-      }
-    });
-  }
-
-  addListener(event, listener) {
-    return this.on(event, listener);
-  }
-
-  removeListener(event, listener) {
-    return this.off(event, listener);
-  }
-
-  async _query(sql, params = []) {
-    if (!this._db) {
-      throw new Error("Database not connected");
+    if (this.db) {
+      await new Promise((resolve) => {
+        this.db.close(resolve);
+      });
+      this.db = null;
     }
 
+    await super.stop();
+    this.log("Service stopped");
+  }
+
+  // ====================
+  // Database Methods
+  // ====================
+
+  async connectToDatabase() {
     return new Promise((resolve, reject) => {
-      this._db.all(sql, params, (err, rows) => {
+      this.log(`Connecting to database: ${this.config.dbPath}`);
+
+      this.db = new sqlite3.Database(this.config.dbPath, (err) => {
         if (err) {
-          this._debug("Query error:", err.message);
+          this.log("Database connection error:", err.message);
           return reject(err);
         }
+
+        this.log("Database connected");
+        resolve();
+      });
+    });
+  }
+
+  async query(sql, params = []) {
+    return new Promise((resolve, reject) => {
+      this.db.all(sql, params, (err, rows) => {
+        if (err) return reject(err);
         resolve(rows || []);
       });
     });
   }
 
+  async loadInitialData() {
+    try {
+      // Load recorded data
+      await this.loadRecordedData();
+
+      this.log("[StateService] Loaded ---->>>>>>>>>>>", this.recordedData.length, "rows from DB");
+
+
+      // Start with the first data point
+      if (this.recordedData.length > 0) {
+        this.startPlayback();
+      }
+    } catch (error) {
+      this.log("Error loading initial data:", error);
+      throw error;
+    }
+  }
+
+  async loadRecordedData() {
+    try {
+      this.log("Loading filtered patches from database...");
+
+      // First, ensure the filtered table exists
+      await this.ensureFilteredTable();
+
+      // Load only filtered patches with valid position data
+      const rows = await this.query(`
+        SELECT * 
+        FROM sk_patches_filtered 
+        ORDER BY timestamp ASC 
+        LIMIT 3000
+      `);
+
+      this.recordedData = rows.map((row) => ({
+        timestamp: new Date(row.timestamp).getTime(),
+        data: JSON.parse(row.patch_json),
+      }));
+
+      this.log(
+        `Loaded ${this.recordedData.length} filtered records from database`
+      );
+
+      if (this.recordedData.length > 0) {
+        const first = new Date(this.recordedData[0].timestamp);
+        const last = new Date(
+          this.recordedData[this.recordedData.length - 1].timestamp
+        );
+        this.log(
+          `Data time range: ${first.toISOString()} to ${last.toISOString()}`
+        );
+
+        // Start playback automatically
+        this.startPlayback();
+      } else {
+        this.log("No filtered records found in database");
+      }
+
+      return this.recordedData;
+    } catch (error) {
+      this.log("Error loading filtered data:", error);
+      throw error;
+    }
+  }
+
+  async ensureFilteredTable() {
+    try {
+      // Check if filtered table exists
+      const tableExists = await this.query(`
+      SELECT name FROM sqlite_master 
+      WHERE type='table' AND name='sk_patches_filtered'
+    `);
+
+      if (tableExists.length === 0) {
+        this.log("Creating filtered patches table...");
+
+        // Create the filtered table with the same structure as sk_patches
+        await this.query(`
+        CREATE TABLE sk_patches_filtered AS
+        SELECT * FROM sk_patches
+        WHERE json_extract(patch_json, '$.navigation.position.latitude') IS NOT NULL
+        AND json_extract(patch_json, '$.navigation.position.longitude') IS NOT NULL
+      `);
+
+        this.log("Created sk_patches_filtered table with position data only");
+      }
+    } catch (error) {
+      this.log("Error ensuring filtered table:", error);
+      throw error;
+    }
+  }
+
+  async createFilteredTable() {
+    // Implementation for creating the filtered table
+    // This would be similar to the existing _createFilteredTable method
+    // but with better error handling and logging
+  }
+
+  // ====================
+  // Playback Methods
+  // ====================
+
+  startPlayback(speed = this.config.defaultPlaybackSpeed) {
+    if (this.isPlaying) return;
+
+    this.log(`Starting playback at ${speed}x speed`);
+    this.isPlaying = true;
+    this.playbackSpeed = speed;
+    this.currentIndex = 0;
+
+    // Start with the first data point
+    setTimeout(() => {
+      this.playNext();
+    }, 1000);
+  }
+
+  stopPlayback() {
+    if (!this.isPlaying) return;
+
+    this.log("Stopping playback");
+    this.isPlaying = false;
+
+    if (this.playbackInterval) {
+      clearTimeout(this.playbackInterval);
+      this.playbackInterval = null;
+    }
+  }
+
+  setPlaybackSpeed(speed) {
+    if (!this.isPlaying) return;
+
+    this.playbackSpeed = speed;
+    this.log(`Playback speed set to ${speed}x`);
+
+    // Restart the playback with the new speed
+    if (this.playbackInterval) {
+      clearTimeout(this.playbackInterval);
+      this.playNext();
+    }
+  }
+
+  playNext() {
+    try {
+      // Check if we have data to play
+      if (!this.recordedData || !Array.isArray(this.recordedData)) {
+        this.log("No recorded data available");
+        return;
+      }
+
+      // Handle end of data or stopped playback
+      if (!this.isPlaying || this.currentIndex >= this.recordedData.length) {
+        if (this.isPlaying) {
+          this.currentIndex = 0;
+          this.log("Reached end of data, looping back to start");
+        } else {
+          this.log("Playback stopped or no more data");
+          return;
+        }
+      }
+
+      // Get current data point
+      const currentData = this.recordedData[this.currentIndex];
+      if (!currentData) {
+        this.log(`No data at index ${this.currentIndex}, skipping`);
+        this.currentIndex++;
+        return this.playNext(); // Skip to next point
+      }
+
+
+      if (this.currentIndex % 10 === 0) {
+        this.log(
+          `Processing data point ${this.currentIndex + 1}/${
+            this.recordedData.length
+          }`
+        );
+      }
+
+      // Apply the data to the state
+      try {
+        this.applyDataPoint(currentData);
+      } catch (error) {
+        this.log(`Error applying data point: ${error.message}`);
+      }
+
+      // Move to next index
+      this.currentIndex++;
+
+      // Schedule the next update if there's more data
+      if (this.currentIndex < this.recordedData.length) {
+        const nextData = this.recordedData[this.currentIndex];
+        if (!nextData) {
+          this.log(`No next data at index ${this.currentIndex}, skipping`);
+          return this.playNext(); // Skip to next point
+        }
+
+        const timeDiff = nextData.timestamp - currentData.timestamp;
+        const delay = Math.max(0, timeDiff / this.playbackSpeed);
+
+        // this.log(
+        //   `Next update in ${delay.toFixed(0)}ms (${timeDiff}ms / ${
+        //     this.playbackSpeed
+        //   }x)`
+        // );
+
+        // Clear any existing timeout to prevent multiple timeouts
+        if (this.playbackInterval) {
+          clearTimeout(this.playbackInterval);
+        }
+
+        this.playbackInterval = setTimeout(() => {
+          this.playNext();
+        }, delay);
+      }
+    } catch (error) {
+      this.log(`Error in playNext: ${error.message}`);
+      if (error.stack) {
+        this.log(error.stack);
+      }
+    }
+  }
+
   async _initializeDatabase() {
     return new Promise((resolve, reject) => {
-      if (this._db) {
-        this._debug("Database already initialized");
+      if (this.db) {
+        this.log("Database already initialized");
         return resolve();
       }
 
-      const dbPath =
-        process.env.DATABASE_PATH || path.join(__dirname, "../signalk_dev.db");
-      this._debug("Initializing database connection to:", dbPath);
+      const dbPath = this.config.dbPath;
+      this.log("Initializing database connection to:", dbPath);
 
-      this._db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY, (err) => {
+      this.db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY, (err) => {
         if (err) {
-          this._debug("Error opening database:", err.message);
-          this._db = null;
+          this.log("Error opening database:", err.message);
+          this.db = null;
           return reject(err);
         }
-        this._debug("Database connection established");
+        this.log("Database connection established");
         resolve();
       });
     });
   }
 
+  // ====================
+  // Debug Utilities
+  // ====================
+
+  /**
+   * Debug method to manually trigger a position update check
+   */
+  triggerPositionUpdate() {
+    if (!stateData || !stateData.getState) {
+      this.log("Error: stateData.getState is not available");
+      return;
+    }
+
+    const position = stateData.getState("/navigation/position");
+    this.log("Current position from state:", JSON.stringify(position, null, 2));
+
+    // Emit a position update event to trigger any listeners
+    if (position) {
+      this.emit("state:update", {
+        type: "position",
+        data: position,
+        timestamp: Date.now(),
+      });
+      this.log("Emitted position update event");
+    } else {
+      this.log("No position data available in state");
+    }
+  }
+
+  // ====================
+  // Data Processing
+  // ====================
+
+  parseDataRow(row) {
+    try {
+      if (!row || !row.patch_json) return null;
+
+      const data = JSON.parse(row.patch_json);
+      return {
+        timestamp: new Date(row.timestamp).getTime(),
+        data,
+      };
+    } catch (error) {
+      this.log("Error parsing data row:", error);
+      return null;
+    }
+  }
+
+  applyDataPoint(dataPoint) {
+    if (!dataPoint) {
+      this.log("No data point provided");
+      return;
+    }
+
+    if (!dataPoint.data) {
+      this.log("No data in data point");
+      return;
+    }
+
+    try {
+      // this.log(
+      //   `[StateService] Starting applyDataPoint at ${new Date().toISOString()}`
+      // );
+      // this.log(
+      //   `[StateService] Input dataPoint:`,
+      //   JSON.stringify(dataPoint, null, 2)
+      // );
+
+      // Log the first few paths being updated for debugging
+      const paths = Object.keys(dataPoint.data);
+      // this.log(`Updating ${paths.length} paths, first few:`, paths.slice(0, 3));
+
+      if (!stateData || typeof stateData.batchUpdate !== "function") {
+        throw new Error("stateData.batchUpdate is not a function");
+      }
+
+      // Debug: Log the position data if it exists
+      // if (dataPoint.data.some((patch) => patch.path.includes("position"))) {
+      //   const positionPatch = dataPoint.data.find(
+      //     (p) => p.path === "/navigation/position"
+      //   );
+      //   if (positionPatch) {
+      //     this.log(
+      //       `Position update: ${JSON.stringify(positionPatch.value, null, 2)}`
+      //     );
+      //   }
+      // }
+
+      // // Log state before update
+      // let beforeState = {};
+      // if (stateData.getState) {
+      //   beforeState.position = stateData.getState("/navigation/position");
+      //   beforeState.timestamp = stateData.getState(
+      //     "/navigation/position/timestamp"
+      //   );
+      // }
+      // // this.log("State BEFORE update:", JSON.stringify(beforeState, null, 2));
+
+      // Apply the data point to the state
+      // this.log("Applying update:", JSON.stringify(dataPoint.data, null, 2));
+      const result = stateData.batchUpdate(dataPoint.data);
+
+      if (result && result.error) {
+        throw new Error(`Batch update failed: ${result.error}`);
+      }
+
+      // Log state after update
+      // let afterState = {};
+      // if (stateData.getState) {
+      //   afterState.position = stateData.getState("/navigation/position");
+      //   afterState.timestamp = stateData.getState(
+      //     "/navigation/position/timestamp"
+      //   );
+      //   afterState.allPositionPaths = stateData.getState(
+      //     "/navigation/position/*"
+      //   );
+      // }
+      // this.log("State AFTER update:", JSON.stringify(afterState, null, 2));
+
+      // Log the raw state data structure if available
+      // if (stateData.getState) {
+      //   try {
+      //     const rawState = stateData.getState("*");
+      //     this.log("Raw state keys:", Object.keys(rawState || {}));
+      //   } catch (e) {
+      //     this.log("Could not get raw state:", e.message);
+      //   }
+      // }
+
+      // Emit event for listeners
+      const updateEvent = {
+        type: "patch",
+        data: dataPoint.data,
+        timestamp: dataPoint.timestamp,
+      };
+
+      this.emit("state:patch", updateEvent);
+      // this.log(`Emitted state:patch for patch event`);
+    } catch (error) {
+      this.log("Error in applyDataPoint:", error);
+      if (error.stack) {
+        this.log(error.stack);
+      }
+    }
+  }
+
+  // ====================
+  // Mock Data Generation
+  // ====================
+
+  /**
+   * Starts automatic updates for mock tank and battery data
+   * @param {number} [intervalMs=5000] - Update interval in milliseconds
+   */
+  startMockMultipleTanksAndBatteries(intervalMs = 5000) {
+    this.log("Starting mock data updates...");
+
+    // Clear any existing interval
+    this.stopMockDataUpdates();
+
+    // Initial update
+    this.updateMockData();
+
+    // Set up periodic updates
+    this.mockDataInterval = setInterval(() => {
+      this.updateMockData();
+    }, intervalMs);
+
+    this.log("Started mock data updates");
+  }
+
+  startMockDataUpdates() {
+    // For backward compatibility, call the new method with default interval
+    this.startMockMultipleTanksAndBatteries(this.config.mockDataUpdateInterval);
+  }
+
+  stopMockDataUpdates() {
+    if (this.mockDataInterval) {
+      clearInterval(this.mockDataInterval);
+      this.mockDataInterval = null;
+      this.log("Stopped mock data updates");
+    }
+  }
+
+  updateMockData() {
+    // Update tank levels
+    this.updateTankLevels();
+
+    // Update battery levels
+    this.updateBatteryLevels();
+
+    // Update engine status
+    this.updateEngineStatus();
+
+    // Create the state update
+    const update = this.createMockStateUpdate();
+
+    // Apply the update
+    stateData.batchUpdate(update);
+
+    // Emit the update
+    this.emit("state:update", {
+      type: "mock-update",
+      data: update,
+      timestamp: Date.now(),
+    });
+  }
+
+  updateTankLevels() {
+    // Implement tank level simulation
+    // This would include the logic from generateMockMultipleTanksAndBatteries
+    // but simplified and better organized
+  }
+
+  updateBatteryLevels() {
+    // Implement battery level simulation
+  }
+
+  updateEngineStatus() {
+    // Implement engine status simulation
+  }
+
+  createMockStateUpdate() {
+    // Create a state update object from the current mock state
+    return {
+      vessel: {
+        systems: {
+          tanks: this.mockState.tanks,
+          electrical: {
+            batteries: this.mockState.batteries,
+          },
+          propulsion: {
+            engines: this.mockState.engines,
+          },
+        },
+      },
+    };
+  }
+
   async _loadInitialData() {
-    if (!this._db) {
-      this._debug("Database not connected");
+    if (!this.db) {
+      this.log("Database not connected");
       return false;
     }
 
     try {
       // First try to load the most recent full state
       const fullStateRow = await new Promise((resolve) => {
-        this._db.get(
+        this.db.get(
           "SELECT data FROM full_state ORDER BY timestamp DESC LIMIT 1",
           (err, row) => {
             if (err) {
-              this._debug("Error querying full_state:", err.message);
+              this.log("Error querying full_state:", err.message);
               resolve(null);
             } else {
               resolve(row);
@@ -1469,136 +760,95 @@ export class NewStateServiceDemo extends ContinuousService {
       if (fullStateRow && fullStateRow.data) {
         try {
           const fullState = JSON.parse(fullStateRow.data);
-          this._debug("Loaded full state from database");
-          
+          this.log("Loaded full state from database");
+
           // Apply the full state update
           stateData.batchUpdate(fullState);
-          this._debug("Applied full state to stateData");
+          this.log("Applied full state to stateData");
           return true;
         } catch (error) {
-          this._debug("Error parsing full state:", error);
+          this.log("Error parsing full state:", error);
           // Continue to try loading from patches if full state fails
         }
       }
 
-      this._debug("No valid full state found, will load from patches");
-      
+      this.log("No valid full state found, will load from patches");
+
       // If we get here, we need to load from patches
       // First check if we have any patches
       const patchCount = await new Promise((resolve) => {
-        this._db.get(
-          "SELECT COUNT(*) as count FROM sk_patches",
-          (err, row) => resolve(row ? row.count : 0)
+        this.db.get("SELECT COUNT(*) as count FROM sk_patches", (err, row) =>
+          resolve(row ? row.count : 0)
         );
       });
 
       if (patchCount === 0) {
-        this._debug("No patches found in database, starting with empty state");
+        this.log("No patches found in database, starting with empty state");
         return false;
       }
 
       // Get the most recent patch that contains navigation data
       const navPatch = await new Promise((resolve) => {
-        this._db.get(`
+        this.db.get(
+          `
           SELECT patch_json 
           FROM sk_patches 
           WHERE patch_json LIKE '%"navigation"%' 
           ORDER BY timestamp DESC 
           LIMIT 1
-        `, (err, row) => resolve(row));
+        `,
+          (err, row) => resolve(row)
+        );
       });
 
       if (navPatch && navPatch.patch_json) {
         try {
           const patchData = JSON.parse(navPatch.patch_json);
-          this._debug("Applying latest navigation patch");
+          this.log("Applying latest navigation patch");
           stateData.batchUpdate(patchData);
           return true;
         } catch (error) {
-          this._debug("Error applying navigation patch:", error);
+          this.log("Error applying navigation patch:", error);
           return false;
         }
       }
-      
+
       return false;
     } catch (error) {
-      this._debug("Error loading initial data:", error);
+      this.log("Error loading initial data:", error);
       return false;
     }
+    // State is now ready
+    this.isReady = true;
+    this.emit && this.emit("ready");
   }
 
+  // ====================
+  // Public API
+  // ====================
 
-
-  async updateState(updates) {
-    // console.log(
-    //   "[NewStateServiceDemo] Updating state with:",
-    //   JSON.stringify(updates, null, 2)
-    // );
-    
-    if (!updates || typeof updates !== "object") {
-      throw new Error("Updates must be an object");
-    }
-
-    // Log the current state before update
-    const currentState = this.getState();
-    console.log(
-      "[NewStateServiceDemo] State before update - tides exists:",
-      "tides" in currentState
-    );
-    
-    // Log the structure of the updates
-    console.log(
-      "[NewStateServiceDemo] Update structure:",
-      Object.keys(updates).join(", ")
-    );
-
-    try {
-      // Apply the updates directly to stateData
-      console.log("[NewStateServiceDemo] Applying updates to stateData");
-      
-      Object.assign(stateData, updates);
-      
-      // Also call batchUpdate for any other updates
-      const result = stateData.batchUpdate(updates);
-      console.log("[NewStateServiceDemo] batchUpdate result:", result);
-      
-      // Force a state refresh
-      const updatedState = this.getState();
-      
-      console.log(
-        "[NewStateServiceDemo] State after update - tides exists:",
-        "tides" in updatedState
-      );
-      
-      console.log(
-        "[NewStateServiceDemo] Updated state keys:",
-        Object.keys(updatedState).filter(key => key !== 'meta')
-      );
-
-      // Emit events to notify listeners
-      this.emit("state:update", updates);
-      console.log("[NewStateServiceDemo] Emitted state:update event");
-
-      // Emit full state update
-      const fullState = this.getState();
-      this.emit("state:full-update", {
-        data: fullState,
-        timestamp: new Date().toISOString(),
-      });
-      console.log("[NewStateServiceDemo] Emitted state:full-update event");
-      
-      return fullState;
-      
-    } catch (error) {
-      console.error("[NewStateServiceDemo] Error in updateState:", error);
-      throw error;
-    }
+  getState() {
+    return stateData.getState();
   }
 
+  async waitUntilReady(timeout = 5000) {
+    if (this.isReady) return Promise.resolve();
 
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error("Timeout waiting for StateService to be ready"));
+      }, timeout);
 
+      const onReady = () => {
+        clearTimeout(timer);
+        this.off("ready", onReady);
+        resolve();
+      };
 
+      this.on("ready", onReady);
+    });
+  }
 }
 
-// Create and export the singleton instance
+// Create and export singleton instance
 export default new NewStateServiceDemo();

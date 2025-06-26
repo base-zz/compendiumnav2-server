@@ -4,8 +4,12 @@ import path from 'path';
 import fetch from 'node-fetch';
 import { getOrCreateAppUuid } from './uniqueAppId.js';
 
-const PRIVATE_KEY_FILE = '.private-key';
-const PUBLIC_KEY_FILE = '.public-key';
+// Default key file paths (can be overridden by environment variables)
+const DEFAULT_PRIVATE_KEY_FILE = `${process.env.HOME || process.env.USERPROFILE || ''}/.compendium/keys/private-key`;
+const DEFAULT_PUBLIC_KEY_FILE = `${process.env.HOME || process.env.USERPROFILE || ''}/.compendium/keys/public-key`;
+
+const PRIVATE_KEY_FILE = process.env.COMPENDIUM_PRIVATE_KEY_FILE || DEFAULT_PRIVATE_KEY_FILE;
+const PUBLIC_KEY_FILE = process.env.COMPENDIUM_PUBLIC_KEY_FILE || DEFAULT_PUBLIC_KEY_FILE;
 
 /**
  * Generate or retrieve the key pair for this boat server

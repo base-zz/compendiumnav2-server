@@ -32,6 +32,7 @@ export const ALERT_RULE_CATEGORIES = {
   ELECTRICAL: 'electrical',
   TANK: 'tank',
   SAFETY: 'safety',
+  SECURITY: 'security',
   CUSTOM: 'custom'
 };
 

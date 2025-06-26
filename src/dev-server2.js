@@ -20,6 +20,7 @@ import http from "http";
 import fs from "fs";
 import path from "path";
 import { stateData } from "./state/StateData.js";
+import { stateManager2 } from "./relay/core/state/StateManager2.js";
 
 const log = debug("compendium:dev-server2");
 
@@ -59,137 +60,129 @@ async function initializeServices() {
   try {
     console.log("[DEV-SERVER2] Initializing NewStateServiceDemo...");
 
-    // Initialize the demo service
+    // Initialize the demo service, which loads data from the DB
     const stateService = newStateServiceDemo;
     await stateService.start();
+    await stateService.loadInitialData();
 
     // Register the state service with the service manager
     serviceManager.registerService("state", stateService);
 
-    // Start mock data generation
+    // Start mock data generation for other systems
     console.log("[DEV-SERVER2] Starting mock data generation...");
     stateService.startMockMultipleTanksAndBatteries(5000); // Update every 5 seconds
 
-    // Initialize and register other services with the state service
-    console.log(
-      "[DEV-SERVER2] Initializing TidalService and WeatherService..."
-    );
-    const tidalService = new TidalService(stateService);
-    const weatherService = new WeatherService(stateService);
-
-    serviceManager.registerService("tidal", tidalService);
-    serviceManager.registerService("weather", weatherService);
-
-    // Start all services
-    console.log("[DEV-SERVER2] Starting all services...");
-    await serviceManager.startAll();
-
-    console.log("[DEV-SERVER2] All services initialized and started");
+    console.log("[DEV-SERVER2] NewStateServiceDemo initialized.");
     return true;
   } catch (error) {
-    console.error("[DEV-SERVER2] Failed to initialize services:", error);
+    console.error(
+      "[DEV-SERVER2] Failed to initialize NewStateServiceDemo:",
+      error
+    );
     throw error;
   }
 }
 
-// --- Bridge canonical state into relay state manager ---
+// --- Bridge state and initialize dependent services ---
 async function bridgeStateToRelay() {
-  console.log("[DEV-SERVER2] Starting state bridge to relay");
+  console.log(
+    "[DEV-SERVER2] Starting state bridge and initializing dependent services"
+  );
   try {
-    const { stateManager } = await import("./relay/core/state/StateManager.js");
-
-    // Get the state service instance that was already created and started
+    
+    // Get the state service instance that was already created
     const stateService = serviceManager.getService("state");
     if (!stateService) {
       throw new Error("State service not found in service manager");
     }
+    
+    // Use statically imported stateManager2
+    const stateManager = stateManager2;
+    stateManager.initialState = stateService.getState();
 
-
-    // Get the current state and send initial update
-    const currentState = stateService.getState();
-
-    // Update the state data and relay
-    stateData.batchUpdate(currentState);
-    stateManager.receiveExternalStateUpdate(currentState);
-    stateManager.emitFullState();
-
-    // Set up event listener for state updates
-    stateService.on("state:updated", ({ data }) => {
+    // --- Wire up state events from provider to manager ---
+    console.log("[DEV-SERVER2] Wiring NewStateServiceDemo to StateManager2");
+    stateService.on("state:patch", ({ data }) => {
       try {
-        stateManager.receiveExternalStateUpdate(data);
+        // console.log("[DEV-SERVER2] 'state:patch' event received. Forwarding to StateManager2.");
+        stateManager.applyPatchAndForward(data);
       } catch (err) {
-        console.error("[DEV-SERVER2] Error updating state in relay:", err);
+        console.error("[DEV-SERVER2] Error applying patch in relay:", err);
       }
     });
 
-    // Add listeners for tide and weather updates
-    const tidalService = serviceManager.getService("tidal");
-    const weatherService = serviceManager.getService("weather");
-
-    if (tidalService) {
-      console.log('[DEV-SERVER2] Setting up tide:update listener on tidalService');
-      
-      // Remove any existing listeners to prevent duplicates
-      tidalService.removeAllListeners("tide:update");
-      
-      // Set up the new listener
-      const onTideUpdate = (data) => {
+    stateService.on("state:full-update", ({ data }) => {
+      try {
         console.log(
-          "[DEV-SERVER2] Received tide:update, forwarding to state manager"
+          "[DEV-SERVER2] 'state:full-update' event received. Forwarding to StateManager2."
         );
-        stateManager.setTideData(data);
-      };
-      
-      tidalService.on("tide:update", onTideUpdate);
-      
-      // Log the listener count for debugging
-      const listenerCount = tidalService.listenerCount("tide:update");
-      console.log(`[DEV-SERVER2] TidalService now has ${listenerCount} tide:update listeners`);
-      
-      // Manually trigger an update to test
-      tidalService.run().catch(err => {
-        console.error('[DEV-SERVER2] Error triggering manual tide update:', err);
-      });
-    } else {
-      console.error('[DEV-SERVER2] Tidal service not found!');
-      console.log('[DEV-SERVER2] Available services:', serviceManager.listServices());
-    }
-
-    if (weatherService) {
-      console.log('[DEV-SERVER2] Setting up weather:update listener on weatherService');
-      
-      // Remove any existing listeners to prevent duplicates
-      weatherService.removeAllListeners("weather:update");
-      
-      // Set up the new listener
-      const onWeatherUpdate = (data) => {
-        console.log(
-          "[DEV-SERVER2] Received weather:update, forwarding to state manager"
+        stateManager.receiveExternalStateUpdate(data);
+      } catch (err) {
+        console.error(
+          "[DEV-SERVER2] Error applying full update in relay:",
+          err
         );
-        stateManager.setWeatherData(data);
-      };
-      
-      weatherService.on("weather:update", onWeatherUpdate);
-      
-      // Log the listener count for debugging
-      const listenerCount = weatherService.listenerCount("weather:update");
-      console.log(`[DEV-SERVER2] WeatherService now has ${listenerCount} weather:update listeners`);
-      
-      // Manually trigger an update to test
-      weatherService.run().catch(err => {
-        console.error('[DEV-SERVER2] Error triggering manual weather update:', err);
-      });
-    } else {
-      console.error('[DEV-SERVER2] Weather service not found!');
-      console.log('[DEV-SERVER2] Available services:', serviceManager.listServices());
-    }
+      }
+    });
 
-    console.log("[DEV-SERVER2] State bridge to relay activated");
+    // --- Initialize secondary services ---
+    setTimeout(() => {
+      initializeSecondaryServices(stateManager, serviceManager);
+      stateService.startPlayback();
+      console.log(
+        "[DEV-SERVER2] State bridge to relay activated and all services running."
+      );
+    }, 1000);
+
   } catch (err) {
     console.error("[DEV-SERVER2] Failed to set up state bridge:", err);
-    throw err; // Re-throw to be caught by the caller
+    throw err;
   }
 }
+
+ 
+// --- Bridge state and initialize dependent services ---
+async function initializeSecondaryServices(stateManager, serviceManager) {
+  console.log("[DEV-SERVER2] Starting secondary services...");
+
+  const stateService = serviceManager.getService("state");
+  const tidalService = new TidalService(stateService);
+  const weatherService = new WeatherService(stateService);
+
+  serviceManager.registerService("tidal", tidalService);
+  serviceManager.registerService("weather", weatherService);
+
+  // --- Wire up tide and weather updates back to the state manager ---
+  if (tidalService) {
+    console.log(
+      "[DEV-SERVER2] Setting up tide:update listener on tidalService"
+    );
+    tidalService.on("tide:update", (data) => {
+      console.log(
+        "[DEV-SERVER2] Received tide:update, forwarding to state manager"
+      );
+      stateManager.setTideData(data);
+    });
+  }
+
+  if (weatherService) {
+    console.log(
+      "[DEV-SERVER2] Setting up weather:update listener on weatherService"
+    );
+    weatherService.on("weather:update", (data) => {
+      console.log(
+        "[DEV-SERVER2] Received weather:update, forwarding to state manager"
+      );
+      stateManager.setWeatherData(data);
+    });
+  }
+
+  // --- Start all other services ---
+  console.log("[DEV-SERVER2] Starting all services (Tidal, Weather)...");
+  await serviceManager.startAll(); // This will start tidal and weather services
+}
+
+//////////////////////
 
 async function startDevServer() {
   try {
@@ -288,7 +281,7 @@ async function startDevServer() {
 
     // 5. Start direct server
     console.log(`[DEV-SERVER2] Starting direct server on port ${directPort}`);
-    await startDirectServerWrapper(directConfig);
+    const directServer = await startDirectServerWrapper(directConfig);
 
     // 6. Create Express app and set up API routes
     const app = express();
@@ -359,12 +352,12 @@ async function startDevServer() {
     log(`[DEBUG] Configured HTTP server port: ${PORT}`);
 
     // Create HTTP server
-    const server = http.createServer(app);
+    const httpServer = http.createServer(app);
 
     // Add error handler for the HTTP server
-    server.on("error", (error) => {
+    httpServer.on("error", (error) => {
       // Check if this is a Node.js error with a code property
-      if (error && typeof error === 'object' && 'code' in error) {
+      if (error && typeof error === "object" && "code" in error) {
         if (error.code === "EADDRINUSE") {
           log(
             `[ERROR] Port ${PORT} is already in use. Please check for other running instances.`
@@ -372,64 +365,116 @@ async function startDevServer() {
           process.exit(1);
         }
       }
-      
+
       // For all other errors, just log the message
-      const errorMessage = error && typeof error === 'object' && 'message' in error 
-        ? error.message 
-        : String(error);
+      const errorMessage =
+        error && typeof error === "object" && "message" in error
+          ? error.message
+          : String(error);
       log(`[ERROR] HTTP server error: ${errorMessage}`);
       process.exit(1);
     });
 
     // Start the server
-    server.listen(PORT, '0.0.0.0', () => {
+    httpServer.listen(PORT, "0.0.0.0", () => {
       console.log(`[HTTP] Server started on port ${PORT}`);
       console.log(`[HTTP] Access the API at http://localhost:${PORT}/`);
       console.log("\nAvailable endpoints:");
       console.log(`  GET  http://localhost:${PORT}/api/boat-info`);
       console.log(`  POST http://localhost:${PORT}/api/vps/register`);
-      console.log(`  GET  http://localhost:${PORT}/api/vps/health\n`);
-      console.log("[DEV-SERVER2] Development server started with HTTP");
+      console.log(`  GET  http://localhost:${PORT}/api/vps/health`);
     });
 
-    // Graceful shutdown handler
-    const shutdown = async () => {
-      console.log("\n[DEV-SERVER2] Shutting down gracefully...");
+    console.log("[DEV-SERVER2] Development server started with HTTP");
 
-      try {
-        // Stop all services
-        await serviceManager.stopAll();
+    // Return all server instances for graceful shutdown
+    return { relayServer, directServer, httpServer };
+  } catch (error) {
+    console.error("[DEV-SERVER2] Fatal error during startup:", error);
+    process.exit(1);
+  }
+}
 
-        // Close the HTTP server
-        server.close(() => {
-          console.log("[DEV-SERVER2] HTTP server closed");
-          process.exit(0);
+// Graceful shutdown handler
+async function shutdown(signal) {
+  console.log(
+    `\n[DEV-SERVER2] Received ${signal}. Shutting down gracefully...`
+  );
+
+  try {
+    // Stop all background services
+    await serviceManager.stopAll();
+    console.log("[DEV-SERVER2] All services stopped.");
+
+    // Close the HTTP server
+    if (servers.httpServer) {
+      await new Promise((resolve) => servers.httpServer.close(resolve));
+      console.log("[DEV-SERVER2] HTTP server closed.");
+    }
+
+    // Close the Direct server
+    if (
+      servers.directServer &&
+      typeof servers.directServer.shutdown === "function"
+    ) {
+      await servers.directServer.shutdown();
+      console.log("[DEV-SERVER2] Direct server closed.");
+    } else if (
+      servers.directServer &&
+      typeof servers.directServer.close === "function"
+    ) {
+      // Fallback for older directServer instances that might still return wss directly
+      await servers.directServer.close();
+      console.log("[DEV-SERVER2] Direct server (old style) closed.");
+    } else {
+      console.warn(
+        "[DEV-SERVER2] Direct server object found, but no recognized close or shutdown method."
+      );
+    }
+
+    // Close the Relay server
+    if (servers.relayServer) {
+      console.log("[DEV-SERVER2] Closing relay server...");
+      if (typeof servers.relayServer.shutdown === "function") {
+        servers.relayServer.shutdown();
+        console.log("[DEV-SERVER2] Relay server shutdown initiated.");
+      } else if (typeof servers.relayServer.close === "function") {
+        servers.relayServer.close(() => {
+          console.log("[DEV-SERVER2] Relay server closed.");
         });
-
-        // Force close after timeout
-        setTimeout(() => {
-          console.error(
-            "[DEV-SERVER2] Could not close connections in time, forcefully shutting down"
-          );
-          process.exit(1);
-        }, 10000);
-      } catch (error) {
-        console.error("[DEV-SERVER2] Error during shutdown:", error);
-        process.exit(1);
+      } else {
+        console.log(
+          "[DEV-SERVER2] Relay server has no close or shutdown method."
+        );
       }
-    };
+    }
 
-    // Handle shutdown signals
-    process.on("SIGTERM", shutdown);
-    process.on("SIGINT", shutdown);
+    console.log("[DEV-SERVER2] Shutdown complete.");
+    process.exit(0);
+  } catch (error) {
+    console.error("[DEV-SERVER2] Error during graceful shutdown:", error);
+    process.exit(1);
+  }
+}
+
+let servers = {};
+
+async function main() {
+  try {
+    servers = await startDevServer();
+    console.log("[DEV-SERVER2] All components started successfully.");
   } catch (error) {
     console.error("[DEV-SERVER2] Failed to start development server:", error);
     process.exit(1);
   }
 }
 
+// Register signal handlers
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
+// Start the application
+main();
+
 // Enable debug output for our services
 debug.enable("cn2:*");
-
-// Start the dev server
-startDevServer().catch(console.error);

@@ -337,4 +337,24 @@ export const stateData = {
       forecast: this.forecast,
     });
   },
+
+  /**
+   * Returns the value at the given '/'-separated path, or the whole state if no path is provided.
+   * Example: getState('/navigation/position')
+   */
+  getState(path) {
+    if (!path) return this.state;
+    // Remove leading/trailing slashes and split
+    const parts = path.replace(/^\/+|\/+$/g, '').split('/');
+    let obj = this;
+    for (const key of parts) {
+      if (key === '*') continue; // support wildcard for some usages
+      if (obj && typeof obj === 'object' && key in obj) {
+        obj = obj[key];
+      } else {
+        return undefined;
+      }
+    }
+    return obj;
+  },
 };

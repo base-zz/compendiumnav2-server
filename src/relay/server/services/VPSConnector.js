@@ -464,12 +464,13 @@ send(data) {
 * @returns {boolean} - Whether to skip the message
 */
 _shouldSkipMessage(data) {
-  // Always send identity, registration, heartbeat, and ping messages
+  // Always send identity, registration, heartbeat, ping, and anchor update messages
   if (data.type === "identity" || 
       data.type === "register" || 
       data.type === "subscribe" || 
       data.type === "heartbeat" || 
-      data.type === "ping") {
+      data.type === "ping" ||
+      data.type === "anchor:update") {
     return false;
   }
   

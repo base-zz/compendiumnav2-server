@@ -1,4 +1,5 @@
-// DEPRECATED: All anchor logic migrated to state.controller.js
+/**
+ * DEPRECATED: All anchor logic migrated to state.controller.js
  * @api {get} /anchor Get Anchor State
  * @apiName GetAnchorState
  * @apiGroup Anchor

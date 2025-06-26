@@ -94,6 +94,11 @@ CURRENT_USER=$(whoami)
 APP_USER="${COMPENDIUM_USER:-$CURRENT_USER}"
 SERVICE_NAME="compendium"
 
+# Key management
+KEYS_DIR="${USER_HOME}/.compendium/keys"
+PRIVATE_KEY_FILE="${KEYS_DIR}/private-key"
+PUBLIC_KEY_FILE="${KEYS_DIR}/public-key"
+
 # Detect if running on Raspberry Pi
 if [ -f /etc/rpi-issue ] || grep -q 'Raspberry Pi' /etc/os-release 2>/dev/null; then
     IS_RASPBERRY_PI=true
@@ -363,49 +368,44 @@ verify_repository() {
         }
     fi
     
-    echo -e "${GREEN}Repository verified${NC}"
-    return 0
-}
-
-# Configure environment variables with mDNS settings
-configure_environment() {
-    echo -e "${BLUE}Configuring environment...${NC}"
+    # Configure environment variables
+    configure_environment || return 1
     
-    # Create .env file if it doesn't exist
-    local env_file=".env"
-    if [ ! -f "$env_file" ]; then
-        touch "$env_file"
-    fi
+    # Create keys directory with proper permissions
+    echo -e "${BLUE}Setting up key directory...${NC}"
+    mkdir -p "$KEYS_DIR"
+    chmod 700 "$KEYS_DIR"
+    chown "$APP_USER:" "$KEYS_DIR"
     
-    # Get the local IP address
-    local ip_address
-    if command -v hostname &> /dev/null; then
-        ip_address=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "127.0.0.1")
-    else
-        ip_address="127.0.0.1"
-    fi
+    # Generate and register keys
+    echo -e "${BLUE}Setting up key-based authentication...${NC}"
+    generate_and_register_keys || {
+        echo -e "${YELLOW}Key generation/registration failed, but continuing with installation...${NC}"
+        echo -e "${YELLOW}The application will attempt to generate keys on first run if needed.${NC}"
+    }
     
-    # Set environment variables
-    set_env_var "PORT" "$HTTP_PORT"
-    set_env_var "VPS_WS_PORT" "$WS_PORT"
-    set_env_var "NODE_ENV" "production"
-    set_env_var "FRONTEND_URL" "http://${ip_address}:${HTTP_PORT}"
-    
-    # VPS connection configuration
-    set_env_var "VPS_HOST" "compendiumnav.com"
-    set_env_var "VPS_PATH" "/relay"
-    # Force WSS (secure WebSockets) for production
-    set_env_var "VPS_WS_PORT" "443"  # SSL port for secure WebSockets
-    
-    # WebSocket connection settings
-    set_env_var "VPS_PING_INTERVAL" "25000"  # 25 seconds between pings
-    set_env_var "VPS_CONNECTION_TIMEOUT" "30000"  # 30 second connection timeout
-    
-    # We're using key-based authentication which is more secure than token-based auth
-    # Remove TOKEN_SECRET if it exists to force key-based authentication
-    if grep -q "^TOKEN_SECRET=" "$env_file"; then
-        sed -i "/^TOKEN_SECRET=/d" "$env_file"
-        echo -e "${GREEN}Removed TOKEN_SECRET to enable secure key-based authentication${NC}"
+    # Set proper permissions on key files and copy to project directory
+    if [ -f "$PRIVATE_KEY_FILE" ] && [ -f "$PUBLIC_KEY_FILE" ]; then
+        # Set permissions on original files
+        chmod 600 "$PRIVATE_KEY_FILE"
+        chmod 644 "$PUBLIC_KEY_FILE"
+        chown "$APP_USER:" "$PRIVATE_KEY_FILE" "$PUBLIC_KEY_FILE"
+        
+        # Create project keys directory if it doesn't exist
+        local project_keys_dir="${APP_DIR}/keys"
+        mkdir -p "$project_keys_dir"
+        chmod 700 "$project_keys_dir"
+        
+        # Copy keys to project directory
+        cp "$PRIVATE_KEY_FILE" "${project_keys_dir}/"
+        cp "$PUBLIC_KEY_FILE" "${project_keys_dir}/"
+        
+        # Set permissions on copied files
+        chmod 600 "${project_keys_dir}/$(basename "$PRIVATE_KEY_FILE")"
+        chmod 644 "${project_keys_dir}/$(basename "$PUBLIC_KEY_FILE")"
+        chown -R "$APP_USER:" "$project_keys_dir"
+        
+        echo -e "${GREEN}Keys have been copied to: $project_keys_dir${NC}"
     fi
     
     # mDNS configuration
@@ -1016,6 +1016,129 @@ health_check() {
     fi
 }
 
+# Generate and register keys with VPS
+generate_and_register_keys() {
+    echo -e "${BLUE}Setting up key-based authentication...${NC}"
+    
+    # Create keys directory if it doesn't exist
+    mkdir -p "$KEYS_DIR"
+    
+    # Check if node is installed
+    if ! command -v node >/dev/null 2>&1; then
+        echo -e "${YELLOW}Node.js is required for key generation. Installing Node.js...${NC}"
+        install_dependencies
+    fi
+    
+    # Create a temporary script to generate and register keys
+    local key_script="${KEYS_DIR}/key-setup.js"
+    
+    # Create the key setup script
+    cat > "$key_script" << 'EOL'
+    import { getOrCreateKeyPair, registerPublicKeyWithVPS } from './src/state/keyPair.js';
+    import fs from 'fs';
+    import path from 'path';
+    import { fileURLToPath } from 'url';
+    
+    // Get the directory of the current module
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    
+    // Set the key file paths
+    const KEYS_DIR = process.env.HOME ? path.join(process.env.HOME, '.compendium/keys') : '/etc/compendium/keys';
+    const PRIVATE_KEY_PATH = path.join(KEYS_DIR, 'private-key');
+    const PUBLIC_KEY_PATH = path.join(KEYS_DIR, 'public-key');
+    
+    // Set environment variables for the key paths
+    process.env.COMPENDIUM_PRIVATE_KEY_FILE = PRIVATE_KEY_PATH;
+    process.env.COMPENDIUM_PUBLIC_KEY_FILE = PUBLIC_KEY_PATH;
+    
+    // Ensure the keys directory exists
+    if (!fs.existsSync(KEYS_DIR)) {
+      fs.mkdirSync(KEYS_DIR, { recursive: true, mode: 0o700 });
+    }
+    
+    async function setupKeys() {
+      try {
+        console.log('Generating key pair...');
+        const keyPair = getOrCreateKeyPair();
+        
+        if (!keyPair || !keyPair.publicKey) {
+          throw new Error('Failed to generate key pair');
+        }
+        
+        console.log('Key pair generated successfully');
+        
+        // Get VPS URL from environment
+        const vpsHost = process.env.VPS_HOST || 'compendiumnav.com';
+        const vpsProtocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+        const vpsPort = process.env.NODE_ENV === 'production' ? '443' : (process.env.VPS_WS_PORT || '3009');
+        const vpsPath = process.env.VPS_PATH || '/relay';
+        const vpsUrl = `${vpsProtocol}://${vpsHost}:${vpsPort}${vpsPath}`;
+        
+        console.log(`Registering public key with VPS at ${vpsUrl}...`);
+        const success = await registerPublicKeyWithVPS(vpsUrl);
+        
+        if (!success) {
+          throw new Error('Failed to register public key with VPS');
+        }
+        
+        console.log('Successfully registered public key with VPS');
+        console.log('Private key stored at:', PRIVATE_KEY_PATH);
+        console.log('Public key stored at:', PUBLIC_KEY_PATH);
+        process.exit(0);
+      } catch (error) {
+        console.error('Error during key setup:', error);
+        process.exit(1);
+      }
+    }
+    
+    setupKeys();
+    EOL
+    
+    # Create a package.json for the keys directory
+    mkdir -p "${KEYS_DIR}/src/state"
+    cp "${APP_DIR}/src/state/keyPair.js" "${KEYS_DIR}/src/state/"
+    cp "${APP_DIR}/src/state/uniqueAppId.js" "${KEYS_DIR}/src/state/"
+    
+    # Create a package.json for the keys directory
+    cat > "${KEYS_DIR}/package.json" << 'EOL'
+    {
+      "name": "compendium-keys",
+      "version": "1.0.0",
+      "description": "Key management for Compendium Navigation Server",
+      "type": "module",
+      "dependencies": {
+        "node-forge": "^1.3.1",
+        "node-fetch": "^2.6.7"
+      }
+    }
+    EOL
+    
+    # Install required dependencies
+    echo -e "${BLUE}Installing required Node.js dependencies...${NC}"
+    (cd "$KEYS_DIR" && npm install --no-package-lock --no-save)
+    
+    # Run the key setup script
+    echo -e "${BLUE}Generating and registering keys...${NC}"
+    if ! (cd "$KEYS_DIR" && node key-setup.js); then
+        echo -e "${RED}Error: Failed to generate or register keys${NC}" >&2
+        return 1
+    fi
+    
+    # Copy the generated keys to the app directory
+    if [ -f "${KEYS_DIR}/.private-key" ] && [ -f "${KEYS_DIR}/.public-key" ]; then
+        cp "${KEYS_DIR}/.private-key" "${APP_DIR}/"
+        cp "${KEYS_DIR}/.public-key" "${APP_DIR}/"
+        chown "$APP_USER:" "${APP_DIR}/.private-key" "${APP_DIR}/.public-key"
+        chmod 600 "${APP_DIR}/.private-key"
+        chmod 644 "${APP_DIR}/.public-key"
+        echo -e "${GREEN}Keys successfully generated and registered${NC}"
+    else
+        echo -e "${YELLOW}Warning: Keys were not generated correctly${NC}" >&2
+        return 1
+    fi
+}
+
 # Install function
 install() {
     echo -e "${BLUE}Starting Compendium Navigation Server installation...${NC}"
@@ -1183,6 +1306,14 @@ setup_repository() {
 
 # Update function
 update() {
+    # Generate and register keys if they don't exist
+    if [ ! -f "${APP_DIR}/.private-key" ] || [ ! -f "${APP_DIR}/.public-key" ]; then
+        echo -e "${YELLOW}No existing keys found. Generating new keys...${NC}"
+        generate_and_register_keys || {
+            echo -e "${YELLOW}Key generation/registration failed, but continuing with update...${NC}"
+            echo -e "${YELLOW}The application will attempt to generate keys on first run if needed.${NC}"
+        }
+    fi
     echo -e "${BLUE}Updating Compendium Navigation Server...${NC}"
     
     # Ensure we have a valid application directory

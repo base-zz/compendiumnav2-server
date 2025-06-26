@@ -29,6 +29,7 @@ const HIGH_WIND_THRESHOLD = 25;
 export const WeatherRules = [
   // High Apparent Wind Speed Detection Rule
   {
+    type: 'weather',
     name: 'High Apparent Wind Speed Detection',
     condition(state) {
       // Check if wind data exists
@@ -114,6 +115,7 @@ export const WeatherRules = [
   
   // High Apparent Wind Speed Resolution Rule
   {
+    type: 'weather',
     name: 'High Apparent Wind Speed Resolution',
     condition(state) {
       // Check if wind data exists
@@ -187,6 +189,7 @@ export const WeatherRules = [
   
   // High True Wind Speed Detection Rule
   {
+    type: 'weather',
     name: 'High True Wind Speed Detection',
     condition(state) {
       // Check if wind data exists
@@ -272,6 +275,7 @@ export const WeatherRules = [
   
   // High True Wind Speed Resolution Rule
   {
+    type: 'weather',
     name: 'High True Wind Speed Resolution',
     condition(state) {
       // Check if wind data exists

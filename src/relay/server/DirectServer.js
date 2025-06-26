@@ -16,7 +16,7 @@ import { dirname } from 'path';
  * @property {string} [role]
  * @property {NetSocket} [_socket]
  */
-import { stateManager } from "../core/state/StateManager.js";
+import { stateManager2 as stateManager } from "../core/state/StateManager2.js";
 
 /**
  * @param {Object} [options]
@@ -176,77 +176,47 @@ async function startDirectServer(options = {}) {
           messageStr = message.toString();
         }
         
-        const data = JSON.parse(messageStr);
+        console.log(`[DIRECT] Received message from ${ws._socket?.remoteAddress || 'unknown'}:`, messageStr);
         
-        // Store client ID for logging
-        const clientIdentifier = ws.clientId || clientId;
-        
-        // Handle ping messages
-        if (data.type === 'ping') {
-          if (ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'pong',
-              timestamp: Date.now()
-            }));
-          }
-          return;
-        }
-        
-        // Handle identity messages
-        if (data.type === 'identity') {
-          console.log(`[DIRECT] Received identity message from ${clientId} (${data.platform || 'unknown platform'})`);
-          console.log(`[DIRECT] Identity details:`, {
-            clientId: data.clientId,
-            platform: data.platform,
-            role: data.role,
-            timestamp: new Date().toISOString(),
-            remoteAddress: clientIp
-          });
+        // Parse the message
+        let data;
+        try {
+          data = JSON.parse(messageStr);
+          console.log(`[DIRECT] Parsed message type: ${data.type || 'unknown'}`);
           
-          if (data.clientId) {
-            // Store client information on the WebSocket connection
-            ws.clientId = data.clientId;
-            ws.platform = data.platform;
-            ws.role = data.role;
+          // Handle anchor updates
+          if (data.type === 'anchor:update') {
+
+            console.log('[DIRECT] Processing anchor:update message:', JSON.stringify(data, null, 2));
+            const success = stateManager.updateAnchorState(data);
+            console.log(`[DIRECT] Anchor update ${success ? 'succeeded' : 'failed'}`);
             
-            console.log(`[DIRECT] Stored client identity: ${data.clientId} (${data.platform || 'unknown platform'})`);
-            
-            // Emit an event to StateManager
-            stateManager.emit('identity:received', {
-              clientId: data.clientId,
-              platform: data.platform,
-              role: data.role,
-              timestamp: Date.now()
-            });
-            
-            // Send acknowledgment
             if (ws.readyState === ws.OPEN) {
               ws.send(JSON.stringify({
-                type: 'identity:ack',
-                status: 'success',
-                timestamp: Date.now()
+                type: 'anchor:update:ack',
+                success,
+                timestamp: Date.now(),
+                receivedData: data.data // Echo back the received data for debugging
               }));
             }
-          } else {
-            console.warn(`[DIRECT] Received identity message without clientId from ${clientId}`);
+            return;
           }
-          return;
-        }
-        
-        // Handle anchor state updates
-        if (data.type === 'anchor:update' && data.data) {
-          const success = stateManager.updateAnchorState(data.data);
+          
+          // Handle other message types...
+          
+        } catch (parseError) {
+          console.error('[DIRECT] Error parsing message:', parseError);
           if (ws.readyState === ws.OPEN) {
             ws.send(JSON.stringify({
-              type: 'anchor:update:ack',
-              success,
-              timestamp: Date.now()
+              type: 'error',
+              error: 'Invalid message format',
+              details: parseError.message
             }));
           }
           return;
         }
         
-        console.log(`[DIRECT] Received message from ${clientIdentifier}:`, data.type || 'unknown type');
+        console.log(`[DIRECT] Unhandled message type: ${data.type || 'unknown'}`);
       } catch (error) {
         console.error(`[DIRECT] Error processing message from ${clientId}:`, error);
       }
@@ -336,7 +306,7 @@ async function startDirectServer(options = {}) {
     if (!clients || clients.size === 0) return;
     
     const messageString = JSON.stringify(message);
-    console.log(`[DIRECT] Broadcasting to ${clients.size} clients: ${messageString}`);
+    // console.log(`[DIRECT] Broadcasting to ${clients.size} clients: ${messageString}`);
     
     clients.forEach((client) => {
       if (client.readyState === 1) { // 1 = OPEN
@@ -405,13 +375,22 @@ async function startDirectServer(options = {}) {
     ws.on("message", (data) => {
       try {
         // Safely parse message data whether it's a string or buffer
-        const message = JSON.parse(data.toString());
+        const rawMessage = data.toString();
+        console.log(`[DIRECT] Raw message received: ${rawMessage}`);
+        
+        const message = JSON.parse(rawMessage);
         const socket = extendedWs._socket;
         const clientIp = (socket && socket.remoteAddress) ? 
           socket.remoteAddress : 'unknown';
         
-        // Log all messages
-        console.log(`[DIRECT] Message: ${message.type} from ${clientIp}`);
+        // Log all messages with more detail
+        console.log(`[DIRECT] Message received:`, {
+          type: message.type,
+          clientIp,
+          timestamp: new Date().toISOString(),
+          data: message.data ? '[...]' : 'none',
+          rawLength: rawMessage.length
+        });
         
         // Special handling for identity messages
         if (message.type === 'identity' && message.data) {
@@ -439,18 +418,31 @@ async function startDirectServer(options = {}) {
         
         // Handle anchor state updates
         if (message.type === 'anchor:update' && message.data) {
-          console.log(`[DIRECT] Received anchor update from client`);
-          
-          // Forward the anchor data to the StateManager
-          // The StateManager is the single source of truth for state changes
-          const success = stateManager.updateAnchorState(message.data);
-          
-          // Acknowledge receipt
-          ws.send(JSON.stringify({
-            type: 'anchor:update:ack',
-            success,
-            timestamp: Date.now()
-          }));
+          console.log('[DIRECT] Processing anchor:update message:', JSON.stringify(message.data, null, 2));
+          try {
+            const success = stateManager.updateAnchorState(message.data);
+            console.log(`[DIRECT] Anchor update ${success ? 'succeeded' : 'failed'}`);
+            
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'anchor:update:ack',
+                success,
+                timestamp: Date.now(),
+                receivedData: message.data // Echo back the received data for debugging
+              }));
+            }
+          } catch (error) {
+            console.error('[DIRECT] Error processing anchor update:', error);
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'error',
+                error: 'Failed to process anchor update',
+                details: error.message,
+                timestamp: Date.now()
+              }));
+            }
+          }
+          return;
         }
       } catch (e) {
         console.warn("[DIRECT] Invalid message from client:", e);
