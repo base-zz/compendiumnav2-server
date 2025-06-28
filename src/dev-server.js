@@ -481,8 +481,74 @@ if (vpsUrl) {
   }
 }
 
-// Enable debug output for our services
-debug.enable('cn2:*');
+// Patch console methods to filter out unwanted logs
+const originalConsole = {
+  log: console.log,
+  info: console.info,
+  warn: console.warn,
+  error: console.error,
+  debug: console.debug
+};
+
+// Whitelist of allowed log patterns
+const ALLOWED_PATTERNS = [
+  'bluetooth',
+  'Bluetooth',
+  'error',
+  'Error',
+  'exception',
+  'Exception'
+];
+
+// Function to check if a log message should be shown
+function shouldShowLog(message) {
+  if (typeof message !== 'string') {
+    // For non-string messages, only allow if they're errors
+    return false;
+  }
+  
+  // Check if this is an error message (always show errors)
+  if (message.toLowerCase().includes('error') || 
+      message.toLowerCase().includes('exception') ||
+      message.toLowerCase().includes('failed')) {
+    return true;
+  }
+  
+  // Check if this is a Bluetooth-related message
+  if (message.toLowerCase().includes('bluetooth')) {
+    return true;
+  }
+  
+  // Check if this is a startup message
+  if (message.includes('Server started') || 
+      message.includes('listening on') ||
+      message.includes('Console logging configured')) {
+    return true;
+  }
+  
+  // By default, hide all other messages
+  return false;
+}
+
+// Override console methods
+const createConsoleMethod = (original) => {
+  return function(...args) {
+    // Only process the first argument for simplicity
+    if (args.length > 0 && shouldShowLog(String(args[0]))) {
+      original.apply(console, args);
+    }
+  };
+};
+
+console.log = createConsoleMethod(originalConsole.log);
+console.info = createConsoleMethod(originalConsole.info);
+console.warn = createConsoleMethod(originalConsole.warn);
+console.debug = createConsoleMethod(originalConsole.debug);
+
+// Always show errors
+console.error = originalConsole.error;
+
+console.log('Console logging configured to show only Bluetooth and error messages');
 
 // Start the dev server
 startDevServer().catch(console.error);

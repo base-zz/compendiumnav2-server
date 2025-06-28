@@ -20,7 +20,13 @@ import http from "http";
 import fs from "fs";
 import path from "path";
 import { stateData } from "./state/StateData.js";
-import { stateManager2 } from "./relay/core/state/StateManager2.js";
+import { StateManager2 } from "./relay/core/state/StateManager2.js";
+import { BluetoothService } from "./services/BluetoothService.js";
+
+// Create Express app
+const app = express();
+app.use(express.json());
+const server = http.createServer(app);
 
 const log = debug("compendium:dev-server2");
 
@@ -57,7 +63,12 @@ function buildVpsUrl() {
 
 // --- Initialize and register services ---
 async function initializeServices() {
+  log("Initializing services...");
+
   try {
+    // Initialize Bluetooth service
+    log("Bluetooth service will be initialized by service manager");
+
     console.log("[DEV-SERVER2] Initializing NewStateServiceDemo...");
 
     // Initialize the demo service, which loads data from the DB
@@ -96,8 +107,8 @@ async function bridgeStateToRelay() {
       throw new Error("State service not found in service manager");
     }
     
-    // Use statically imported stateManager2
-    const stateManager = stateManager2;
+    // Initialize StateManager2 with initial state
+    const stateManager = new StateManager2(stateData);
     stateManager.initialState = stateService.getState();
 
     // --- Wire up state events from provider to manager ---
@@ -148,9 +159,11 @@ async function initializeSecondaryServices(stateManager, serviceManager) {
   const stateService = serviceManager.getService("state");
   const tidalService = new TidalService(stateService);
   const weatherService = new WeatherService(stateService);
+  const bluetoothService = new BluetoothService();
 
   serviceManager.registerService("tidal", tidalService);
   serviceManager.registerService("weather", weatherService);
+  serviceManager.registerService("bluetooth", bluetoothService);
 
   // --- Wire up tide and weather updates back to the state manager ---
   if (tidalService) {
@@ -177,9 +190,286 @@ async function initializeSecondaryServices(stateManager, serviceManager) {
     });
   }
 
-  // --- Start all other services ---
-  console.log("[DEV-SERVER2] Starting all services (Tidal, Weather)...");
+  if (bluetoothService) {
+    console.log("[DEV-SERVER2] Setting up Bluetooth service event listeners");
+    
+    // Initialize the Bluetooth service
+    try {
+      // Start the Bluetooth service and log detailed information about the process
+      console.log("[DEV-SERVER2] Starting Bluetooth service with detailed logging...");
+      await bluetoothService.start();
+      console.log("[DEV-SERVER2] Bluetooth service start() method completed");
+      
+      // Always register parsers at startup
+      const parserRegistry = bluetoothService.parserRegistry;
+      if (parserRegistry) {
+        const allParsers = parserRegistry.getAllParsers ? parserRegistry.getAllParsers() : [];
+        console.log(`[DEV-SERVER2] Bluetooth service parser registry contains ${allParsers.length || 0} parsers`);
+        
+        // Always register RuuviParser explicitly
+        console.log("[DEV-SERVER2] Registering RuuviParser...");
+        const { RuuviParser } = await import("./bluetooth/parsers/RuuviParser.js");
+        console.log("[DEV-SERVER2] RuuviParser imported:", {
+          exists: !!RuuviParser,
+          manufacturerId: RuuviParser ? RuuviParser.manufacturerId : undefined
+        });
+        if (RuuviParser && RuuviParser.manufacturerId) {
+          const result = bluetoothService.registerParser(RuuviParser.manufacturerId, RuuviParser);
+          console.log(`[DEV-SERVER2] RuuviParser registration result: ${result}`);
+        } else {
+          console.log("[DEV-SERVER2] ERROR: RuuviParser or its manufacturerId is undefined");
+        }
+      }
+      
+      // Update Bluetooth service status
+      stateManager.updateBluetoothStatus({ 
+        state: 'enabled',
+        error: null 
+      });
+      
+      // Device discovery events
+      bluetoothService.on("device:discovered", (device) => {
+        // Only log device discoveries if debug mode is enabled
+        if (process.env.LOG_DEVICE_DISCOVERIES === 'true') {
+          console.log(`[DEV-SERVER2] Device discovered: ${device.id} (${device.name || 'Unnamed'})`);
+        }
+        stateManager.updateBluetoothDevice(device);
+      });
+      
+      // Device update events (sensor data changes, etc.)
+      bluetoothService.on("device:updated", (device) => {
+        stateManager.updateBluetoothDevice(device);
+      });
+      
+      // Device sensor data events (parsed data from sensors)
+      bluetoothService.on("device:data", ({ id, data }) => {
+        console.log(`[DEV-SERVER2] Received sensor data for device ${id}`);
+        
+        // Log data preview
+        const dataPreview = {};
+        if (data.temperature) dataPreview.temperature = data.temperature.value;
+        if (data.humidity) dataPreview.humidity = data.humidity.value;
+        if (data.pressure) dataPreview.pressure = data.pressure.value;
+        if (data.battery && data.battery.voltage) dataPreview.battery = data.battery.voltage.value;
+        
+        console.log(`[DEV-SERVER2] Sensor data preview: ${JSON.stringify(dataPreview)}`);
+        console.log(`[DEV-SERVER2] Forwarding sensor data to state manager...`);
+        
+        // Update state with sensor data
+        const result = stateManager.updateBluetoothDeviceSensorData(id, data);
+        console.log(`[DEV-SERVER2] State update ${result ? 'successful' : 'failed'}`);
+      });
+      
+      // Set up periodic state inspection for debugging
+      const stateInspectionInterval = 30000; // 30 seconds
+      console.log(`[DEV-SERVER2] Setting up state inspection every ${stateInspectionInterval/1000} seconds`);
+      
+      setInterval(() => {
+        // Get all Bluetooth devices from state
+        const bluetoothState = stateManager.appState?.bluetooth;
+        if (!bluetoothState || !bluetoothState.devices) {
+          console.log('[DEV-SERVER2] No Bluetooth devices in state');
+          return;
+        }
+        
+        // Count devices with sensor data
+        const allDevices = Object.values(bluetoothState.devices);
+        const devicesWithSensorData = allDevices.filter(device => device.sensorData);
+        
+        console.log(`[DEV-SERVER2] STATE INSPECTION: ${allDevices.length} total devices, ${devicesWithSensorData.length} with sensor data`);
+        
+        // Log details of devices with sensor data
+        if (devicesWithSensorData.length > 0) {
+          devicesWithSensorData.forEach(device => {
+            const sensorDataPreview = {};
+            const sensorData = device.sensorData;
+            
+            if (sensorData.temperature) sensorDataPreview.temperature = sensorData.temperature.value;
+            if (sensorData.humidity) sensorDataPreview.humidity = sensorData.humidity.value;
+            if (sensorData.pressure) sensorDataPreview.pressure = sensorData.pressure.value;
+            if (sensorData.battery && sensorData.battery.voltage) {
+              sensorDataPreview.battery = sensorData.battery.voltage.value;
+            }
+            
+            console.log(`[DEV-SERVER2] Device ${device.id} (${device.name || 'Unknown'}) sensor data:`, sensorDataPreview);
+          });
+        }
+      }, stateInspectionInterval);
+      
+      // Device selection events
+      bluetoothService.on("device:selected", (device) => {
+        console.log(`[DEV-SERVER2] Device selected: ${device.id}`);
+        stateManager.setBluetoothDeviceSelected(device.id, true);
+      });
+      
+      bluetoothService.on("device:unselected", (device) => {
+        console.log(`[DEV-SERVER2] Device unselected: ${device.id}`);
+        stateManager.setBluetoothDeviceSelected(device.id, false);
+      });
+      
+      // Bluetooth service status events
+      bluetoothService.on("scanStart", () => {
+        console.log("[DEV-SERVER2] Bluetooth scan started");
+        stateManager.updateBluetoothStatus({
+          scanning: true,
+          state: 'enabled'
+        });
+      });
+      
+      // Add debounce for device count logging
+      let lastScanStopTime = 0;
+      const scanStopDebounceTime = 500; // 500ms debounce
+      
+      bluetoothService.on("scanStop", () => {
+        console.log("[DEV-SERVER2] Bluetooth scan stopped");
+        
+        // Update state immediately
+        stateManager.updateBluetoothStatus({
+          scanning: false
+        });
+        
+        // Debounce the device count logging to prevent multiple logs per scan cycle
+        const now = Date.now();
+        if (now - lastScanStopTime > scanStopDebounceTime) {
+          lastScanStopTime = now;
+          
+          // Log the number of discovered and selected devices
+          setTimeout(() => {
+            const allDevices = bluetoothService.getDevices();
+            const selectedDevices = bluetoothService.getSelectedDevices();
+            console.log(`[BluetoothService] Devices: ${allDevices.length} discovered, ${selectedDevices.length} selected`);
+          }, 200); // Small delay to ensure all processing is complete
+        }
+      });
+      
+      bluetoothService.on("error", (error) => {
+        console.error("[DEV-SERVER2] Bluetooth service error:", error);
+        stateManager.updateBluetoothStatus({ 
+          state: 'error',
+          error: error.message || 'Unknown Bluetooth error' 
+        });
+      });
+      
+    } catch (error) {
+      console.error("[DEV-SERVER2] Failed to initialize Bluetooth service:", error);
+      stateManager.updateBluetoothStatus({ 
+        state: 'error',
+        error: error.message || 'Failed to initialize Bluetooth service' 
+      });
+    }
+  }
+
+    // --- Start all other services ---
+  console.log("[DEV-SERVER2] Starting all services (Tidal, Weather, Bluetooth)...");
   await serviceManager.startAll(); // This will start tidal and weather services
+
+  // --- Set up Bluetooth API endpoints ---
+  console.log("[DEV-SERVER2] Setting up Bluetooth API endpoints...");
+  app.use(express.json());
+  
+  // Bluetooth API endpoints
+  function setupBluetoothRoutes(app) {
+    try {
+      const bluetoothService = serviceManager.getService('bluetooth');
+      if (!bluetoothService) {
+        console.warn('Bluetooth service not available. Bluetooth API endpoints will not be available.');
+        return;
+      }
+      
+      console.log('Bluetooth service found, setting up routes...');
+      const router = express.Router();
+      
+      // Get list of discovered devices
+      router.get('/devices', async (req, res) => {
+        try {
+          const devices = bluetoothService.getDevices();
+          res.json(devices);
+        } catch (error) {
+          console.error('Error getting devices:', error);
+          res.status(500).json({ error: 'Failed to get devices' });
+        }
+      });
+
+      // Start/stop scanning
+      router.post('/scan', async (req, res) => {
+        try {
+          const { action } = req.body;
+          if (!action) {
+            return res.status(400).json({ error: 'Action is required' });
+          }
+          
+          if (action === 'start') {
+            await bluetoothService.start();
+            res.json({ 
+              status: 'scanning',
+              message: 'Bluetooth scanning started successfully'
+            });
+          } else if (action === 'stop') {
+            await bluetoothService.stop();
+            res.json({ 
+              status: 'stopped',
+              message: 'Bluetooth scanning stopped'
+            });
+          } else {
+            res.status(400).json({ 
+              error: 'Invalid action',
+              validActions: ['start', 'stop']
+            });
+          }
+        } catch (error) {
+          console.error('Error controlling scan:', error);
+          res.status(500).json({ 
+            error: 'Failed to control scanning',
+            details: error.message 
+          });
+        }
+      });
+
+      // Get scan status
+      router.get('/status', (req, res) => {
+        try {
+          res.json({
+            status: 'success',
+            data: {
+              isRunning: bluetoothService.isRunning,
+              isScanning: bluetoothService.scanning,
+              lastScan: bluetoothService.lastScanTime,
+              serviceAvailable: true
+            }
+          });
+        } catch (error) {
+          console.error('Error getting status:', error);
+          res.status(500).json({ 
+            error: 'Failed to get status',
+            details: error.message 
+          });
+        }
+      });
+
+      // Health check endpoint
+      router.get('/health', (req, res) => {
+        res.json({
+          status: 'ok',
+          service: 'bluetooth',
+          available: true,
+          timestamp: new Date().toISOString()
+        });
+      });
+
+      app.use('/api/bluetooth', router);
+      console.log('[DEV-SERVER2] Bluetooth API endpoints registered at /api/bluetooth');
+      
+    } catch (error) {
+      console.error('Failed to set up Bluetooth routes:', error);
+    }
+  }
+
+  // Setup Bluetooth routes if service is available
+  if (serviceManager.getService('bluetooth')) {
+    setupBluetoothRoutes(app);
+  } else {
+    console.warn('Bluetooth service not available. Bluetooth API endpoints will not be registered.');
+  }
 }
 
 //////////////////////
@@ -316,6 +606,64 @@ async function startDevServer() {
 
     // Register API routes
     registerBoatInfoRoutes(app);
+    registerVpsRoutes(app, { vpsUrl: process.env.VPS_URL });
+
+    // Set up Bluetooth API routes if Bluetooth service is available
+    try {
+      const bluetoothService = serviceManager.getService('bluetooth');
+      if (bluetoothService) {
+        const router = express.Router();
+        
+        // Get list of discovered devices
+        router.get('/bluetooth/devices', async (req, res) => {
+          try {
+            const devices = bluetoothService.getDevices();
+            res.json(devices);
+          } catch (error) {
+            console.error('Error getting devices:', error);
+            res.status(500).json({ error: 'Failed to get devices' });
+          }
+        });
+
+        // Start/stop scanning
+        router.post('/bluetooth/scan', async (req, res) => {
+          try {
+            const { action } = req.body;
+            if (action === 'start') {
+              await bluetoothService.start();
+              res.json({ status: 'scanning' });
+            } else if (action === 'stop') {
+              await bluetoothService.stop();
+              res.json({ status: 'stopped' });
+            } else {
+              res.status(400).json({ error: 'Invalid action' });
+            }
+          } catch (error) {
+            console.error('Error controlling scan:', error);
+            res.status(500).json({ error: 'Failed to control scanning' });
+          }
+        });
+
+        // Get scan status
+        router.get('/bluetooth/status', (req, res) => {
+          try {
+            res.json({
+              isRunning: bluetoothService.isRunning,
+              isScanning: bluetoothService.scanning,
+              lastScan: bluetoothService.lastScanTime
+            });
+          } catch (error) {
+            console.error('Error getting status:', error);
+            res.status(500).json({ error: 'Failed to get status' });
+          }
+        });
+
+        app.use('/api', router);
+        console.log("Bluetooth API endpoints registered at /api/bluetooth/*");
+      }
+    } catch (error) {
+      console.error('Failed to set up Bluetooth API:', error);
+    }
 
     // Build VPS URL from environment variables
     const vpsUrl = (() => {
@@ -397,11 +745,14 @@ async function startDevServer() {
 
 // Graceful shutdown handler
 async function shutdown(signal) {
-  console.log(
-    `\n[DEV-SERVER2] Received ${signal}. Shutting down gracefully...`
-  );
+  console.log(`\n${signal} received. Shutting down gracefully...`);
 
   try {
+    // Clean up Bluetooth service if it was initialized
+    const bluetoothService = serviceManager.getService('bluetooth');
+    if (bluetoothService) {
+      await bluetoothService.stop();
+    }
     // Stop all background services
     await serviceManager.stopAll();
     console.log("[DEV-SERVER2] All services stopped.");

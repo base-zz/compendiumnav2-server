@@ -651,5 +651,16 @@ export function createStateDataModel(unitPreferences = UNIT_PRESETS.IMPERIAL) {
     },
     tides: {},
     forecast: {},
+    bluetooth: {
+      enabled: false,
+      scanning: false,
+      lastUpdated: null,
+      devices: {},
+      selectedDevices: [],
+      status: {
+        state: 'disabled', // 'enabled', 'disabled', 'unauthorized', 'unsupported'
+        error: null
+      }
+    },
   };
 }

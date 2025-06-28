@@ -1,0 +1,412 @@
+[StateService] State initialized with Signal K structure
+[StateService] State structure: {
+  hasVessels: true,
+  hasSelfVessel: true,
+  hasPosition: true,
+  hasBatchUpdate: true
+}
+[allRules2.js] Imported anchorRules length: 3
+[allRules2.js] Imported navigationRules length: 3
+[allRules2.js] Imported weatherRules length: 4
+[allRules2.js] Combined rules before map, length: 10
+[DB] Using database at: /Users/basselabul-hajj/compendiumnav2-server/signalk_dev.db
+[allRules2.js] getRules() returning 10 rules with options: {}
+[StateManager2] Retrieved 10 rules from getRules().
+[StateManager2] Attempting to add rule: Anchor Deployed Notification
+[RuleEngine2] Added rule: Anchor Deployed Notification
+[StateManager2] Attempting to add rule: Anchor Retrieved Notification
+[RuleEngine2] Added rule: Anchor Retrieved Notification
+[StateManager2] Attempting to add rule: Anchor Dragging Detection
+[RuleEngine2] Added rule: Anchor Dragging Detection
+[StateManager2] Attempting to add rule: High Speed Navigation
+[RuleEngine2] Added rule: High Speed Navigation
+[StateManager2] Attempting to add rule: Drifting Detection
+[RuleEngine2] Added rule: Drifting Detection
+[StateManager2] Attempting to add rule: Proximity Alert
+[RuleEngine2] Added rule: Proximity Alert
+[StateManager2] Attempting to add rule: High Wind Speed Alert
+[RuleEngine2] Added rule: High Wind Speed Alert
+[StateManager2] Attempting to add rule: Storm Warning
+[RuleEngine2] Added rule: Storm Warning
+[StateManager2] Attempting to add rule: Temperature Alert
+[RuleEngine2] Added rule: Temperature Alert
+[StateManager2] Attempting to add rule: Pressure Drop Alert
+[RuleEngine2] Added rule: Pressure Drop Alert
+[StateManager2] Finished adding rules.
+Loading .env file from: /Users/basselabul-hajj/compendiumnav2-server/.env
+Authentication: key-based
+[DEV-SERVER2] Initializing services...
+[DEV-SERVER2] Initializing NewStateServiceDemo...
+[StateService] Starting service
+[StateService] Service started successfully and is ready
+[StateService] Continuous service started
+[StateService] [StateService] Starting service at 2025-06-27T23:48:48.851Z
+[StateService] Initializing database connection to: /Users/basselabul-hajj/compendiumnav2-server/src/signalk_dev.db
+Connected to SQLite database
+[StateService] Database connection established
+[StateService] Loaded user unit preferences: {
+  length: 'ft',
+  speed: 'kts',
+  temperature: '°F',
+  pressure: 'inHg',
+  volume: 'gal',
+  angle: 'deg',
+  preset: 'IMPERIAL'
+}
+Database indexes and design documents initialized
+Storage service initialized
+[StateService] Loaded full state from database
+[StateService] Applied full state to stateData
+[StateService] [StateService] Initial state before loading data: { hasStateData: true, hasVessels: true, hasSelfVessel: true }
+[StateService] Loading filtered patches from database...
+[StateService] Loaded 3000 filtered records from database
+[StateService] Data time range: 2025-05-09T22:20:04.000Z to 2025-05-09T23:35:03.000Z
+[StateService] Starting playback at 1x speed
+[StateService] [StateService] Loaded ---->>>>>>>>>>> 3000 rows from DB
+[ServiceManager] Registered service: state (continuous)
+[DEV-SERVER2] Starting mock data generation...
+[StateService] Starting mock data updates...
+[StateService] Started mock data updates
+[DEV-SERVER2] NewStateServiceDemo initialized.
+[DEV-SERVER2] Starting state bridge and initializing dependent services
+[allRules2.js] getRules() returning 10 rules with options: {}
+[StateManager2] Retrieved 10 rules from getRules().
+[StateManager2] Attempting to add rule: Anchor Deployed Notification
+[RuleEngine2] Added rule: Anchor Deployed Notification
+[StateManager2] Attempting to add rule: Anchor Retrieved Notification
+[RuleEngine2] Added rule: Anchor Retrieved Notification
+[StateManager2] Attempting to add rule: Anchor Dragging Detection
+[RuleEngine2] Added rule: Anchor Dragging Detection
+[StateManager2] Attempting to add rule: High Speed Navigation
+[RuleEngine2] Added rule: High Speed Navigation
+[StateManager2] Attempting to add rule: Drifting Detection
+[RuleEngine2] Added rule: Drifting Detection
+[StateManager2] Attempting to add rule: Proximity Alert
+[RuleEngine2] Added rule: Proximity Alert
+[StateManager2] Attempting to add rule: High Wind Speed Alert
+[RuleEngine2] Added rule: High Wind Speed Alert
+[StateManager2] Attempting to add rule: Storm Warning
+[RuleEngine2] Added rule: Storm Warning
+[StateManager2] Attempting to add rule: Temperature Alert
+[RuleEngine2] Added rule: Temperature Alert
+[StateManager2] Attempting to add rule: Pressure Drop Alert
+[RuleEngine2] Added rule: Pressure Drop Alert
+[StateManager2] Finished adding rules.
+[DEV-SERVER2] Wiring NewStateServiceDemo to StateManager2
+[DEV-SERVER2] Starting WebSocket server on port 3009
+[DEV-SERVER2] Starting relay server on port 3008
+[DEV-SERVER2] VPS URL: wss://compendiumnav.com/relay
+[allRules2.js] getRules() returning 10 rules with options: {}
+[StateManager2] Retrieved 10 rules from getRules().
+[StateManager2] Attempting to add rule: Anchor Deployed Notification
+[RuleEngine2] Added rule: Anchor Deployed Notification
+[StateManager2] Attempting to add rule: Anchor Retrieved Notification
+[RuleEngine2] Added rule: Anchor Retrieved Notification
+[StateManager2] Attempting to add rule: Anchor Dragging Detection
+[RuleEngine2] Added rule: Anchor Dragging Detection
+[StateManager2] Attempting to add rule: High Speed Navigation
+[RuleEngine2] Added rule: High Speed Navigation
+[StateManager2] Attempting to add rule: Drifting Detection
+[RuleEngine2] Added rule: Drifting Detection
+[StateManager2] Attempting to add rule: Proximity Alert
+[RuleEngine2] Added rule: Proximity Alert
+[StateManager2] Attempting to add rule: High Wind Speed Alert
+[RuleEngine2] Added rule: High Wind Speed Alert
+[StateManager2] Attempting to add rule: Storm Warning
+[RuleEngine2] Added rule: Storm Warning
+[StateManager2] Attempting to add rule: Temperature Alert
+[RuleEngine2] Added rule: Temperature Alert
+[StateManager2] Attempting to add rule: Pressure Drop Alert
+[RuleEngine2] Added rule: Pressure Drop Alert
+[StateManager2] Finished adding rules.
+[RELAY] Initializing relay server
+[RELAY] VPS URL: wss://compendiumnav.com/relay
+[RELAY] Using authentication: key-based
+[RELAY] Attempting to connect to VPS...
+[VPS-CONNECTOR] Authentication method: key-based
+[VPS-CONNECTOR] Token generated: NO
+[VPS-CONNECTOR] Key pair available: true
+[VPS-CONNECTOR] Public key (first 20 chars): -----BEGIN PUBLIC KE...
+[VPS-CONNECTOR] Registering public key with VPS...
+[KEY-PAIR] API base URL: https://compendiumnav.com
+[KEY-PAIR] Registering public key with VPS at https://compendiumnav.com/api/boat/register-key
+Storage service initialized
+Storage service initialized
+[KEY-PAIR] Successfully registered public key with VPS for boat 45a6724a-5d43-4a22-b0fa-f3e4114b4ccf
+[VPS-CONNECTOR] Public key registration successful
+[VPS-CONNECTOR] Connecting to VPS Relay Proxy at: wss://compendiumnav.com/relay
+[VPS-CONNECTOR-DEBUG] Connection URL: wss://compendiumnav.com/relay?token=
+[VPS-CONNECTOR] Connected to VPS Relay Proxy
+[RELAY] VPS connection established
+[VPS-CONNECTOR-DEBUG] Creating identity message for boat 45a6724a-5d43-4a22-b0fa-f3e4114b4ccf
+[VPS-CONNECTOR-DEBUG] This boatId must match the one clients are using to connect
+[VPS-DEBUG] Found private key, generating signature
+[VPS-DEBUG] Added signature to identity message (first 20 chars): vq2L969kCLL7NmaGr9Ej...
+[VPS-DEBUG] Sending identity message: {"type":"identity","boatId":"45a6724a-5d43-4a22-b0fa-f3e4114b4ccf","role":"boat-server","timestamp":1751068132184,"time":"2025-06-27T23:48:52.184Z","signature":"vq2L969kCLL7NmaGr9EjEVctZqNP2WCYC3rQcBKGkJO7kiWRi261u5HfqWwU/6HCzbGJNFKhP9HA0pzA+EFJ5Lb8dpX6Hr+aVTP3z/+fs0KZgf2LdQAw3fTt0QVFXtKQlP11cP+u1ooLdJ8Ic6HBHUvtLFJda35+UJwNI4W2nQ2mv1hjuXdZntEcMZPrEuzBuCSO3ewBXvtxIqwNquOeNrKrfztKE1TkFATmtF/FKMKlChn1jAd+FYhO0FLjTnRGpo6IGuK+6aSUpHaeiDUXo6W+x6dwkwTw4IBuBmt5y38Y00Q9Ix3BjUFgyAQNupl6a2CRykq0RqW5+j1SH3FC0A=="}
+[RELAY] Successfully connected to VPS
+[RELAY] Successfully initialized on port 3008
+[RELAY] Relay server initialized and started on port 3008
+[DEV-SERVER2] Starting direct server on port 3009
+[DIRECT] Binding WebSocket server to 0.0.0.0:3009
+[DIRECT] Starting WebSocket server on ws://0.0.0.0:3009
+[DIRECT] WebSocket server listening on 0.0.0.0:3009
+[DIRECT] Server is bound to: IPv4
+[DIRECT] HTTP server running on http://0.0.0.0:3009
+[DIRECT] WebSocket server running on 0.0.0.0:3009
+[DIRECT] Direct server started
+[VPS] No VPS URL provided, VPS registration will be disabled
+[DEV-SERVER2] Development server started with HTTP
+[DEV-SERVER2] All components started successfully.
+[HTTP] Server started on port 3001
+[HTTP] Access the API at http://localhost:3001/
+
+Available endpoints:
+  GET  http://localhost:3001/api/boat-info
+  POST http://localhost:3001/api/vps/register
+  GET  http://localhost:3001/api/vps/health
+[VPS-CONNECTOR] Received connectionStatus message from VPS: boat 45a6724a-5d43-4a22-b0fa-f3e4114b4ccf, clients: 0
+[VPS-CONNECTOR] Full connectionStatus message: {"type":"connectionStatus","boatId":"45a6724a-5d43-4a22-b0fa-f3e4114b4ccf","clientCount":0,"timestamp":1751068132282}
+[VPS-CONNECTOR] Updated internal client count to 0
+[VPS-CONNECTOR] Emitting connectionStatus event: boat 45a6724a-5d43-4a22-b0fa-f3e4114b4ccf, clients: 0
+[RELAY] Client connection status update: 0 clients for boat 45a6724a-5d43-4a22-b0fa-f3e4114b4ccf
+[StateManager2] Client count updated: 0 -> 0
+[StateService] Processing data point 1/3000
+[DEV-SERVER2] Starting secondary services...
+2025-06-27T23:48:52.831Z cn2:tidal-service Initialized tidal service (scheduled)
+2025-06-27T23:48:52.831Z cn2:tidal-service Initialized with interval: 7200000ms
+2025-06-27T23:48:52.831Z cn2:weather-service Initialized weather service (scheduled)
+2025-06-27T23:48:52.831Z cn2:weather-service Initialized with interval: 3600000ms
+2025-06-27T23:48:52.831Z cn2:bluetooth-service Initialized bluetooth service (continuous)
+2025-06-27T23:48:52.831Z cn2:bluetooth-service Initializing continuous service
+[ServiceManager] Registered service: tidal (scheduled)
+[ServiceManager] Registered service: weather (scheduled)
+[ServiceManager] Registered service: bluetooth (continuous)
+[DEV-SERVER2] Setting up tide:update listener on tidalService
+[DEV-SERVER2] Setting up weather:update listener on weatherService
+[DEV-SERVER2] Setting up Bluetooth service event listeners
+2025-06-27T23:48:52.831Z cn2:bluetooth-service Starting Bluetooth service...
+
+=== YAML CHECK ===
+Current working directory: /Users/basselabul-hajj/compendiumnav2-server
+YML path: /Users/basselabul-hajj/compendiumnav2-server/src/bluetooth/config/btman.yml
+[DEV-SERVER2] State bridge to relay activated and all services running.
+YAML file exists
+File content (first 200 chars): company_identifiers:
+
+  - value: 0x0F1B
+    name: 'PalatiumCare LLC'
+
+  - value: 0x0F1A
+    name: 'FLO SCIENCES, LLC'
+
+  - value: 0x0F19
+    name: 'Shenzhen SuperSound Technology Co.,Ltd'
+
+  - value: 
+2025-06-27T23:48:52.848Z cn2:bluetooth-service Found Apple entry: Apple, Inc. (0x004C)
+2025-06-27T23:48:52.848Z cn2:bluetooth-service Skipping invalid company entry debug
+2025-06-27T23:48:52.848Z cn2:bluetooth-service Successfully loaded 3864/3865 company identifiers
+2025-06-27T23:48:52.848Z cn2:bluetooth-service Apple company name: Apple, Inc.
+2025-06-27T23:48:52.911Z cn2:bluetooth-service Noble event listeners reset debug
+2025-06-27T23:48:52.912Z cn2:bluetooth-service Initializing Bluetooth adapter, current state: poweredOn
+2025-06-27T23:48:52.912Z cn2:bluetooth-service Bluetooth adapter is already powered on
+2025-06-27T23:48:52.912Z cn2:bluetooth-service Starting BLE scan cycle
+2025-06-27T23:48:52.912Z cn2:bluetooth-service Bluetooth service started successfully
+[DEV-SERVER2] Bluetooth service started successfully
+[DEV-SERVER2] Starting all services (Tidal, Weather, Bluetooth)...
+[ServiceManager] Service 'state' is already running
+[ServiceManager] Starting service: tidal
+2025-06-27T23:48:52.914Z cn2:tidal-service Starting scheduled service
+2025-06-27T23:48:52.914Z cn2:tidal-service Next run scheduled in 7200 seconds
+2025-06-27T23:48:52.914Z cn2:tidal-service Scheduled service started successfully
+2025-06-27T23:48:52.914Z cn2:tidal-service Running initial task immediately
+2025-06-27T23:48:52.914Z cn2:tidal-service Starting task #1751068132914
+[TidalService] Starting tidal data fetch...
+[TidalService] Waiting for position data...
+[TidalService] Got valid position: 37.3036485, -76.4542491
+[TidalService] Got position: 37.3036485, -76.4542491
+2025-06-27T23:48:52.928Z cn2:bluetooth-service Noble state: poweredOn debug
+2025-06-27T23:48:52.928Z cn2:bluetooth-service Starting BLE scan... debug
+2025-06-27T23:48:52.928Z cn2:bluetooth-service BLE scan started debug
+[DEV-SERVER2] Bluetooth scan started
+2025-06-27T23:48:52.929Z cn2:bluetooth-service BLE scan started debug
+[DEV-SERVER2] Bluetooth scan started
+2025-06-27T23:48:52.929Z cn2:bluetooth-service BLE scan started debug
+[DEV-SERVER2] Bluetooth scan started
+[VPS-CONNECTOR] Registering public key via WebSocket
+[VPS-CONNECTOR] Sent key registration message via WebSocket
+[RELAY] Processing VPS message: register-key-response
+[RELAY-SERVER] Received message from VPS: {
+  type: 'register-key-response',
+  messageId: 'unknown',
+  clientId: 'unknown',
+  boatId: '45a6724a-5d43-4a22-b0fa-f3e4114b4ccf',
+  timestamp: '2025-06-27T23:48:53.270Z',
+  dataSize: 95
+}
+[RELAY-SERVER-DEBUG] Raw message from VPS: {"type":"register-key-response","success":true,"boatId":"45a6724a-5d43-4a22-b0fa-f3e4114b4ccf"}
+[RELAY-SERVER] Forwarding message type register-key-response to clients
+[VPS-CONNECTOR] Public key registered successfully via WebSocket
+[TidalService] Raw marine data received
+[TidalService] Processed marine data:
+[DEV-SERVER2] Received tide:update, forwarding to state manager
+[TidalService] Emitted 'tide:update' event with data: current, hourly, daily, metadata
+2025-06-27T23:48:53.488Z cn2:tidal-service Task #1751068132914 completed in 574ms
+2025-06-27T23:48:53.488Z cn2:tidal-service Next run scheduled in 7200 seconds
+[tidal] Running scheduled task...
+[TidalService] Starting tidal data fetch...
+[TidalService] Waiting for position data...
+[TidalService] Got valid position: 37.3036485, -76.4542491
+[TidalService] Got position: 37.3036485, -76.4542491
+[TidalService] Raw marine data received
+[TidalService] Processed marine data:
+[DEV-SERVER2] Received tide:update, forwarding to state manager
+[TidalService] Emitted 'tide:update' event with data: current, hourly, daily, metadata
+[ServiceManager] Scheduled 'tidal' to run every 7200000ms
+[ServiceManager] Starting service: weather
+[WeatherService] Starting weather service...
+[WeatherService] State service is ready
+[WeatherService] Starting weather data fetch...
+[WeatherService] Waiting for position data...
+[WeatherService] Got position: 37.3036485, -76.4542491
+[WeatherService] Fetching weather data...
+[DEV-SERVER2] Received weather:update, forwarding to state manager
+[WeatherService] Successfully updated state with forecast data
+[DEV-SERVER2] Received weather:update, forwarding to state manager
+[weather] Running scheduled task...
+[WeatherService] Starting weather data fetch...
+[WeatherService] Waiting for position data...
+[WeatherService] Got position: 37.3036485, -76.4542491
+[WeatherService] Fetching weather data...
+[DEV-SERVER2] Received weather:update, forwarding to state manager
+[WeatherService] Successfully updated state with forecast data
+[DEV-SERVER2] Received weather:update, forwarding to state manager
+[ServiceManager] Scheduled 'weather' to run every 3600000ms
+[ServiceManager] Service 'bluetooth' is already running
+[DEV-SERVER2] Setting up Bluetooth API endpoints...
+Bluetooth service found, setting up routes...
+[DEV-SERVER2] Bluetooth API endpoints registered at /api/bluetooth
+[BluetoothService] Auto-selecting Ruuvi device: c4d5653318b41ad4dce6b335160e7999
+[BluetoothService] Auto-selecting Ruuvi device: c4d5653318b41ad4dce6b335160e7999
+2025-06-27T23:49:02.930Z cn2:bluetooth-service Stopping scan after 10000ms debug
+2025-06-27T23:49:02.930Z cn2:bluetooth-service Stop scan event listeners set up debug
+2025-06-27T23:49:02.930Z cn2:bluetooth-service Calling noble.stopScanning() debug
+2025-06-27T23:49:02.930Z cn2:bluetooth-service Stop scan initiated, waiting for confirmation... debug
+2025-06-27T23:49:02.930Z cn2:bluetooth-service Stop scan event listeners set up debug
+2025-06-27T23:49:02.930Z cn2:bluetooth-service Calling noble.stopScanning() debug
+2025-06-27T23:49:02.930Z cn2:bluetooth-service Stop scan initiated, waiting for confirmation... debug
+2025-06-27T23:49:02.930Z cn2:bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:02.931Z cn2:bluetooth-service Processing 42 device updates debug
+2025-06-27T23:49:02.931Z cn2:bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:02.931Z cn2:bluetooth-service Processing 42 device updates debug
+2025-06-27T23:49:02.931Z cn2:bluetooth-service BLE scan stopped event received debug
+2025-06-27T23:49:02.931Z cn2:bluetooth-service Cleaning up stopScan listeners debug
+[DEV-SERVER2] Bluetooth scan stopped
+2025-06-27T23:49:02.931Z cn2:bluetooth-service BLE scan stopped event received debug
+2025-06-27T23:49:02.931Z cn2:bluetooth-service Cleaning up stopScan listeners debug
+[DEV-SERVER2] Bluetooth scan stopped
+2025-06-27T23:49:02.931Z cn2:bluetooth-service Resting for 5000ms before next scan...
+2025-06-27T23:49:02.931Z cn2:bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:02.931Z cn2:bluetooth-service Processing 42 device updates debug
+2025-06-27T23:49:02.931Z cn2:bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:02.931Z cn2:bluetooth-service Processing 42 device updates debug
+[BluetoothService] Devices: 40 discovered, 0 selected
+2025-06-27T23:49:03.197Z cn2:bluetooth-service Completed processing 42 device updates debug
+[DEV-SERVER2] Bluetooth scan stopped
+2025-06-27T23:49:03.250Z cn2:bluetooth-service Completed processing 42 device updates debug
+[DEV-SERVER2] Bluetooth scan stopped
+2025-06-27T23:49:03.338Z cn2:bluetooth-service Completed processing 42 device updates debug
+[DEV-SERVER2] Bluetooth scan stopped
+2025-06-27T23:49:03.352Z cn2:bluetooth-service Completed processing 42 device updates debug
+[DEV-SERVER2] Bluetooth scan stopped
+[StateService] Processing data point 11/3000
+2025-06-27T23:49:07.933Z cn2:bluetooth-service Noble state: poweredOn debug
+2025-06-27T23:49:07.933Z cn2:bluetooth-service Starting BLE scan... debug
+2025-06-27T23:49:07.933Z cn2:bluetooth-service BLE scan started debug
+[DEV-SERVER2] Bluetooth scan started
+2025-06-27T23:49:07.934Z cn2:bluetooth-service BLE scan started debug
+[DEV-SERVER2] Bluetooth scan started
+2025-06-27T23:49:07.934Z cn2:bluetooth-service BLE scan started debug
+[DEV-SERVER2] Bluetooth scan started
+[BluetoothService] No parser found for selected device c4d5653318b41ad4dce6b335160e7999
+[BluetoothService] No parser found for selected device c4d5653318b41ad4dce6b335160e7999
+[BluetoothService] No parser found for selected device c4d5653318b41ad4dce6b335160e7999
+[BluetoothService] No parser found for selected device c4d5653318b41ad4dce6b335160e7999
+2025-06-27T23:49:17.933Z cn2:bluetooth-service Stopping scan after 10000ms debug
+2025-06-27T23:49:17.934Z cn2:bluetooth-service Stop scan event listeners set up debug
+2025-06-27T23:49:17.934Z cn2:bluetooth-service Calling noble.stopScanning() debug
+2025-06-27T23:49:17.934Z cn2:bluetooth-service Stop scan initiated, waiting for confirmation... debug
+2025-06-27T23:49:17.936Z cn2:bluetooth-service Stop scan event listeners set up debug
+2025-06-27T23:49:17.936Z cn2:bluetooth-service Calling noble.stopScanning() debug
+2025-06-27T23:49:17.936Z cn2:bluetooth-service Stop scan initiated, waiting for confirmation... debug
+2025-06-27T23:49:17.936Z cn2:bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:17.936Z cn2:bluetooth-service Processing 38 device updates debug
+2025-06-27T23:49:17.937Z cn2:bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:17.937Z cn2:bluetooth-service Processing 38 device updates debug
+2025-06-27T23:49:17.937Z cn2:bluetooth-service BLE scan stopped event received debug
+2025-06-27T23:49:17.937Z cn2:bluetooth-service Cleaning up stopScan listeners debug
+[DEV-SERVER2] Bluetooth scan stopped
+2025-06-27T23:49:17.937Z cn2:bluetooth-service BLE scan stopped event received debug
+2025-06-27T23:49:17.937Z cn2:bluetooth-service Cleaning up stopScan listeners debug
+[DEV-SERVER2] Bluetooth scan stopped
+2025-06-27T23:49:17.938Z cn2:bluetooth-service Resting for 5000ms before next scan...
+2025-06-27T23:49:17.939Z cn2:bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:17.939Z cn2:bluetooth-service Processing 38 device updates debug
+2025-06-27T23:49:17.939Z cn2:bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:17.939Z cn2:bluetooth-service Processing 38 device updates debug
+[BluetoothService] Devices: 44 discovered, 1 selected
+2025-06-27T23:49:18.186Z cn2:bluetooth-service Completed processing 38 device updates debug
+[DEV-SERVER2] Bluetooth scan stopped
+2025-06-27T23:49:18.220Z cn2:bluetooth-service Completed processing 38 device updates debug
+[DEV-SERVER2] Bluetooth scan stopped
+2025-06-27T23:49:18.340Z cn2:bluetooth-service Completed processing 38 device updates debug
+[DEV-SERVER2] Bluetooth scan stopped
+2025-06-27T23:49:18.402Z cn2:bluetooth-service Completed processing 38 device updates debug
+[DEV-SERVER2] Bluetooth scan stopped
+2025-06-27T23:49:22.939Z cn2:bluetooth-service Noble state: poweredOn debug
+2025-06-27T23:49:22.940Z cn2:bluetooth-service Starting BLE scan... debug
+2025-06-27T23:49:22.940Z cn2:bluetooth-service BLE scan started debug
+[DEV-SERVER2] Bluetooth scan started
+2025-06-27T23:49:22.940Z cn2:bluetooth-service BLE scan started debug
+[DEV-SERVER2] Bluetooth scan started
+2025-06-27T23:49:22.940Z cn2:bluetooth-service BLE scan started debug
+[DEV-SERVER2] Bluetooth scan started
+
+SIGINT received. Shutting down gracefully...
+2025-06-27T23:49:23.638Z cn2:bluetooth-service Stopping Bluetooth service...
+2025-06-27T23:49:23.638Z cn2:bluetooth-service Stop scan event listeners set up debug
+2025-06-27T23:49:23.638Z cn2:bluetooth-service Calling noble.stopScanning() debug
+2025-06-27T23:49:23.639Z cn2:bluetooth-service Stop scan initiated, waiting for confirmation... debug
+2025-06-27T23:49:23.639Z cn2:bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:23.639Z cn2:bluetooth-service Processing 10 device updates debug
+2025-06-27T23:49:23.639Z cn2:bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:23.639Z cn2:bluetooth-service Processing 10 device updates debug
+2025-06-27T23:49:23.639Z cn2:bluetooth-service BLE scan stopped event received debug
+2025-06-27T23:49:23.639Z cn2:bluetooth-service Cleaning up stopScan listeners debug
+[DEV-SERVER2] Bluetooth scan stopped
+2025-06-27T23:49:23.639Z cn2:bluetooth-service Noble event listeners reset debug
+2025-06-27T23:49:23.639Z cn2:bluetooth-service Bluetooth service stopped
+[ServiceManager] Stopping service: tidal
+2025-06-27T23:49:23.639Z cn2:tidal-service Stopping service
+2025-06-27T23:49:23.639Z cn2:tidal-service Service stopped successfully
+2025-06-27T23:49:23.639Z cn2:tidal-service Scheduled service stopped
+[ServiceManager] Stopping service: state
+[StateService] Stopping State Service
+[StateService] Stopping playback
+[StateService] Stopped mock data updates
+[StateService] Stopping service
+[StateService] Service stopped successfully
+[StateService] Continuous service stopped
+[StateService] Service stopped
+[DEV-SERVER2] All services stopped.
+[DEV-SERVER2] HTTP server closed.
+[DIRECT] Shutting down...
+[DEV-SERVER2] Direct server closed.
+[DEV-SERVER2] Closing relay server...
+[RELAY] Starting shutdown sequence
+[RELAY] VPS connection lost
+[DEV-SERVER2] Disconnected from VPS
+[VPS-CONNECTOR] Disconnected from VPS Relay Proxy
+[RELAY] Shutdown complete
+[DEV-SERVER2] Relay server shutdown initiated.
+[DEV-SERVER2] Shutdown complete.

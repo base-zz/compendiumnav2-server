@@ -12,6 +12,8 @@ class ScheduledService extends BaseService {
    * @param {number} [options.interval=3600000] - Interval between runs in milliseconds
    * @param {boolean} [options.immediate=true] - Whether to run immediately on start
    * @param {boolean} [options.runOnInit=false] - Whether to run when the service starts
+   * @param {number} [options.scanDuration] - Duration of each scan in ms (for scanning services)
+   * @param {string} [options.ymlPath] - Path to YAML configuration file (for services that use YAML configs)
    */
   constructor(name, options = {}) {
     super(name, 'scheduled');
