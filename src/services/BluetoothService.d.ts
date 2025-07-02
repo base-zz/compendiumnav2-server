@@ -11,10 +11,29 @@ declare class BluetoothService extends EventEmitter {
   private companyMap: Map<number, string>;
   private _shouldBeScanning: boolean;
 
+  /**
+   * @typedef {Object} DeviceFilterOptions
+   * @property {number} [minRssi] - Minimum RSSI value for device discovery
+   * @property {string[]|null} [allowedTypes] - Array of allowed device types (null = all types)
+   */
+
+  /**
+   * @typedef {Object} BluetoothServiceOptions
+   */
   constructor(options?: {
+    scanDuration?: number;
     scanInterval?: number;
+    ymlPath?: string;
+    filters?: {
+      minRssi?: number;
+      allowedTypes?: string[] | null;
+    };
+    autoSelectRuuvi?: boolean;
+    debug?: boolean;
+    logLevel?: string;
     parserRegistry?: ParserRegistry;
     deviceManager?: DeviceManager;
+    stateManager?: any; // StateManager instance
   });
 
   // Lifecycle methods

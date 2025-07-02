@@ -11,7 +11,6 @@ class ContinuousService extends BaseService {
    */
   constructor(name) {
     super(name, 'continuous');
-    this.log('Initializing continuous service');
   }
   
   /**
@@ -20,12 +19,10 @@ class ContinuousService extends BaseService {
    */
   async start() {
     if (this.isRunning) {
-      this.log('Continuous service is already running');
       return;
     }
     
     await super.start();
-    this.log('Continuous service started');
   }
   
   /**
@@ -34,7 +31,6 @@ class ContinuousService extends BaseService {
    */
   async stop() {
     if (!this.isRunning) {
-      this.log('Continuous service is not running');
       return;
     }
     

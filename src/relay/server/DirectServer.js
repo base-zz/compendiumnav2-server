@@ -2,6 +2,7 @@ import { WebSocket as WS, WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import debug from 'debug';
 
 /**
  * @typedef {import('ws').WebSocket} WebSocket
@@ -17,6 +18,11 @@ import { dirname } from 'path';
  * @property {NetSocket} [_socket]
  */
 import { stateManager2 as stateManager } from "../core/state/StateManager2.js";
+
+const log = debug('compendium:direct-server');
+const logWarn = debug('compendium:direct-server:warn');
+const logError = debug('compendium:direct-server:error');
+const logTrace = debug('compendium:direct-server:trace');
 
 /**
  * @param {Object} [options]
@@ -36,7 +42,7 @@ async function startDirectServer(options = {}) {
   const HOST = options.host || process.env.DIRECT_WS_HOST || '0.0.0.0';
   
   // Ensure we're binding to all interfaces for mDNS to work
-  console.log(`[DIRECT] Binding WebSocket server to ${HOST}:${PORT}`);
+  log(`Binding WebSocket server to ${HOST}:${PORT}`);
   
   // Create HTTP server
   const httpServer = createServer((req, res) => {
@@ -55,7 +61,7 @@ async function startDirectServer(options = {}) {
     clientTracking: true
   };
 
-  console.log(`[DIRECT] Starting WebSocket server on ws://${HOST}:${PORT}`);
+  log(`Starting WebSocket server on ws://${HOST}:${PORT}`);
   
   // Create WebSocket server attached to HTTP
   /** @type {WebSocketServer} */
@@ -63,7 +69,7 @@ async function startDirectServer(options = {}) {
   
   // Start the HTTP server
   httpServer.listen(PORT, HOST, () => {
-    console.log(`[DIRECT] HTTP server running on http://${HOST}:${PORT}`);
+    log(`HTTP server running on http://${HOST}:${PORT}`);
   });
   
   // Store the server instance for later use
@@ -73,16 +79,16 @@ async function startDirectServer(options = {}) {
   wss.on('listening', () => {
     const address = wss.address();
     if (typeof address === 'string') {
-      console.log(`[DIRECT] WebSocket server listening on ${address}`);
+      log(`WebSocket server listening on ${address}`);
     } else {
-      console.log(`[DIRECT] WebSocket server listening on ${address.address}:${address.port}`);
-      console.log(`[DIRECT] Server is bound to: ${address.family === 'IPv6' ? 'IPv6' : 'IPv4'}`);
+      log(`WebSocket server listening on ${address.address}:${address.port}`);
+      log(`Server is bound to: ${address.family === 'IPv6' ? 'IPv6' : 'IPv4'}`);
     }
   });
 
   // Handle connection errors
   wss.on('error', (error) => {
-    console.error('[DIRECT] WebSocket server error:', error);
+    logError('WebSocket server error:', error);
   });
 
   // Single connection handler for WebSocket connections
@@ -92,15 +98,15 @@ async function startDirectServer(options = {}) {
     const origin = request.headers.origin || 'unknown';
     let isAlive = true;
     
-    console.log(`[DIRECT] New connection from ${clientIp} (${clientId}), Origin: ${origin}`);
-    console.log(`[DIRECT] Active clients: ${wss.clients.size}`);
+    log(`New connection from ${clientIp} (${clientId}), Origin: ${origin}`);
+    log(`Active clients: ${wss.clients.size}`);
     
     // Function to get a safe copy of the state
     const getSafeStateCopy = (state) => {
       try {
         return JSON.parse(JSON.stringify(state));
       } catch (error) {
-        console.error('[DIRECT] Error cloning state:', error);
+        logError('Error cloning state:', error);
         return {};
       }
     };
@@ -126,6 +132,14 @@ async function startDirectServer(options = {}) {
 
     const onStateUpdate = (payload) => {
       if (isAlive && ws.readyState === ws.OPEN) {
+        // Add debug logging for state:patch events related to Bluetooth sensor data
+        if (payload.type === 'state:patch' && payload.updateType === 'sensor') {
+          logTrace(`Sending Bluetooth sensor data patch to client ${clientId}:`, {
+            patchLength: payload.data.length,
+            timestamp: new Date(payload.timestamp).toISOString(),
+            paths: payload.data.map(p => p.path).join(', ')
+          });
+        }
         ws.send(JSON.stringify(payload));
       }
     };
@@ -154,13 +168,13 @@ async function startDirectServer(options = {}) {
           timestamp: Date.now()
         }), (error) => {
           if (error) {
-            console.error(`[DIRECT] Error sending initial state to ${clientId}:`, error);
+            logError(`Error sending initial state to ${clientId}:`, error);
           } else {
-            console.log(`[DIRECT] Sent initial state to ${clientId}`);
+            log(`Sent initial state to ${clientId}`);
           }
         });
       } catch (error) {
-        console.error(`[DIRECT] Error preparing initial state:`, error);
+        logError(`Error preparing initial state:`, error);
       }
     };
     
@@ -176,20 +190,40 @@ async function startDirectServer(options = {}) {
           messageStr = message.toString();
         }
         
-        console.log(`[DIRECT] Received message from ${ws._socket?.remoteAddress || 'unknown'}:`, messageStr);
+        logTrace(`Received message from ${ws._socket?.remoteAddress || 'unknown'}:`, messageStr);
         
         // Parse the message
         let data;
         try {
           data = JSON.parse(messageStr);
-          console.log(`[DIRECT] Parsed message type: ${data.type || 'unknown'}`);
+          log(`Parsed message type: ${data.type || 'unknown'}`);
+          
+          // Handle Bluetooth toggle (direct format)
+          if (data.type === 'bluetooth:toggle') {
+            log('Processing bluetooth:toggle message:', JSON.stringify(data, null, 2));
+            
+            // Convert to the standard command format and process it
+            const commandData = { enabled: data.enabled === true };
+            const success = stateManager.toggleBluetooth(commandData.enabled);
+            
+            // Send response
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'bluetooth:response',
+                action: 'toggle',
+                success,
+                message: `Bluetooth ${commandData.enabled ? 'enabled' : 'disabled'}`,
+                timestamp: Date.now()
+              }));
+            }
+            return;
+          }
           
           // Handle anchor updates
           if (data.type === 'anchor:update') {
-
-            console.log('[DIRECT] Processing anchor:update message:', JSON.stringify(data, null, 2));
+            log('Processing anchor:update message:', JSON.stringify(data, null, 2));
             const success = stateManager.updateAnchorState(data);
-            console.log(`[DIRECT] Anchor update ${success ? 'succeeded' : 'failed'}`);
+            log(`Anchor update ${success ? 'succeeded' : 'failed'}`);
             
             if (ws.readyState === ws.OPEN) {
               ws.send(JSON.stringify({
@@ -202,10 +236,183 @@ async function startDirectServer(options = {}) {
             return;
           }
           
+          // Handle Bluetooth commands
+          if ((data.type === 'command' && data.service === 'bluetooth') || data.type === 'bluetooth:toggle') {
+            log('Processing Bluetooth command:', JSON.stringify(data, null, 2));
+            
+            // Extract action and command data based on message format
+            let action, commandData;
+            
+            if (data.type === 'bluetooth:toggle') {
+              // Handle bluetooth:toggle format
+              action = 'toggle';
+              commandData = { enabled: data.enabled };
+            } else {
+              // Handle standard command format
+              action = data.action;
+              commandData = data.data;
+            }
+            let success = false;
+            let response = {
+              type: 'bluetooth:response',
+              action,
+              success: false,
+              timestamp: Date.now()
+            };
+            
+            try {
+              switch (action) {
+                case 'toggle':
+                  // Toggle Bluetooth on/off
+                  if (typeof commandData?.enabled === 'boolean') {
+                    success = stateManager.toggleBluetooth(commandData.enabled);
+                    response.message = `Bluetooth ${commandData.enabled ? 'enabled' : 'disabled'}`;
+                  } else {
+                    response.error = 'Invalid toggle parameter: enabled must be a boolean';
+                  }
+                  break;
+                  
+                case 'scan':
+                  // Start/stop Bluetooth scanning
+                  if (typeof commandData?.scanning === 'boolean') {
+                    success = stateManager.updateBluetoothScanningStatus(commandData.scanning);
+                    response.message = `Bluetooth scanning ${commandData.scanning ? 'started' : 'stopped'}`;
+                  } else {
+                    response.error = 'Invalid scan parameter: scanning must be a boolean';
+                  }
+                  break;
+                  
+                case 'select-device':
+                  // Select a Bluetooth device
+                  if (commandData?.deviceId) {
+                    // Handle async method
+                    stateManager.setBluetoothDeviceSelected(commandData.deviceId, true)
+                      .then(result => {
+                        response.success = result;
+                        response.message = `Device ${commandData.deviceId} selected`;
+                        response.deviceId = commandData.deviceId;
+                        
+                        if (ws.readyState === ws.OPEN) {
+                          ws.send(JSON.stringify(response));
+                        }
+                      })
+                      .catch(error => {
+                        logError(`Error selecting device:`, error);
+                        response.error = `Error selecting device: ${error.message}`;
+                        response.success = false;
+                        
+                        if (ws.readyState === ws.OPEN) {
+                          ws.send(JSON.stringify(response));
+                        }
+                      });
+                    
+                    // Return early since we're handling the response asynchronously
+                    return;
+                  } else {
+                    response.error = 'Invalid parameter: deviceId is required';
+                  }
+                  break;
+                  
+                case 'deselect-device':
+                  // Deselect a Bluetooth device
+                  if (commandData?.deviceId) {
+                    // Handle async method
+                    stateManager.setBluetoothDeviceSelected(commandData.deviceId, false)
+                      .then(result => {
+                        response.success = result;
+                        response.message = `Device ${commandData.deviceId} deselected`;
+                        response.deviceId = commandData.deviceId;
+                        
+                        if (ws.readyState === ws.OPEN) {
+                          ws.send(JSON.stringify(response));
+                        }
+                      })
+                      .catch(error => {
+                        logError(`Error deselecting device:`, error);
+                        response.error = `Error deselecting device: ${error.message}`;
+                        response.success = false;
+                        
+                        if (ws.readyState === ws.OPEN) {
+                          ws.send(JSON.stringify(response));
+                        }
+                      });
+                    
+                    // Return early since we're handling the response asynchronously
+                    return;
+                  } else {
+                    response.error = 'Invalid parameter: deviceId is required';
+                  }
+                  break;
+                  
+                case 'rename-device':
+                  // Rename a Bluetooth device
+                  if (commandData?.deviceId && commandData?.name) {
+                    // Need to handle this asynchronously
+                    stateManager.updateBluetoothDeviceMetadata(commandData.deviceId, { name: commandData.name })
+                      .then(result => {
+                        response.success = result;
+                        response.message = result ? 
+                          `Device ${commandData.deviceId} renamed to ${commandData.name}` : 
+                          `Failed to rename device ${commandData.deviceId}`;
+                        response.deviceId = commandData.deviceId;
+                        
+                        if (ws.readyState === ws.OPEN) {
+                          ws.send(JSON.stringify(response));
+                        }
+                      })
+                      .catch(error => {
+                        logError(`Error renaming device:`, error);
+                        response.error = `Error renaming device: ${error.message}`;
+                        response.success = false;
+                        
+                        if (ws.readyState === ws.OPEN) {
+                          ws.send(JSON.stringify(response));
+                        }
+                      });
+                    
+                    // Return early since we're handling the response asynchronously
+                    return;
+                  } else {
+                    response.error = 'Invalid parameters: deviceId and name are required';
+                  }
+                  break;
+                  
+                default:
+                  response.error = `Unknown Bluetooth action: ${action}`;
+              }
+            } catch (error) {
+              logError(`Error handling Bluetooth command ${action}:`, error);
+              response.error = `Error processing command: ${error.message}`;
+            }
+            
+            // Update the success flag in the response
+            response.success = success;
+            
+            // Send response back to the client
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify(response));
+            }
+            return;
+          }
+          
+          // Handle ping messages
+          if (data.type === 'ping') {
+            // Respond with a pong message
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'pong',
+                timestamp: Date.now(),
+                serverTime: new Date().toISOString(),
+                echo: data.timestamp // Echo back the client timestamp for latency calculation
+              }));
+            }
+            return;
+          }
+          
           // Handle other message types...
           
         } catch (parseError) {
-          console.error('[DIRECT] Error parsing message:', parseError);
+          logError('Error parsing message:', parseError);
           if (ws.readyState === ws.OPEN) {
             ws.send(JSON.stringify({
               type: 'error',
@@ -216,9 +423,9 @@ async function startDirectServer(options = {}) {
           return;
         }
         
-        console.log(`[DIRECT] Unhandled message type: ${data.type || 'unknown'}`);
+        logWarn(`Unhandled message type: ${data.type || 'unknown'}`);
       } catch (error) {
-        console.error(`[DIRECT] Error processing message from ${clientId}:`, error);
+        logError(`Error processing message from ${clientId}:`, error);
       }
     });
     
@@ -253,20 +460,20 @@ async function startDirectServer(options = {}) {
       stateManager.off('state:full-update', onStateUpdate);
       stateManager.off('state:patch', onStateUpdate);
       
-      console.log(`[DIRECT] Client ${clientIp} (${clientId}) disconnected`);
-      console.log(`[DIRECT] Active clients: ${wss.clients.size}`);
+      log(`Client ${clientIp} (${clientId}) disconnected`);
+      log(`Active clients: ${wss.clients.size}`);
     };
     
     ws.on('close', cleanup);
     ws.on('error', (error) => {
-      console.error(`[DIRECT] WebSocket error from ${clientIp} (${origin}):`, error);
+      logError(`WebSocket error from ${clientIp} (${origin}):`, error);
       cleanup();
     });
     
     // Set up connection timeout
     const connectionTimeout = setTimeout(() => {
       if (isAlive) {
-        console.log(`[DIRECT] Connection timeout for ${clientId}, terminating`);
+        logWarn(`Connection timeout for ${clientId}, terminating`);
         ws.terminate();
       }
     }, 45000); // 45 seconds (longer than 2x the heartbeat interval)
@@ -279,7 +486,7 @@ async function startDirectServer(options = {}) {
   // Handle CORS headers for WebSocket upgrade
   wss.on('headers', (headers, request) => {
     const origin = request.headers.origin || 'unknown';
-    console.log(`[DIRECT] WebSocket upgrade from ${request.socket.remoteAddress}, Origin: ${origin}`);
+    log(`WebSocket upgrade from ${request.socket.remoteAddress}, Origin: ${origin}`);
     
     // Allow all origins in development
     headers.push('Access-Control-Allow-Origin: *');
@@ -292,10 +499,10 @@ async function startDirectServer(options = {}) {
   // Now it's safe to get the address
   const serverAddress = wss.address();
   if (typeof serverAddress === 'string') {
-    console.log(`[DIRECT] WebSocket server running on ${serverAddress}`);
+    log(`WebSocket server running on ${serverAddress}`);
   } else {
     const address = serverAddress.address === '::' ? '0.0.0.0' : serverAddress.address;
-    console.log(`[DIRECT] WebSocket server running on ${address}:${serverAddress.port}`);
+    log(`WebSocket server running on ${address}:${serverAddress.port}`);
   }
 
   // Broadcast to all connected clients
@@ -306,7 +513,7 @@ async function startDirectServer(options = {}) {
     if (!clients || clients.size === 0) return;
     
     const messageString = JSON.stringify(message);
-    // console.log(`[DIRECT] Broadcasting to ${clients.size} clients: ${messageString}`);
+    // log(`Broadcasting to ${clients.size} clients: ${messageString}`);
     
     clients.forEach((client) => {
       if (client.readyState === 1) { // 1 = OPEN
@@ -322,11 +529,6 @@ async function startDirectServer(options = {}) {
   // Register state listeners
   const stateEventHandler = (payload) => {
     broadcast(payload);
-    
-    // Log after broadcast
-    // setTimeout(() => {
-    //   console.log(`[DIRECT] Active clients after broadcast: ${getActiveClientCount()}`);
-    // }, 100);
   }
 
   stateManager.on('state:full-update', stateEventHandler);
@@ -345,10 +547,10 @@ async function startDirectServer(options = {}) {
   }
   
   wss.on("connection", (/** @type {WebSocket & ExtendedWebSocket} */ ws, req) => {
-    console.log(`[DIRECT] New connection from ${req.socket.remoteAddress}`);
+    log(`[DIRECT] New connection from ${req.socket.remoteAddress}`);
     
     // Log active client count
-    console.log(`[DIRECT] Active clients: ${getActiveClientCount()}`);
+    log(`[DIRECT] Active clients: ${getActiveClientCount()}`);
 
     // Send initial state ONLY to this client
     ws.send(
@@ -360,11 +562,11 @@ async function startDirectServer(options = {}) {
       }),
       (err) => {
         if (err) {
-          console.error("[DIRECT] Initial state send failed:", err);
+          logError("[DIRECT] Initial state send failed:", err);
           ws.terminate();
           return;
         }
-        console.log("[DIRECT] Initial state sent successfully");
+        log("[DIRECT] Initial state sent successfully");
       }
     );
 
@@ -376,7 +578,7 @@ async function startDirectServer(options = {}) {
       try {
         // Safely parse message data whether it's a string or buffer
         const rawMessage = data.toString();
-        console.log(`[DIRECT] Raw message received: ${rawMessage}`);
+        log(`[DIRECT] Raw message received: ${rawMessage}`);
         
         const message = JSON.parse(rawMessage);
         const socket = extendedWs._socket;
@@ -384,7 +586,7 @@ async function startDirectServer(options = {}) {
           socket.remoteAddress : 'unknown';
         
         // Log all messages with more detail
-        console.log(`[DIRECT] Message received:`, {
+        log(`[DIRECT] Message received:`, {
           type: message.type,
           clientIp,
           timestamp: new Date().toISOString(),
@@ -399,7 +601,7 @@ async function startDirectServer(options = {}) {
           extendedWs.platform = message.data.platform;
           extendedWs.role = message.data.role;
           
-          console.log('[DIRECT] Identity received:', {
+          log('[DIRECT] Identity received:', {
             clientId: extendedWs.clientId,
             platform: extendedWs.platform,
             role: extendedWs.role,
@@ -418,10 +620,10 @@ async function startDirectServer(options = {}) {
         
         // Handle anchor state updates
         if (message.type === 'anchor:update' && message.data) {
-          console.log('[DIRECT] Processing anchor:update message:', JSON.stringify(message.data, null, 2));
+          log('[DIRECT] Processing anchor:update message:', JSON.stringify(message.data, null, 2));
           try {
             const success = stateManager.updateAnchorState(message.data);
-            console.log(`[DIRECT] Anchor update ${success ? 'succeeded' : 'failed'}`);
+            log(`[DIRECT] Anchor update ${success ? 'succeeded' : 'failed'}`);
             
             if (ws.readyState === ws.OPEN) {
               ws.send(JSON.stringify({
@@ -432,7 +634,7 @@ async function startDirectServer(options = {}) {
               }));
             }
           } catch (error) {
-            console.error('[DIRECT] Error processing anchor update:', error);
+            logError('[DIRECT] Error processing anchor update:', error);
             if (ws.readyState === ws.OPEN) {
               ws.send(JSON.stringify({
                 type: 'error',
@@ -445,7 +647,7 @@ async function startDirectServer(options = {}) {
           return;
         }
       } catch (e) {
-        console.warn("[DIRECT] Invalid message from client:", e);
+        logWarn("[DIRECT] Invalid message from client:", e);
       }
     });
 
@@ -457,14 +659,14 @@ async function startDirectServer(options = {}) {
     // Cleanup on disconnect
     ws.on("close", () => {
       clearInterval(heartbeat);
-      console.log("[DIRECT] Client disconnected");
+      log("[DIRECT] Client disconnected");
       
       // Log active client count
-      console.log(`[DIRECT] Active clients: ${getActiveClientCount()}`);
+      log(`[DIRECT] Active clients: ${getActiveClientCount()}`);
     });
 
     ws.on("error", (err) => {
-      console.warn("[DIRECT] Client error:", err);
+      logWarn("[DIRECT] Client error:", err);
     });
   });
 
@@ -479,7 +681,7 @@ async function startDirectServer(options = {}) {
 
 
   function shutdown() {
-    console.log("[DIRECT] Shutting down...");
+    log("[DIRECT] Shutting down...");
 
     stateManager.off('state:full-update', stateEventHandler);
     stateManager.off('state:patch', stateEventHandler);

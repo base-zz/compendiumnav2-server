@@ -8,6 +8,7 @@
     "start": "node -r module-alias/register dist/index.js",
     "build": "tsc",
     "dev": "ts-node -r module-alias/register src/dev-server.js",
+    "dev2": "node -r module-alias/register src/dev-server2.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "_moduleAliases": {

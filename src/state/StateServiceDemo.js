@@ -10,7 +10,7 @@ import EventEmitter from 'events';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { stateData } from './StateData.js';
-import { stateManager } from '../relay/core/state/StateManager.js';
+import { stateManager2 as stateManager } from '../relay/core/state/StateManager2.js';
 import sqlite3 from 'sqlite3';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -402,14 +402,19 @@ export class StateServiceDemo extends EventEmitter {
     }
     
     // Now update the state manager with the complete state
-    stateManager.applyPatchAndForward({
-      vessel: {
-        systems: {
-          tanks: stateData.vessel.systems.tanks,
-          electrical: stateData.vessel.systems.electrical
-        }
+    const patch = [
+      {
+        op: 'replace',
+        path: '/vessel/systems/tanks',
+        value: stateData.vessel.systems.tanks
+      },
+      {
+        op: 'replace',
+        path: '/vessel/systems/electrical',
+        value: stateData.vessel.systems.electrical
       }
-    });
+    ];
+    stateManager.applyPatchAndForward(patch);
     
     // Emit the state update
     this.emit('state:patch', { 

@@ -1,11 +1,12 @@
 import { EventEmitter } from 'events';
+import debug from 'debug';
 
 // Import ScheduledService with dynamic import to avoid circular dependencies
 let ScheduledService;
 try {
   ScheduledService = (await import('./ScheduledService.js')).default;
 } catch (error) {
-  console.warn('ScheduledService not found, scheduling will be disabled');
+  console.error('ScheduledService not found, scheduling will be disabled');
 }
 
 export class ServiceManager {
@@ -14,6 +15,10 @@ export class ServiceManager {
     this.timers = new Map();
     this.eventBus = new EventEmitter();
     this.isShuttingDown = false;
+
+    // Set up debug logging
+    this.log = debug('cn2:service-manager');
+    this.logError = debug('cn2:service-manager:error');
   }
 
   registerService(name, service) {
@@ -32,15 +37,15 @@ export class ServiceManager {
 
     // Special handling for service errors
     service.on('error', (error) => {
-      console.error(`[${name}] Service error:`, error);
+      this.logError(`[${name}] Service error:`, error);
     });
 
     this.services.set(name, service);
-    console.log(`[ServiceManager] Registered service: ${name} (${service.type})`);
+    this.log(`Registered service: ${name} (${service.type})`);
     
     // Log dependencies if any
     if (service._dependencies && service._dependencies.length > 0) {
-      console.log(`[ServiceManager] ${name} depends on: ${service._dependencies.join(', ')}`);
+      this.log(`${name} depends on: ${service._dependencies.join(', ')}`);
     }
   }
 
@@ -51,12 +56,12 @@ export class ServiceManager {
     }
 
     if (service.isRunning) {
-      console.warn(`[ServiceManager] Service '${name}' is already running`);
+      this.log(`Service '${name}' is already running`);
       return;
     }
 
     try {
-      console.log(`[ServiceManager] Starting service: ${name}`);
+      this.log(`Starting service: ${name}`);
       await service.start();
 
       // Set up scheduling for scheduled services
@@ -65,12 +70,12 @@ export class ServiceManager {
           if (this.isShuttingDown) return;
           
           try {
-            console.log(`[${name}] Running scheduled task...`);
+            this.log(`[${name}] Running scheduled task...`);
             await service.run();
             service.lastUpdated = new Date();
             service.emit('run:complete');
           } catch (error) {
-            console.error(`[${name}] Scheduled task failed:`, error);
+            this.logError(`[${name}] Scheduled task failed:`, error);
             service.emit('run:error', error);
           }
         };
@@ -83,12 +88,12 @@ export class ServiceManager {
         // Set up interval
         const timer = setInterval(runner, service.options.interval);
         this.timers.set(name, timer);
-        console.log(`[ServiceManager] Scheduled '${name}' to run every ${service.options.interval}ms`);
+        this.log(`Scheduled '${name}' to run every ${service.options.interval}ms`);
       }
 
       return service;
     } catch (error) {
-      console.error(`[ServiceManager] Failed to start service '${name}':`, error);
+      this.logError(`Failed to start service '${name}':`, error);
       throw error;
     }
   }
@@ -98,7 +103,7 @@ export class ServiceManager {
     if (!service || !service.isRunning) return;
 
     try {
-      console.log(`[ServiceManager] Stopping service: ${name}`);
+      this.log(`Stopping service: ${name}`);
       
       // Clear any running timers
       if (this.timers.has(name)) {
@@ -108,7 +113,7 @@ export class ServiceManager {
 
       await service.stop();
     } catch (error) {
-      console.error(`[ServiceManager] Error stopping service '${name}':`, error);
+      this.logError(`Error stopping service '${name}':`, error);
       throw error;
     }
   }
@@ -125,7 +130,7 @@ export class ServiceManager {
         await this.startService(name);
         results.started.push(name);
       } catch (error) {
-        console.error(`[ServiceManager] Failed to start service ${name}:`, error);
+        this.logError(`Failed to start service ${name}:`, error);
         results.errors.push({ 
           name, 
           error: error.message || 'Unknown error',

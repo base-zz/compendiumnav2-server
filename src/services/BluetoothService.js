@@ -7,7 +7,7 @@ import { fileURLToPath, URL } from "url";
 import { EventEmitter } from "events";
 import { ParserRegistry } from "../bluetooth/parsers/ParserRegistry.js";
 import { DeviceManager } from "../bluetooth/services/DeviceManager.js";
-import { RuuviParser } from "../bluetooth/parsers/RuuviParser.js";
+import RuuviParser from "../bluetooth/parsers/RuuviParser.js";
 import ContinuousService from "./ContinuousService.js";
 
 /**
@@ -50,6 +50,11 @@ export class BluetoothService extends ContinuousService {
    * @type {number} - Time between scans in milliseconds
    */
   scanInterval;
+
+  /**
+   * @type {boolean} - Flag to indicate if the service is currently in the process of stopping a scan
+   */
+  isStopping = false;
 
   /**
    * @type {string} - Path to the YAML file containing company identifiers
@@ -153,12 +158,9 @@ export class BluetoothService extends ContinuousService {
    * @property {boolean} [autoSelectRuuvi] - Whether to automatically select Ruuvi devices
    * @property {boolean} [debug] - Enable debug logging
    * @property {string} [logLevel] - Logging level (e.g., 'info', 'debug', 'error')
-   * @property {number} [scanInterval] - Time between scans in ms
-   * @property {string} [ymlPath] - Path to company identifiers YML file
    * @property {DeviceFilterOptions} [filters] - Device filtering options
    * @property {boolean} [autoSelectRuuvi] - Whether to automatically select Ruuvi devices when discovered
-   * @property {boolean} [debug] - Enable debug logging
-   * @property {string} [logLevel] - Logging level (e.g., 'debug', 'info', 'warn', 'error')
+   * @property {Object} [stateManager] - StateManager instance for state updates
    */
 
   /**
@@ -174,6 +176,7 @@ export class BluetoothService extends ContinuousService {
       autoSelectRuuvi = false,
       debug = defaults.debug,
       logLevel = defaults.logLevel,
+      stateManager = null,
     } = options;
 
     // Initialize ContinuousService
@@ -186,6 +189,7 @@ export class BluetoothService extends ContinuousService {
     this.autoSelectRuuvi = autoSelectRuuvi;
     this.debug = debug;
     this.logLevel = logLevel;
+    this.stateManager = stateManager; // Store the state manager reference
 
     /** @type {DeviceFilterOptions} */
     this.filters = {
@@ -200,6 +204,11 @@ export class BluetoothService extends ContinuousService {
     this.scanTimeout = null;
     this.scanTimer = null;
     this.companyMap = new Map();
+    this.isStarting = false;
+
+    // Debounce properties for scan stop logging
+    this.lastScanStopTime = 0;
+    this.scanStopDebounceTime = 500; // 500ms
     
     // Map to store device updates during a scan cycle
     this.deviceUpdates = new Map(); // Map of device ID -> device info
@@ -211,6 +220,101 @@ export class BluetoothService extends ContinuousService {
     this._onStateChange = (state) => this._handleStateChange(state);
     this._onScanStart = () => this._handleScanStart();
     this._onScanStop = () => this._handleScanStop();
+    
+    // Set up internal event listeners for state management if stateManager is provided
+    if (this.stateManager) {
+      this._setupStateManagement();
+    }
+  }
+  
+  /**
+   * Set the state manager instance after construction
+   * @param {Object} stateManager - StateManager instance
+   */
+  setStateManager(stateManager) {
+    if (!stateManager) {
+      this.log('Warning: Attempted to set null stateManager');
+      return;
+    }
+    
+    this.stateManager = stateManager;
+    this._setupStateManagement();
+  }
+  
+  /**
+   * Set up internal event listeners for state management
+   * @private
+   */
+  _setupStateManagement() {
+    if (!this.stateManager) {
+      this.log(
+        "Cannot set up state management: No state manager provided",
+        "warn"
+      );
+      return;
+    }
+
+    this.log("Setting up state management integration");
+
+    // Handle device discovery events internally
+    this.on("device:discovered", (device) => {
+      // this.log(
+      //   `Updating state for discovered device: ${device.id} (${
+      //     device.name || "Unnamed"
+      //   })`
+      // );
+      this.stateManager.updateBluetoothDevice(device, "discovery");
+    });
+
+    // Handle device update events internally
+    this.on("device:updated", (device) => {
+      // this.log(
+      //   `Updating state for updated device: ${device.id} (${
+      //     device.name || "unnamed"
+      //   })`
+      // );
+      this.stateManager.updateBluetoothDevice(device, "update");
+    });
+
+    // Handle device sensor data events internally
+    this.on("device:data", ({ id, data }) => {
+      this.log(`Updating state with sensor data for device ${id}`);
+      this.stateManager.updateBluetoothDeviceSensorData(id, data);
+    });
+
+    // Handle device selection events
+    this.on("device:selected", (device) => {
+      this.log(`Device selected: ${device.id}`);
+      this.stateManager.setBluetoothDeviceSelected(device.id, true);
+    });
+
+    this.on("device:unselected", (device) => {
+      this.log(`Device unselected: ${device.id}`);
+      this.stateManager.setBluetoothDeviceSelected(device.id, false);
+    });
+
+    // Handle service status events
+    this.on("scanStart", () => {
+      this.log("Bluetooth scan started");
+      this.stateManager.updateBluetoothStatus({
+        scanning: true,
+        state: "enabled",
+      });
+    });
+
+    this.on("scanStop", () => {
+      this.stateManager.updateBluetoothStatus({
+        scanning: false,
+      });
+    });
+
+    this.on("error", (error) => {
+      this.logError(`Bluetooth service error: ${error.message}`);
+      this.stateManager.updateBluetoothStatus({
+        state: "error",
+        error: error.message || "Unknown Bluetooth error",
+      });
+    });
   }
 
   /**
@@ -228,7 +332,7 @@ export class BluetoothService extends ContinuousService {
       this.log("Starting Bluetooth service...");
       
       // Debug RuuviParser import
-      console.log("[BluetoothService] RuuviParser import check:", {
+      this.log("RuuviParser import check:", {
         exists: !!RuuviParser,
         type: typeof RuuviParser,
         isClass: typeof RuuviParser === 'function',
@@ -236,15 +340,64 @@ export class BluetoothService extends ContinuousService {
         staticParse: RuuviParser ? (typeof RuuviParser.parse === 'function') : undefined,
         prototype: RuuviParser ? Object.getOwnPropertyNames(RuuviParser.prototype || {}) : undefined
       });
+      
+      // Initialize DeviceManager with error handling
+      try {
+        // Check if there's a lock file and remove it if it exists
+        const fs = require('fs');
+        const path = require('path');
+        const lockFilePath = path.join(process.cwd(), 'data', 'devices.db', 'LOCK');
+        
+        if (fs.existsSync(lockFilePath)) {
+          this.log(`Found stale lock file at ${lockFilePath}, attempting to remove...`);
+          try {
+            fs.unlinkSync(lockFilePath);
+            this.log(`Successfully removed stale lock file`);
+          } catch (lockError) {
+            this.log(`Failed to remove lock file: ${lockError.message}`);
+          }
+        }
+        
+        // Reinitialize the DeviceManager
+        if (!this.deviceManager || !this.deviceManager.isInitialized) {
+          this.log(`Initializing DeviceManager...`);
+          this.deviceManager = new DeviceManager();
+          await this.deviceManager.initialize();
+          this.log(`DeviceManager initialized successfully`);
+        }
+      } catch (deviceManagerError) {
+        this.log(`DeviceManager initialization failed, but continuing without device persistence: ${deviceManagerError.message}`);
+        // Create a simple in-memory device manager as fallback
+        this.deviceManager = {
+          isInitialized: true,
+          registerDevice: (id, device) => {
+            // this.log(`In-memory device registration: ${id}`);
+            return Promise.resolve(device);
+          },
+          getDevice: (id) => Promise.resolve(null),
+          getAllDevices: () => Promise.resolve([]),
+          selectedDevices: new Set(),
+          connectedDevices: new Set()
+        };
+      }
+      
+      // Update Bluetooth status in state if state manager is available
+      if (this.stateManager) {
+        this.stateManager.updateBluetoothStatus({
+          state: 'enabled',
+          error: null
+        });
+        this.log('Updated Bluetooth status in state manager');
+      }
 
       // Initialize the parser registry if not already done
       if (!this.parserRegistry) {
         this.parserRegistry = new ParserRegistry();
-        console.log("[BluetoothService] Created new ParserRegistry instance");
+        this.log("Created new ParserRegistry instance");
         
         // Use the RuuviParser instance directly - it now has the expected interface
-        console.log(`[BluetoothService] Using RuuviParser instance with manufacturerId: 0x${RuuviParser.manufacturerId.toString(16).toUpperCase()}`);
-        console.log(`[BluetoothService] RuuviParser instance:`, {
+        this.log(`Using RuuviParser instance with manufacturerId: 0x${RuuviParser.manufacturerId.toString(16).toUpperCase()}`);
+        this.log(`RuuviParser instance:`, {
           name: RuuviParser.name,
           hasParse: typeof RuuviParser.parse === 'function',
           hasMatches: typeof RuuviParser.matches === 'function'
@@ -252,11 +405,11 @@ export class BluetoothService extends ContinuousService {
         
         // Register the RuuviParser with the correct manufacturer ID
         const registrationResult = this.registerParser(RuuviParser.manufacturerId, RuuviParser);
-        console.log(`[BluetoothService] RuuviParser registration result: ${registrationResult}`);
+        this.log(`RuuviParser registration result: ${registrationResult}`);
         
         // Verify registration
         const allParsers = this.parserRegistry.getAllParsers ? this.parserRegistry.getAllParsers() : new Map();
-        console.log(`[BluetoothService] Total parsers after registration: ${allParsers.size || 'unknown'}`);
+        this.log(`Total parsers after registration: ${allParsers.size || 'unknown'}`);
         
         this.log(`Registered RuuviParser for manufacturer ID: 0x${RuuviParser.manufacturerId.toString(16).toUpperCase()}`);
       }
@@ -435,7 +588,7 @@ export class BluetoothService extends ContinuousService {
 
       this.log("Bluetooth service resources cleaned up", "debug");
     } catch (error) {
-      console.error("Error during Bluetooth service cleanup:", error);
+      this.error("Error during Bluetooth service cleanup:", error);
     }
   }
 
@@ -450,25 +603,21 @@ export class BluetoothService extends ContinuousService {
         path.join(process.cwd(), "src", "bluetooth", "config", "btman.yml");
 
       // Debug: Log the current working directory and full YML path
-      console.log("\n=== YAML CHECK ===");
-      console.log("Current working directory:", process.cwd());
-      console.log("YML path:", ymlPath);
+      this.log("\n=== YAML CHECK ===");
+      this.log("Current working directory:", process.cwd());
+      this.log("YML path:", ymlPath);
 
       // Check if the file exists
       try {
         await fs.access(ymlPath);
-        console.log("YAML file exists");
+        this.log("Located company identifier YAML file");
       } catch (err) {
-        console.error("YAML file does not exist:", err);
+        this.error("YAML file does not exist:", err);
         return;
       }
 
       // Read the YAML file
       const fileContent = await fs.readFile(ymlPath, "utf8");
-      console.log(
-        "File content (first 200 chars):",
-        fileContent.substring(0, 200)
-      );
 
       // Parse YAML
       const ymlData = yaml.load(fileContent);
@@ -605,10 +754,10 @@ export class BluetoothService extends ContinuousService {
    * @private
    */
   _handleScanStart() {
-    this.log("BLE scan started", "debug");
-    // Clear the map of device updates for this new scan cycle
-    this.deviceUpdates.clear();
-    this.emit("scanStart");
+    this.log("Bluetooth scan started");
+    this.scanning = true;
+    this.isStarting = false;
+    // No need to clear deviceUpdates as it's a Map that prevents duplicates by key
   }
 
   /**
@@ -616,34 +765,69 @@ export class BluetoothService extends ContinuousService {
    * @private
    */
   async _handleScanStop() {
-    this.log("BLE scan stopped", "debug");
-    
+    // Prevent duplicate calls from race conditions
+    if (!this.scanning && !this.isStopping) {
+      return;
+    }
+
+    this.log("Bluetooth scan stopped");
+    this.scanning = false;
+    this.isStopping = false;
+
     // Process all device updates at the end of the scan cycle
     if (this.deviceUpdates.size > 0 && this.deviceManager) {
       this.log(`Processing ${this.deviceUpdates.size} device updates`, "debug");
-      
+
       try {
         // Process device updates in batches to avoid overwhelming the database
         const batchSize = 10;
         const devices = Array.from(this.deviceUpdates.values());
-        
+
         for (let i = 0; i < devices.length; i += batchSize) {
           const batch = devices.slice(i, i + batchSize);
-          await Promise.all(batch.map(async (deviceInfo) => {
-            try {
-              await this.deviceManager.registerDevice(deviceInfo.id, deviceInfo);
-            } catch (error) {
-              this.log(`Error updating device ${deviceInfo.id}: ${error.message}`, "error");
-            }
-          }));
+          await Promise.all(
+            batch.map(async (deviceInfo) => {
+              try {
+                await this.deviceManager.registerDevice(
+                  deviceInfo.id,
+                  deviceInfo
+                );
+              } catch (error) {
+                this.log(
+                  `Error updating device ${deviceInfo.id}: ${error.message}`,
+                  "error"
+                );
+              }
+            })
+          );
         }
-        
-        this.log(`Completed processing ${this.deviceUpdates.size} device updates`, "debug");
+
+        this.log(
+          `Completed processing ${this.deviceUpdates.size} device updates`,
+          "debug"
+        );
       } catch (error) {
         this.log(`Error processing device updates: ${error.message}`, "error");
       }
     }
-    
+
+    // Debounced logging for device count
+    if (this.debug) {
+      const now = Date.now();
+      if (now - this.lastScanStopTime > this.scanStopDebounceTime) {
+        this.lastScanStopTime = now;
+
+        // Use a small delay to ensure all processing is complete
+        setTimeout(() => {
+          const allDevices = this.getDevices();
+          const selectedDevices = this.getSelectedDevices();
+          this.log(
+            `Devices: ${allDevices.length} discovered, ${selectedDevices.length} selected`
+          );
+        }, 200);
+      }
+    }
+
     this.emit("scanStop");
   }
 
@@ -705,126 +889,32 @@ export class BluetoothService extends ContinuousService {
   }
 
   /**
-   * Stop the BLE scan cycle
-   * @private
-   * @returns {Promise<void>}
-   */
-  async _stopScanCycle() {
-    this.scanCycleActive = false;
-    this.log("Stopping BLE scan cycle");
-
-    // Stop any active scan
-    if (this.scanning) {
-      await this._stopScan();
-    }
-  }
-
-  /**
    * Stop the current BLE scan
    * @private
    * @returns {Promise<boolean>} Resolves with true if scan was stopped successfully
    */
   async _stopScan() {
-    if (!this.scanning) {
-      this.log("No active scan to stop", "debug");
+    if (!this.scanning || this.isStopping) {
+      this.log("Not currently scanning or already stopping", "debug");
       return true;
     }
 
-    return new Promise((resolve, reject) => {
-      let cleanup = () => {};
-      let timeout;
-      let scanStopped = false;
-
-      const onScanStop = () => {
-        if (scanStopped) return;
-        scanStopped = true;
-
-        this.log("BLE scan stopped event received", "debug");
-        cleanup();
-        this.scanning = false;
-        this.emit("scanStop");
-        resolve(true);
-      };
-
-      const onError = (error) => {
-        this.logError(`Error stopping BLE scan: ${error.message}`, error);
-        if (!scanStopped) {
-          cleanup();
-          this.emit("error", error);
-          reject(error);
-        }
-      };
-
-      // Cleanup function to remove all listeners
-      cleanup = () => {
-        this.log("Cleaning up stopScan listeners", "debug");
-        clearTimeout(timeout);
-        try {
-          noble.removeListener("scanStop", onScanStop);
-          noble.removeListener("error", onError);
-        } catch (e) {
-          this.logError(`Error during stopScan cleanup: ${e.message}`);
-        }
-      };
-
-      // Set up event listeners
-      try {
-        noble.once("scanStop", onScanStop);
-        noble.once("error", onError);
-        this.log("Stop scan event listeners set up", "debug");
-      } catch (e) {
-        this.logError(`Error setting up stopScan listeners: ${e.message}`);
-        reject(e);
-        return;
-      }
-
-      // Stop scanning
-      try {
-        this.log("Calling noble.stopScanning()", "debug");
-        
-        try {
-          noble.stopScanning();
-          this.log("Stop scan initiated, waiting for confirmation...", "debug");
-        } catch (nativeError) {
-          // Catch and log native errors but don't let them crash the process
-          this.logError(`Native error during scan stop: ${nativeError.message || 'Unknown error'}`);
-          this.emit("error", nativeError);
-          
-          // Force scan stop state since the native call failed
-          scanStopped = true;
-          this.scanning = false;
-          this.emit("scanStop");
-          cleanup();
-          resolve(true);
-          return;
-        }
-
-        // Set a timeout in case the scan doesn't stop
-        timeout = setTimeout(() => {
-          if (!scanStopped) {
-            this.log("Warning: BLE scan stop timeout, forcing stop", "warn");
-            scanStopped = true;
-            this.scanning = false;
-            this.emit("scanStop");
-            cleanup();
-            resolve(true);
-          }
-        }, 5000); // 5 second timeout
-      } catch (error) {
-        this.logError(`Exception in stopScanning: ${error.message}`);
-        if (error.stack) {
-          this.logError(`Stack trace: ${error.stack}`);
-        }
-        cleanup();
-        reject(error);
-      }
-    }).catch((error) => {
-      this.logError(`Error in _stopScan: ${error.message}`);
-      if (error.stack) {
-        this.logError(`Stack trace: ${error.stack}`);
-      }
-      throw error; // Re-throw to be caught by the caller
-    });
+    this.isStopping = true;
+    this.log(`Scan complete. Discovered ${this.deviceUpdates ? this.deviceUpdates.size : 0} devices in this scan cycle.`);
+    
+    try {
+      this.log("Calling noble.stopScanning()", "debug");
+      noble.stopScanning();
+      // The global 'scanStop' handler (_handleScanStop) will take care of the rest.
+    } catch (error) {
+      this.logError(`Native error during noble.stopScanning(): ${error.message}`);
+      // If stopping fails, we should probably reset the state manually
+      this.scanning = false;
+      this.isStopping = false;
+      this.emit("scanStop"); // Manually emit if noble fails
+    }
+    
+    return true;
   }
 
   /**
@@ -833,44 +923,48 @@ export class BluetoothService extends ContinuousService {
    * @returns {Promise<boolean>} Resolves with true if scan started successfully
    */
   async _startScan() {
-    // Double-check if scanning is already in progress
-    if (this.scanning) {
-      this.log("Scan already in progress", "debug");
-      return true;
+    if (this.scanning || this.isStarting) {
+      this.log("Scan start already in progress.", "debug");
+      return;
     }
 
-    // Simple check for noble
+    this.isStarting = true;
+    this.isStopping = false;
+
     if (!noble) {
       this.logError("Noble module is not available");
-      return false;
+      this.isStarting = false; // Reset lock
+      return;
     }
 
-    // Log the current state for debugging
-    this.log(`Noble state: ${noble.state}`, "debug");
-
-    // If not powered on, wait for state change
     if (noble.state !== "poweredOn") {
       this.log(
         `Waiting for Bluetooth to be powered on (current state: ${noble.state})`,
         "debug"
       );
-      return new Promise((resolve) => {
-        const onStateChange = (state) => {
-          if (state === "poweredOn") {
-            noble.removeListener("stateChange", onStateChange);
-            this._startScan().then(resolve);
-          }
-        };
-        noble.on("stateChange", onStateChange);
+      this.isStarting = false; // Release lock while we wait
+      noble.once("stateChange", (state) => {
+        if (state === "poweredOn") {
+          this._startScan(); // Re-call to try again
+        } else {
+          this.log(`Bluetooth state changed to ${state}, not starting scan.`);
+        }
       });
+      return;
     }
 
-    return new Promise((resolve) => {
-      // Mark that we're scanning
-      this.scanning = true;
-      
-      // Set up a simple timeout to stop scanning after the specified duration
+    this.log("Starting BLE scan...", "debug");
+
+    try {
+      noble.startScanning([], true, (error) => {
+        if (error) {
+          this.logError(`Error during scan: ${error.message}`);
+          this.emit("error", error);
+        }
+      });
+
       if (this.scanDuration > 0) {
+        if (this.scanTimeout) clearTimeout(this.scanTimeout);
         this.scanTimeout = setTimeout(() => {
           this.log(`Stopping scan after ${this.scanDuration}ms`, "debug");
           this._stopScan().catch((e) => {
@@ -878,78 +972,14 @@ export class BluetoothService extends ContinuousService {
           });
         }, this.scanDuration);
       }
-      
-      // Start scanning with empty array (all services) and allow duplicates
-      this.log("Starting BLE scan...", "debug");
-      
-      try {
-        // Use the simplest possible call to startScanning, matching test-bluetooth.js
-        try {
-          noble.startScanning([], true);
-          
-          // Emit scan start event
-          this.log("BLE scan started", "debug");
-          this.emit("scanStart");
-        } catch (nativeError) {
-          // Catch and log native errors but don't let them crash the process
-          this.logError(`Native error during scan start: ${nativeError.message || 'Unknown error'}`);
-          this.emit("error", nativeError);
-        }
-        
-        // Resolve the promise - we consider it successful even if there was a native error
-        // because we want the process to continue
-        resolve(true);
-      } catch (error) {
-        // Handle any synchronous errors
-        this.logError(`Exception during scan start: ${error.message}`);
-        this.scanning = false;
-        if (this.scanTimeout) {
-          clearTimeout(this.scanTimeout);
-          this.scanTimeout = null;
-        }
-        this.emit("error", error);
-        resolve(false);
-      }
-    });
+    } catch (error) {
+      this.logError(`Exception during noble.startScanning(): ${error.message}`);
+      this.isStarting = false; // Reset lock on catastrophic failure
+      this.emit("error", error);
+    }
   }
 
   /**
-   * Handle BLE state change events
-   * @param {string} state - The new BLE state
-   * @private
-   */
-  _handleStateChange(state) {
-    this.log(`Bluetooth adapter state changed: ${state}`, "debug");
-
-    switch (state) {
-      case "poweredOn":
-        this.emit("poweredOn");
-        break;
-
-      case "poweredOff":
-        this.emit("poweredOff");
-        this._stopScan().catch((err) => {
-          this.log(`Error stopping scan on power off: ${err.message}`, "error");
-        });
-        break;
-
-      case "unauthorized":
-        this.emit("unauthorized");
-        this._stopScan().catch((err) => {
-          this.log(
-            `Error stopping scan on unauthorized: ${err.message}`,
-            "error"
-          );
-        });
-        break;
-
-      case "unsupported":
-        this.emit("unsupported");
-        break;
-
-      case "resetting":
-        this.log("Bluetooth adapter is resetting...", "debug");
-        this.emit("resetting");
         break;
 
       default:
@@ -969,18 +999,23 @@ export class BluetoothService extends ContinuousService {
         this.log("Skipping device discovery - not currently scanning", "debug");
         return;
       }
+      
+      // this.log(`[DEBUG] Device discovery event received for peripheral: ${peripheral.id}`);
 
       // Extract device information
       const { id, address, addressType, rssi, advertisement } = peripheral;
       const { localName, txPowerLevel, manufacturerData } = advertisement;
 
-      // Create device info object
+      // Create device info object. On macOS, address is not available for privacy reasons,
+      // so we use a slice of the ID as a fallback for the name.
       const deviceInfo = {
         id,
         address,
         addressType,
         rssi,
-        name: localName || `Unknown (${address})`,
+        name:
+          localName ||
+          (address ? `Unknown (${address})` : `Unknown (${id.slice(-6)})`),
         txPower: txPowerLevel,
         lastSeen: new Date().toISOString(),
         state: peripheral.state,
@@ -989,19 +1024,22 @@ export class BluetoothService extends ContinuousService {
           : null,
       };
 
-      // Process manufacturer data if available
-      if (manufacturerData && manufacturerData.length > 0) {
-        const parsedData = this._parseManufacturerData(manufacturerData);
-        if (parsedData) {
-          Object.assign(deviceData, parsedData);
-        }
+      // Store manufacturer ID if available
+      if (manufacturerData && manufacturerData.length >= 2) {
+        // Extract manufacturer ID from the first 2 bytes (little endian)
+        const manufacturerId = manufacturerData.readUInt16LE(0);
+        deviceInfo.manufacturerId = manufacturerId;
       }
 
       // Update device in device manager
-      this.deviceManager.updateDevice(deviceData);
+      await this.deviceManager.registerDevice(deviceInfo.id, deviceInfo);
+      
+      // Check if device is in selectedDevices Set
+      const isSelected = this.deviceManager.selectedDevices.has(deviceInfo.id);
 
-      // Emit device discovered event
-      this.emit("deviceDiscovered", deviceData);
+      // Emit both event names to be safe
+      this.emit("deviceDiscovered", deviceInfo);
+      this.emit("device:discovered", deviceInfo);
     } catch (error) {
       this.log(`Error handling device discovery: ${error.message}`, "error");
     }
@@ -1033,124 +1071,65 @@ export class BluetoothService extends ContinuousService {
       return null;
     }
   }
-
+  
   /**
-   * Handle discovery of a BLE peripheral
-   * @param {Object} peripheral - The discovered BLE peripheral
+   * Handle BLE state change events
+   * @param {string} state - The new BLE state
    * @private
    */
-  async _handleDeviceDiscovery(peripheral) {
-    try {
-      // Skip if we're not scanning
-      if (!this.scanning) {
-        this.log("Skipping device discovery - not currently scanning", "debug");
-        return;
-      }
-
-      // Extract device information
-      const { id, address, addressType, rssi, advertisement } = peripheral;
-      const { localName, txPowerLevel, manufacturerData } = advertisement;
-      
-      // Check if we've already discovered this device in the current scan cycle
-      const isNewDiscovery = !this.deviceUpdates.has(id);
-      
-      // Create device info object
-      const deviceInfo = {
-        id,
-        address,
-        addressType,
-        rssi,
-        name: localName || "Unknown",
-        txPower: txPowerLevel,
-        lastSeen: new Date(),
-        manufacturerData: manufacturerData
-          ? manufacturerData.toString("hex")
-          : null,
+  _handleStateChange(state) {
+    this.log(`Bluetooth adapter state changed: ${state}`, "debug");
+    
+    // Update state in state manager if available
+    if (this.stateManager) {
+      const stateInfo = {
+        state: state,
+        error: state === 'poweredOn' ? null : `Bluetooth state: ${state}`
       };
-
-      // Check if this is a Ruuvi device by examining the manufacturer data
-      let isRuuviDevice = false;
-      if (manufacturerData && manufacturerData.length >= 2) {
-        // Check for Ruuvi manufacturer ID (0x0499)
-        const manufacturerId = manufacturerData.readUInt16LE(0);
-        isRuuviDevice = (manufacturerId === 0x0499);
-        
-        if (isRuuviDevice && this.deviceManager && !this.deviceManager.isDeviceSelected(id)) {
-          // Auto-select Ruuvi devices
-          console.log(`[BluetoothService] Auto-selecting Ruuvi device: ${id}`);
-          this.selectDevice(id).then(selected => {
-            if (selected) {
-              console.log(`[BluetoothService] Successfully selected Ruuvi device: ${id}`);
-            }
-          });
-        }
-      }
       
-      // Parse manufacturer data for selected devices
-      if (manufacturerData && this.parserRegistry && this.deviceManager && this.deviceManager.isDeviceSelected(id)) {
-        try {
-          // Log manufacturer data details
-          const manufacturerId = manufacturerData.readUInt16LE(0);
-          console.log(`[BluetoothService] Selected device ${id} has manufacturer ID: 0x${manufacturerId.toString(16).toUpperCase()}`);
-          console.log(`[BluetoothService] Manufacturer data: ${manufacturerData.toString('hex')}`);
-          
-          // Check if we have any parsers registered
-          const allParsers = this.parserRegistry.getAllParsers ? this.parserRegistry.getAllParsers() : new Set();
-          console.log(`[BluetoothService] Total registered parsers: ${allParsers ? allParsers.size : 0}`);
-          
-          // Debug the parser registry state
-          console.log(`[BluetoothService] Parser registry manufacturer map:`, {
-            size: this.parserRegistry.manufacturerParsers ? this.parserRegistry.manufacturerParsers.size : 0,
-            hasRuuviId: this.parserRegistry.manufacturerParsers ? this.parserRegistry.manufacturerParsers.has(0x0499) : false
-          });
-          
-          // Log registered manufacturer IDs
-          console.log(`[BluetoothService] Checking for parser for manufacturer ID: 0x${manufacturerId.toString(16).toUpperCase()}`);
-          
-          // First, identify which parser would handle this data
-          const parser = this.parserRegistry.findParserFor(manufacturerData);
-          if (parser) {
-            console.log(`[BluetoothService] Using ${parser.constructor.name} for device ${id}`);
-            
-            // Parse the data
-            const parsedData = parser.parse(manufacturerData);
-            if (parsedData) {
-              deviceInfo.parsedData = parsedData;
-              
-              // Log the parsed data in a more readable format
-              const dataPreview = {};
-              if (parsedData.temperature) dataPreview.temperature = parsedData.temperature.value;
-              if (parsedData.humidity) dataPreview.humidity = parsedData.humidity.value;
-              if (parsedData.pressure) dataPreview.pressure = parsedData.pressure.value;
-              if (parsedData.battery) dataPreview.battery = parsedData.battery.voltage.value;
-              
-              console.log(`[BluetoothService] Parsed data for device ${id}: ${JSON.stringify(dataPreview)}`);
-              
-              // Emit a specific event for selected device data
-              this.emit("device:data", { id, data: parsedData });
-            } else {
-              console.log(`[BluetoothService] Parser returned no data for device ${id}`);
-            }
-          } else {
-            console.log(`[BluetoothService] No parser found for selected device ${id} with manufacturer ID: 0x${manufacturerId.toString(16).toUpperCase()}`);
-          }
-        } catch (error) {
+      this.stateManager.updateBluetoothStatus(stateInfo);
+    }
+
+    switch (state) {
+      case "poweredOn":
+        this.log("Bluetooth adapter is powered on and ready");
+        this.emit("poweredOn");
+        this.emit("ready");
+        break;
+
+      case "poweredOff":
+        this.log("Bluetooth adapter is powered off");
+        this.emit("poweredOff");
+        this._stopScan().catch((err) => {
+          this.log(`Error stopping scan on power off: ${err.message}`, "error");
+        });
+        break;
+
+      case "unauthorized":
+        this.log("Bluetooth adapter is unauthorized", "error");
+        this.emit("unauthorized");
+        this.emit("error", new Error("Bluetooth adapter is unauthorized"));
+        this._stopScan().catch((err) => {
           this.log(
-            `Error parsing manufacturer data for ${id}: ${error.message}`,
+            `Error stopping scan on unauthorized: ${err.message}`,
             "error"
           );
-        }
-      }
+        });
+        break;
 
-      // Store the device info in our updates map
-      this.deviceUpdates.set(id, deviceInfo);
-      
-      // Only emit discovery event if this is a new device in this scan cycle
-      if (isNewDiscovery) {
-        this.emit("device:discovered", deviceInfo);
-      }
-    } catch (error) {
-      this.log(`Error in device discovery handler: ${error.message}`, "error");
+      case "unsupported":
+        this.log("Bluetooth adapter is not supported", "error");
+        this.emit("unsupported");
+        this.emit("error", new Error("Bluetooth adapter is not supported"));
+        break;
+
+      case "resetting":
+        this.log("Bluetooth adapter is resetting...", "debug");
+        this.emit("resetting");
+        break;
+
+      default:
+        this.log(`Unhandled Bluetooth state: ${state}`, "warn");
     }
   }
 
@@ -1161,8 +1140,8 @@ export class BluetoothService extends ContinuousService {
    * @returns {boolean} True if the parser was registered successfully
    */
   registerParser(manufacturerId, parser) {
-    console.log(`[BluetoothService] registerParser called with manufacturerId: 0x${manufacturerId.toString(16).toUpperCase()}`);
-    console.log(`[BluetoothService] Parser details:`, {
+    this.log(`registerParser called with manufacturerId: 0x${manufacturerId.toString(16).toUpperCase()}`);
+    this.log(`Parser details:`, {
       type: typeof parser,
       hasParse: typeof parser.parse === 'function',
       hasMatches: typeof parser.matches === 'function',
@@ -1174,7 +1153,7 @@ export class BluetoothService extends ContinuousService {
       !this.parserRegistry ||
       typeof this.parserRegistry.registerParser !== "function"
     ) {
-      console.log(`[BluetoothService] ERROR: Parser registry not available or missing registerParser method`);
+      this.log(`ERROR: Parser registry not available or missing registerParser method`);
       this.log(
         "Parser registry not available or missing registerParser method",
         "warn"
@@ -1185,26 +1164,26 @@ export class BluetoothService extends ContinuousService {
     try {
       // First check if the parser is already registered to avoid duplicates
       const existingParsers = this.parserRegistry.getByManufacturer(manufacturerId);
-      console.log(`[BluetoothService] Existing parsers for manufacturerId 0x${manufacturerId.toString(16).toUpperCase()}:`, 
+      this.log(`Existing parsers for manufacturerId 0x${manufacturerId.toString(16).toUpperCase()}:`, 
                  existingParsers ? existingParsers.size : 0);
       
-      // Pass manufacturerId as an object with manufacturerId property
-      console.log(`[BluetoothService] Calling parserRegistry.registerParser with:`, { manufacturerId });
-      const result = this.parserRegistry.registerParser({ manufacturerId }, parser);
-      console.log(`[BluetoothService] registerParser call completed, result:`, result);
+      // Pass manufacturerId directly as the first parameter, not as an object
+      this.log(`Calling parserRegistry.registerParser with manufacturerId:`, manufacturerId);
+      const result = this.parserRegistry.registerParser(manufacturerId, parser);
+      this.log(`registerParser call completed, result:`, result);
       
       // Verify the parser was added to the manufacturer map
       const mfrParsers = this.parserRegistry.manufacturerParsers.get(manufacturerId);
-      console.log(`[BluetoothService] After registration, manufacturer map for 0x${manufacturerId.toString(16).toUpperCase()} has:`, 
+      this.log(`After registration, manufacturer map for 0x${manufacturerId.toString(16).toUpperCase()} has:`, 
                  mfrParsers ? mfrParsers.size : 0, 'parsers');
       
       // Verify registration worked
       const allParsers = this.parserRegistry.getAllParsers ? this.parserRegistry.getAllParsers() : [];
-      console.log(`[BluetoothService] After registration, total parsers:`, allParsers.length || 0);
+      this.log(`After registration, total parsers:`, allParsers.size || 0);
       
       // Check if our parser is in the manufacturers map
       const manufacturerParsers = this.parserRegistry.manufacturerParsers?.get?.(manufacturerId);
-      console.log(`[BluetoothService] Parsers for manufacturerId 0x${manufacturerId.toString(16).toUpperCase()}:`, 
+      this.log(`Parsers for manufacturerId 0x${manufacturerId.toString(16).toUpperCase()}:`, 
                  manufacturerParsers ? manufacturerParsers.size : 'none');
       
       this.log(
@@ -1214,7 +1193,7 @@ export class BluetoothService extends ContinuousService {
       );
       return true;
     } catch (error) {
-      console.log(`[BluetoothService] ERROR registering parser:`, error);
+      this.log(`ERROR registering parser:`, error);
       this.log(`Failed to register parser: ${error.message}`, "error");
       return false;
     }
@@ -1229,20 +1208,51 @@ export class BluetoothService extends ContinuousService {
    * @returns {Array<Object>} Filtered list of devices
    */
   getDevices(filters = {}) {
-    if (!this.deviceManager || !this.deviceManager.devices) {
+    if (!this.deviceManager) {
       this.log("Device manager not initialized", "warn");
       return [];
     }
 
-    let devices = Array.from(this.deviceManager.devices.values());
+    // Get devices from the in-memory map
+    let devices = [];
+    
+    // First check if the devices Map exists and has entries
+    if (this.deviceManager.devices && this.deviceManager.devices.size > 0) {
+      devices = Array.from(this.deviceManager.devices.values());
+      this.log(`Retrieved ${devices.length} devices from in-memory map`, "debug");
+      this.log(`Retrieved ${new Set(devices.map(d => d.id)).size} unique devices from in-memory set`, "debug");
+    } else {
+      // If no devices in memory, check if we have any in the discoveryService
+      try {
+        // Check if we have access to the discovery service
+        const discoveryService = global.discoveryService || (global.services && global.services.discovery);
+        if (discoveryService && typeof discoveryService.getDevices === 'function') {
+          const discoveredDevices = discoveryService.getDevices() || [];
+          this.log(`Retrieved ${discoveredDevices.length} devices from discovery service`, "debug");
+          
+          // Add these devices to our collection
+          discoveredDevices.forEach(device => {
+            if (device && device.id && !this.deviceManager.devices.has(device.id)) {
+              this.deviceManager.registerDevice(device.id, device);
+            }
+          });
+          
+          // Update our devices array
+          devices = Array.from(this.deviceManager.devices.values());
+        }
+      } catch (error) {
+        this.log(`Error accessing discovery service: ${error.message}`, "error");
+      }
+    }
 
+    // Apply filters
     if (filters.type) {
       devices = devices.filter((device) => device.type === filters.type);
     }
 
     if (filters.selected !== undefined) {
       devices = devices.filter(
-        (device) => device.isSelected === filters.selected
+        (device) => this.deviceManager.selectedDevices.has(device.id) === filters.selected
       );
     }
 

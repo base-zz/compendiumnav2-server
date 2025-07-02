@@ -1,26 +1,31 @@
+import debug from 'debug';
+
+const log = debug('cn2:parser-registry');
+const logError = debug('cn2:parser-registry:error');
+
 /**
  * Registry for Bluetooth data parsers with support for multiple categories
  * to manage different manufacturers, devices, and parser versions.
  */
 export class ParserRegistry {
   constructor() {
-    console.log(`[ParserRegistry] Creating new ParserRegistry instance`);
+    log(`Creating new ParserRegistry instance`);
     
     // Primary registry by manufacturer ID
     this.manufacturerParsers = new Map(); // manufacturerId -> Array of parsers
-    console.log(`[ParserRegistry] Created manufacturerParsers Map`);
+    log(`Created manufacturerParsers Map`);
     
     // Secondary indices for faster lookups
     this.deviceParsers = new Map(); // deviceType -> Array of parsers
-    console.log(`[ParserRegistry] Created deviceParsers Map`);
+    log(`Created deviceParsers Map`);
     
     this.parserVersions = new Map(); // version -> Array of parsers
-    console.log(`[ParserRegistry] Created parserVersions Map`);
+    log(`Created parserVersions Map`);
     
     this.allParsers = new Set(); // All registered parsers
-    console.log(`[ParserRegistry] Created allParsers Set`);
+    log(`Created allParsers Set`);
     
-    console.log(`[ParserRegistry] ParserRegistry instance created with empty collections`);
+    log(`ParserRegistry instance created with empty collections`);
   }
 
   /**
@@ -35,13 +40,13 @@ export class ParserRegistry {
    * @param {function} [Parser.matches] - Optional static method to check if parser matches data
    */
   registerParser(options, Parser) {
-    console.log(`[ParserRegistry] registerParser called with options:`, options);
-    console.log(`[ParserRegistry] Parser type:`, typeof Parser);
-    console.log(`[ParserRegistry] Parser has parse method:`, typeof Parser.parse === 'function');
-    console.log(`[ParserRegistry] Parser has matches method:`, typeof Parser.matches === 'function');
+    log(`registerParser called with options:`, options);
+    log(`Parser type:`, typeof Parser);
+    log(`Parser has parse method:`, typeof Parser.parse === 'function');
+    log(`Parser has matches method:`, typeof Parser.matches === 'function');
     
     if (typeof Parser.parse !== 'function') {
-      console.log(`[ParserRegistry] ERROR: Parser missing parse method`);
+      logError(`Parser missing parse method`);
       throw new Error('Parser must implement parse() method');
     }
     
@@ -59,30 +64,30 @@ export class ParserRegistry {
       manufacturerId = options;
     }
     
-    console.log(`[ParserRegistry] Extracted manufacturerId:`, manufacturerId);
+    log(`Extracted manufacturerId:`, manufacturerId);
     
     if (manufacturerId === undefined) {
-      console.log(`[ParserRegistry] ERROR: Missing manufacturerId`);
+      logError(`Missing manufacturerId`);
       throw new Error('manufacturerId is required');
     }
 
     // Add to manufacturer index
-    console.log(
-      `[ParserRegistry] Adding parser for manufacturerId: 0x${manufacturerId
+    log(
+      `Adding parser for manufacturerId: 0x${manufacturerId
         .toString(16)
         .toUpperCase()}`
     );
     if (!this.manufacturerParsers.has(manufacturerId)) {
-      console.log(
-        `[ParserRegistry] Creating new Set for manufacturerId: 0x${manufacturerId
+      log(
+        `Creating new Set for manufacturerId: 0x${manufacturerId
           .toString(16)
           .toUpperCase()}`
       );
       this.manufacturerParsers.set(manufacturerId, new Set());
     }
     this.manufacturerParsers.get(manufacturerId).add(Parser);
-    console.log(
-      `[ParserRegistry] Parser added to manufacturer index. Count:`,
+    log(
+      `Parser added to manufacturer index. Count:`,
       this.manufacturerParsers.get(manufacturerId).size
     );
 
@@ -95,8 +100,8 @@ export class ParserRegistry {
         this.deviceParsers.set(deviceKey, new Set());
       }
       this.deviceParsers.get(deviceKey).add(Parser);
-      console.log(
-        `[ParserRegistry] Parser added to device index for ${deviceKey}`
+      log(
+        `Parser added to device index for ${deviceKey}`
       );
     }
 
@@ -106,20 +111,20 @@ export class ParserRegistry {
         this.parserVersions.set(parserVersion, new Set());
       }
       this.parserVersions.get(parserVersion).add(Parser);
-      console.log(
-        `[ParserRegistry] Parser added to version index for ${parserVersion}`
+      log(
+        `Parser added to version index for ${parserVersion}`
       );
     }
 
     // Add to master set
-    console.log(`[ParserRegistry] Adding parser to allParsers set`);
+    log(`Adding parser to allParsers set`);
     this.allParsers.add(Parser);
-    console.log(`[ParserRegistry] allParsers set size after add:`, this.allParsers.size);
+    log(`allParsers set size after add:`, this.allParsers.size);
     
     // Log all registered parsers for debugging
-    console.log(`[ParserRegistry] Current registered parsers:`);
+    log(`Current registered parsers:`);
     for (const parser of this.allParsers) {
-      console.log(`[ParserRegistry] - Parser:`, {
+      log(`- Parser:`, {
         name: parser.name || parser.constructor?.name,
         hasParse: typeof parser.parse === 'function',
         hasMatches: typeof parser.matches === 'function',
@@ -166,35 +171,35 @@ export class ParserRegistry {
    */
   findParserFor(data) {
     if (!data || data.length < 2) {
-      console.log(`[ParserRegistry] Invalid data provided to findParserFor:`, data);
+      logError(`Invalid data provided to findParserFor:`, data);
       return null;
     }
     
     // Extract manufacturer ID from the first 2 bytes (little endian)
     const manufacturerId = data.readUInt16LE(0);
-    console.log(`[ParserRegistry] Looking for parser for manufacturer ID: 0x${manufacturerId.toString(16).toUpperCase()}`);
+    log(`Looking for parser for manufacturer ID: 0x${manufacturerId.toString(16).toUpperCase()}`);
     
     // Debug the state of the registry
-    console.log(`[ParserRegistry] Current registry state:`);
-    console.log(`[ParserRegistry] - Total parsers: ${this.allParsers.size}`);
-    console.log(`[ParserRegistry] - Manufacturer map size: ${this.manufacturerParsers.size}`);
-    console.log(`[ParserRegistry] - Manufacturer map keys:`, [...this.manufacturerParsers.keys()].map(id => `0x${id.toString(16).toUpperCase()}`));
+    log(`Current registry state:`);
+    log(`- Total parsers: ${this.allParsers.size}`);
+    log(`- Manufacturer map size: ${this.manufacturerParsers.size}`);
+    log(`- Manufacturer map keys:`, [...this.manufacturerParsers.keys()].map(id => `0x${id.toString(16).toUpperCase()}`));
     
     // First try to find a parser by manufacturer ID
     const parsers = this.manufacturerParsers.get(manufacturerId);
-    console.log(`[ParserRegistry] Found ${parsers ? parsers.size : 0} registered parsers for this manufacturer ID`);
+    log(`Found ${parsers ? parsers.size : 0} registered parsers for this manufacturer ID`);
     
     if (!parsers || parsers.size === 0) {
-      console.log(`[ParserRegistry] No parsers registered for manufacturer ID: 0x${manufacturerId.toString(16).toUpperCase()}`);
+      log(`No parsers registered for manufacturer ID: 0x${manufacturerId.toString(16).toUpperCase()}`);
       return null;
     }
 
     // If only one parser, use it
     if (parsers.size === 1) {
       const parser = parsers.values().next().value;
-      console.log(`[ParserRegistry] Using single registered parser: ${parser.name || parser.constructor.name}`);
-      console.log(
-        `[ParserRegistry] Using single registered parser: ${
+      log(`Using single registered parser: ${parser.name || parser.constructor.name}`);
+      log(
+        `Using single registered parser: ${
           parser.name || parser.constructor.name
         }`
       );
@@ -202,19 +207,19 @@ export class ParserRegistry {
     }
 
     // If multiple parsers, try to find the best match using the matches() method if available
-    console.log(
-      `[ParserRegistry] Multiple parsers found, looking for best match...`
+    log(
+      `Multiple parsers found, looking for best match...`
     );
     for (const parser of parsers) {
       if (typeof parser.matches === "function") {
-        console.log(
-          `[ParserRegistry] Testing parser ${
+        log(
+          `Testing parser ${
             parser.name || parser.constructor.name
           } with matches() method`
         );
         if (parser.matches(data)) {
-          console.log(
-            `[ParserRegistry] Found matching parser: ${
+          log(
+            `Found matching parser: ${
               parser.name || parser.constructor.name
             }`
           );
@@ -225,8 +230,8 @@ export class ParserRegistry {
 
     // If no specific matcher, return the first parser for this manufacturer
     const defaultParser = parsers.values().next().value;
-    console.log(
-      `[ParserRegistry] No specific match found, using default parser: ${
+    log(
+      `No specific match found, using default parser: ${
         defaultParser.name || defaultParser.constructor.name
       }`
     );
@@ -248,10 +253,10 @@ export class ParserRegistry {
    * @returns {Set<Object>} - Set of all registered parsers
    */
   getAllParsers() {
-    console.log(`[ParserRegistry] getAllParsers called, returning ${this.allParsers.size} parsers`);
+    log(`getAllParsers called, returning ${this.allParsers.size} parsers`);
     // Log each parser for debugging
     for (const parser of this.allParsers) {
-      console.log(`[ParserRegistry] - Parser in getAllParsers:`, {
+      log(`- Parser in getAllParsers:`, {
         name: parser.name || parser.constructor?.name,
         hasParse: typeof parser.parse === 'function',
         hasMatches: typeof parser.matches === 'function',

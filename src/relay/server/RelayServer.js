@@ -1,11 +1,18 @@
 import EventEmitter from "events";
+import debug from 'debug';
 import { StateManager2 } from "../core/state/StateManager2.js";
 import { syncOrchestrator } from "./core/sync/SyncOrchestrator.js";
 import { VPSConnector } from "./services/VPSConnector.js";
 
+const log = debug('compendium:relay-server');
+const logWarn = debug('compendium:relay-server:warn');
+const logError = debug('compendium:relay-server:error');
+const logTrace = debug('compendium:relay-server:trace');
+
 export class RelayServer extends EventEmitter {
   constructor(config = {}) {
     super();
+    log('RelayServer constructor called');
 
     // Validate configuration
     if (!config.port)
@@ -60,31 +67,30 @@ export class RelayServer extends EventEmitter {
 
   async initialize() {
     try {
-      console.log("[RELAY] Initializing relay server");
-      console.log(`[RELAY] VPS URL: ${this.config.vpsUrl}`);
-      console.log(`[RELAY] Using authentication: key-based`);
+      log("Initializing relay server");
+      log(`VPS URL: ${this.config.vpsUrl}`);
 
       // Connect to VPS
-      console.log("[RELAY] Attempting to connect to VPS...");
+      log("Attempting to connect to VPS...");
       try {
         await this.vpsConnector.connect();
-        console.log("[RELAY] Successfully connected to VPS");
+        log("Successfully connected to VPS");
       } catch (vpsError) {
-        console.error("[RELAY] VPS connection failed:", vpsError.message);
-        console.log("[RELAY] Continuing without VPS connection");
+        logError("VPS connection failed: %s", vpsError.message);
+        log("Continuing without VPS connection");
         // Don't rethrow - we'll continue without VPS connection
       }
 
       // Setup server components
       this._setupServer();
 
-      console.log(
-        `[RELAY] Successfully initialized on port ${this.config.port}`
+      log(
+        `Successfully initialized on port ${this.config.port}`
       );
       this.emit("initialized");
       return true;
     } catch (error) {
-      console.error("[RELAY] Initialization failed:", error);
+      logError("Initialization failed: %s", error);
       this.emit("error", {
         type: "init-failed",
         error: error.message,
@@ -134,25 +140,25 @@ export class RelayServer extends EventEmitter {
   _setupConnectionListeners() {
     this.vpsConnector
       .on("connected", () => {
-        console.log("[RELAY] VPS connection established");
+        log("VPS connection established");
         this._flushMessageBuffer();
         this.emit("vps-connected");
       })
       .on("disconnected", () => {
-        console.warn("[RELAY] VPS connection lost");
+        logWarn("VPS connection lost");
         this.emit("vps-disconnected");
       })
       .on("error", (error) => {
-        console.error("[RELAY] VPS connection error:", error.message);
+        logError("VPS connection error: %s", error.message);
         this.emit("vps-error", error);
       })
       .on("max-retries", () => {
-        console.error("[RELAY] VPS connection permanently lost");
+        logError("VPS connection permanently lost");
         this.emit("vps-connection-lost");
       })
       .on("connectionStatus", ({ boatId, clientCount }) => {
-        console.log(
-          `[RELAY] Client connection status update: ${clientCount} clients for boat ${boatId}`
+        log(
+          `Client connection status update: ${clientCount} clients for boat ${boatId}`
         );
 
         // Update the stateManager's client count
@@ -167,14 +173,14 @@ export class RelayServer extends EventEmitter {
     this.vpsConnector.on("message", (message) => {
       try {
         if (!message?.type) {
-          console.warn("[RELAY] Received malformed message:", message);
+          logWarn("Received malformed message: %j", message);
           return;
         }
 
-        console.debug(`[RELAY] Processing VPS message: ${message.type}`);
+        logTrace(`Processing VPS message: ${message.type}`);
 
         // Log message type being sent to VPS with detailed information
-        console.log(`[RELAY-SERVER] Received message from VPS:`, {
+        log(`Received message from VPS:`, {
           type: message.type,
           messageId: message.id || "unknown",
           clientId: message.clientId || "unknown",
@@ -184,8 +190,8 @@ export class RelayServer extends EventEmitter {
         });
 
         // Log the raw message for debugging
-        console.log(
-          `[RELAY-SERVER-DEBUG] Raw message from VPS: ${JSON.stringify(
+        logTrace(
+          `Raw message from VPS: ${JSON.stringify(
             message
           )}`
         );
@@ -193,8 +199,8 @@ export class RelayServer extends EventEmitter {
         switch (message.type) {
           case "client-connected":
             // Handle client connection notification from VPS
-            console.log(
-              `[RELAY-SERVER] New client connected via VPS: ${
+            log(
+              `New client connected via VPS: ${
                 message.clientId || "unknown"
               } for boat ${message.boatId || "unknown"}`
             );
@@ -202,13 +208,13 @@ export class RelayServer extends EventEmitter {
             if (this.stateManager) {
               const newCount = (this.stateManager.clientCount || 0) + 1;
               this.stateManager.updateClientCount(newCount);
-              console.log(
-                `[RELAY-SERVER] Updated client count: ${newCount}`
+              log(
+                `Updated client count: ${newCount}`
               );
 
               // Send a full state update to the new client
-              console.log(
-                `[RELAY-SERVER] Sending full state update to new client ${
+              log(
+                `Sending full state update to new client ${
                   message.clientId || "unknown"
                 }`
               );
@@ -221,16 +227,16 @@ export class RelayServer extends EventEmitter {
               };
               this.vpsConnector.send(fullStateResponse);
             } else {
-              console.warn(
-                `[RELAY-SERVER] Cannot update client count: stateManager is not initialized`
+              logWarn(
+                `Cannot update client count: stateManager is not initialized`
               );
             }
             break;
 
           case "client-disconnected":
             // Handle client disconnection notification from VPS
-            console.log(
-              `[RELAY-SERVER] Client disconnected from VPS: ${
+            log(
+              `Client disconnected from VPS: ${
                 message.clientId || "unknown"
               }`
             );
@@ -238,16 +244,16 @@ export class RelayServer extends EventEmitter {
             if (this.stateManager) {
               const newCount = Math.max(0, (this.stateManager.clientCount || 1) - 1);
               this.stateManager.updateClientCount(newCount);
-              console.log(
-                `[RELAY-SERVER] Updated client count: ${newCount}`
+              log(
+                `Updated client count: ${newCount}`
               );
             }
             break;
 
           case "get-full-state":
           case "request-full-state": // Handle both types of full state requests
-            console.log(
-              `[RELAY-SERVER] Handling full state request from VPS, requestId: ${
+            log(
+              `Handling full state request from VPS, requestId: ${
                 message.requestId || "unknown"
               }, clientId: ${message.clientId || "unknown"}`
             );
@@ -255,8 +261,8 @@ export class RelayServer extends EventEmitter {
             break;
 
           case "state:full-update": // Network message type
-            console.log(
-              `[RELAY-SERVER] Broadcasting full state update to all clients, data size: ${
+            log(
+              `Broadcasting full state update to all clients, data size: ${
                 JSON.stringify(message.data).length
               } bytes`
             );
@@ -267,44 +273,44 @@ export class RelayServer extends EventEmitter {
             const patchSize = message.data?.operations
               ? message.data.operations.length
               : 0;
-            console.log(
-              `[RELAY-SERVER] Broadcasting state patch to all clients, operations: ${patchSize}`
+            log(
+              `Broadcasting state patch to all clients, operations: ${patchSize}`
             );
             this.emit("state:patch", message.data); // Already standardized
             break;
 
           case "tide:update":
-            console.log(`[RELAY-SERVER] Forwarding tide update to clients`);
+            log(`Forwarding tide update to clients`);
             this.emit("tide:update", message.data);
             break;
 
           case "weather:update":
-            console.log(`[RELAY-SERVER] Forwarding weather update to clients`);
+            log(`Forwarding weather update to clients`);
             this.emit("weather:update", message.data);
             break;
 
           case "anchor:update":
-            console.log(`[RELAY-SERVER] Processing anchor:update message:`, JSON.stringify(message.data, null, 2));
+            log(`Processing anchor:update message:`, JSON.stringify(message.data, null, 2));
             try {
               const success = this.stateManager.updateAnchorState(message.data);
-              console.log(`[RELAY-SERVER] Anchor update ${success ? 'succeeded' : 'failed'}`);
+              log(`Anchor update ${success ? 'succeeded' : 'failed'}`);
               // Optionally emit an event for listeners
               this.emit("anchor:update", { success, data: message.data });
             } catch (error) {
-              console.error('[RELAY-SERVER] Error processing anchor update:', error);
+              logError('Error processing anchor update:', error);
               this.emit("error:anchor-update", { error, data: message.data });
             }
             break;
 
           default:
-            console.log(
-              `[RELAY-SERVER] Forwarding message type ${message.type} to clients`
+            log(
+              `Forwarding message type ${message.type} to clients`
             );
             this.emit("vps-message", message);
             break;
         }
       } catch (error) {
-        console.error("[RELAY] Error processing VPS message:", error);
+        logError("Error processing VPS message:", error);
         this.emit("vps-error", {
           error,
           message: "Failed to process VPS message",
@@ -314,8 +320,8 @@ export class RelayServer extends EventEmitter {
   }
 
   _handleFullStateRequest(request) {
-    console.log(
-      `[RELAY-SERVER] Handling full state request from ${
+    log(
+      `Handling full state request from ${
         request.clientId || "unknown client"
       }, requestId: ${request.requestId || "unknown"}`
     );
@@ -330,13 +336,13 @@ export class RelayServer extends EventEmitter {
 
     // Log details about the state being sent
     const stateKeys = fullState ? Object.keys(fullState) : [];
-    console.log(
-      `[RELAY-SERVER] Full state contains ${
+    log(
+      `Full state contains ${
         stateKeys.length
       } top-level keys: ${stateKeys.join(", ")}`
     );
-    console.log(
-      `[RELAY-SERVER] Full state size: ${
+    log(
+      `Full state size: ${
         JSON.stringify(fullState).length
       } bytes`
     );
@@ -349,12 +355,12 @@ export class RelayServer extends EventEmitter {
       requestId: request.requestId || "unknown",
     };
 
-    console.log(
-      `[RELAY-SERVER] Sending full state response to VPS for boatId: ${this.stateManager.boatId}`
+    log(
+      `Sending full state response to VPS for boatId: ${this.stateManager.boatId}`
     );
     this.vpsConnector.send(response);
-    console.log(
-      `[RELAY-SERVER] Full state response sent to VPS, requestId: ${
+    log(
+      `Full state response sent to VPS, requestId: ${
         request.requestId || "unknown"
       }`
     );
@@ -363,12 +369,13 @@ export class RelayServer extends EventEmitter {
   _sendToVPS(message) {
     // Only send messages if there are relay clients connected to the VPS
     if (this.stateManager.clientCount === 0) {
+      logTrace('No clients connected, skipping message send to VPS');
       // No remote clients connected to VPS, don't buffer or send messages
       return;
     }
 
     // Log message type being sent to VPS with detailed information
-    console.log(`[RELAY-SERVER] Sending message to VPS:`, {
+    log(`Sending message to VPS:`, {
       type: message.type,
       messageId: message.id || "unknown",
       timestamp: new Date().toISOString(),
@@ -376,14 +383,14 @@ export class RelayServer extends EventEmitter {
     });
 
     if (!this.vpsConnector.connected) {
-      console.log(
-        `[RELAY-SERVER] VPS not connected, buffering message: ${message.type}`
+      log(
+        `VPS not connected, buffering message: ${message.type}`
       );
       if (this._messageBuffer.length < this._maxBufferSize) {
         this._messageBuffer.push(message);
       } else {
-        console.warn(
-          "[RELAY-SERVER] Message buffer full, discarding oldest message"
+        logWarn(
+          "Message buffer full, discarding oldest message"
         );
         this._messageBuffer.shift();
         this._messageBuffer.push(message);
@@ -394,28 +401,28 @@ export class RelayServer extends EventEmitter {
     try {
       // Include any buffered messages
       const messagesToSend = [message, ...this._messageBuffer];
-      console.log(
-        `[RELAY-SERVER] Sending ${messagesToSend.length} messages to VPS`
+      log(
+        `Sending ${messagesToSend.length} messages to VPS`
       );
       this.vpsConnector.send(messagesToSend);
       this._messageBuffer = [];
-      console.log(`[RELAY-SERVER] Successfully sent messages to VPS`);
+      log(`Successfully sent messages to VPS`);
     } catch (error) {
-      console.error("[RELAY-SERVER] Failed to send to VPS:", error);
+      logError("Failed to send to VPS:", error);
       this._messageBuffer.push(message); // Retry later
     }
   }
 
   forwardMessageToVPS(clientId, message) {
     if (!this.vpsConnector) {
-      console.error(
-        `[RELAY-SERVER] Cannot forward message from client ${clientId} to VPS: VPS connector not initialized`
+      logError(
+        `Cannot forward message from client ${clientId} to VPS: VPS connector not initialized`
       );
       return;
     }
 
-    console.log(
-      `[RELAY-SERVER] Forwarding message from client ${clientId} to VPS:`,
+    log(
+      `Forwarding message from client ${clientId} to VPS:`,
       {
         type: message.type,
         messageId: message.id || "unknown",
@@ -425,15 +432,15 @@ export class RelayServer extends EventEmitter {
     );
 
     this.vpsConnector.send(message);
-    console.log(
-      `[RELAY-SERVER] Successfully forwarded message from client ${clientId} to VPS`
+    log(
+      `Successfully forwarded message from client ${clientId} to VPS`
     );
   }
 
   _flushMessageBuffer() {
     if (this._messageBuffer.length > 0 && this.vpsConnector.connected) {
-      console.log(
-        `[RELAY] Flushing ${this._messageBuffer.length} buffered messages`
+      log(
+        `Flushing ${this._messageBuffer.length} buffered messages`
       );
       this.vpsConnector.send([...this._messageBuffer]);
       this._messageBuffer = [];
@@ -441,18 +448,15 @@ export class RelayServer extends EventEmitter {
   }
 
   _refreshVpsConnection() {
-    console.log(
-      "[RELAY] Refreshing VPS connection with key-based authentication"
-    );
     this.vpsConnector.disconnect();
     this.vpsConnector.connect().catch((error) => {
-      console.error("[RELAY] VPS reconnection failed:", error);
+      logError("VPS reconnection failed:", error);
     });
   }
 
   _monitorBuffer() {
     if (this._messageBuffer.length > 0) {
-      console.log(`[RELAY] Message buffer size: ${this._messageBuffer.length}`);
+      log(`Message buffer size: ${this._messageBuffer.length}`);
     }
   }
 
@@ -465,13 +469,13 @@ export class RelayServer extends EventEmitter {
     // Update the client count in the StateManager
     const currentCount = this.stateManager.clientCount;
     this.stateManager.updateClientCount(currentCount + 1);
-    console.log(
-      `[RELAY-SERVER] Client ${clientId} connected via RELAY (total: ${this.stateManager.clientCount})`
+    log(
+      `Client ${clientId} connected via RELAY (total: ${this.stateManager.clientCount})`
     );
 
     // Log all active clients
-    console.log(
-      `[RELAY-SERVER] Active relay clients: ${Array.from(
+    log(
+      `Active relay clients: ${Array.from(
         this.clients.keys()
       ).join(", ")}`
     );
@@ -486,8 +490,8 @@ export class RelayServer extends EventEmitter {
       // Update the client count in the StateManager
       const currentCount = this.stateManager.clientCount;
       this.stateManager.updateClientCount(currentCount - 1);
-      console.log(
-        `[RELAY] Client ${clientId} disconnected (remaining: ${this.stateManager.clientCount})`
+      log(
+        `Client ${clientId} disconnected (remaining: ${this.stateManager.clientCount})`
       );
       return true;
     }
@@ -505,7 +509,7 @@ export class RelayServer extends EventEmitter {
   }
 
   shutdown() {
-    console.log("[RELAY] Starting shutdown sequence");
+    log("Starting shutdown sequence");
 
     // Remove StateManager event listeners
     if (this._stateEventHandler) {
@@ -536,7 +540,7 @@ export class RelayServer extends EventEmitter {
     // Remove all listeners
     this.removeAllListeners();
 
-    console.log("[RELAY] Shutdown complete");
+    log("Shutdown complete");
     this.emit("shutdown");
   }
 }

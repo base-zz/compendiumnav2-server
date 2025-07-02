@@ -281,6 +281,9 @@ export class RelayWebSocketServer {
             case 'alert':
               this._handleAlertCommand(clientId, message.action, message.data);
               break;
+            case 'bluetooth':
+              this._handleBluetoothCommand(clientId, message.action, message.data);
+              break;
             // Other services would be handled here
             default:
               console.warn(`[WS] Unknown service in command from client ${clientId}:`, message.service);
@@ -338,6 +341,94 @@ export class RelayWebSocketServer {
         client.send(messageString);
       }
     });
+  }
+  
+  /**
+   * Handle Bluetooth commands from clients
+   * @param {string} clientId - The client ID
+   * @param {string} action - The Bluetooth action (e.g., 'toggle', 'scan')
+   * @param {Object} data - The command data
+   * @private
+   */
+  async _handleBluetoothCommand(clientId, action, data) {
+    console.log(`[WS] Processing Bluetooth command: ${action} from client ${clientId}`, data);
+    
+    let success = false;
+    let response = {
+      type: 'bluetooth:response',
+      action,
+      success: false,
+      timestamp: Date.now()
+    };
+    
+    try {
+      switch (action) {
+        case 'toggle':
+          // Toggle Bluetooth on/off
+          if (typeof data?.enabled === 'boolean') {
+            success = this.relayServer.stateManager.toggleBluetooth(data.enabled);
+            response.message = `Bluetooth ${data.enabled ? 'enabled' : 'disabled'}`;
+          } else {
+            response.error = 'Invalid toggle parameter: enabled must be a boolean';
+          }
+          break;
+          
+        case 'scan':
+          // Start/stop Bluetooth scanning
+          if (typeof data?.scanning === 'boolean') {
+            success = this.relayServer.stateManager.updateBluetoothScanningStatus(data.scanning);
+            response.message = `Bluetooth scanning ${data.scanning ? 'started' : 'stopped'}`;
+          } else {
+            response.error = 'Invalid scan parameter: scanning must be a boolean';
+          }
+          break;
+          
+        case 'select-device':
+          // Select a Bluetooth device
+          if (data?.deviceId) {
+            success = this.relayServer.stateManager.setBluetoothDeviceSelected(data.deviceId, true);
+            response.message = `Device ${data.deviceId} selected`;
+            response.deviceId = data.deviceId;
+          } else {
+            response.error = 'Invalid parameter: deviceId is required';
+          }
+          break;
+          
+        case 'deselect-device':
+          // Deselect a Bluetooth device
+          if (data?.deviceId) {
+            success = this.relayServer.stateManager.setBluetoothDeviceSelected(data.deviceId, false);
+            response.message = `Device ${data.deviceId} deselected`;
+            response.deviceId = data.deviceId;
+          } else {
+            response.error = 'Invalid parameter: deviceId is required';
+          }
+          break;
+          
+        case 'rename-device':
+          // Rename a Bluetooth device
+          if (data?.deviceId && data?.name) {
+            success = await this.relayServer.stateManager.updateBluetoothDeviceMetadata(data.deviceId, { name: data.name });
+            response.message = `Device ${data.deviceId} renamed to ${data.name}`;
+            response.deviceId = data.deviceId;
+          } else {
+            response.error = 'Invalid parameters: deviceId and name are required';
+          }
+          break;
+          
+        default:
+          response.error = `Unknown Bluetooth action: ${action}`;
+      }
+    } catch (error) {
+      console.error(`[WS] Error handling Bluetooth command ${action}:`, error);
+      response.error = `Error processing command: ${error.message}`;
+    }
+    
+    // Update the success flag in the response
+    response.success = success;
+    
+    // Send response back to the client
+    this._sendToClient(clientId, response);
   }
   
   /**

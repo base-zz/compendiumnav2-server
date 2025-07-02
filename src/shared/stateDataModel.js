@@ -656,7 +656,7 @@ export function createStateDataModel(unitPreferences = UNIT_PRESETS.IMPERIAL) {
       scanning: false,
       lastUpdated: null,
       devices: {},
-      selectedDevices: [],
+      selectedDevices: {},
       status: {
         state: 'disabled', // 'enabled', 'disabled', 'unauthorized', 'unsupported'
         error: null

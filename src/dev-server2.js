@@ -28,16 +28,17 @@ const app = express();
 app.use(express.json());
 const server = http.createServer(app);
 
-const log = debug("compendium:dev-server2");
+const log = debug("cn2:dev-server2");
+const logError = debug("cn2:dev-server2:error");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-console.log("Loading .env file from:", resolve(__dirname, "../.env"));
+log("Loading .env file from:", resolve(__dirname, "../.env"));
 dotenv.config({ path: resolve(__dirname, "../.env") });
 
 // Using key-based authentication
-console.log("Authentication: key-based");
+log("Authentication: key-based");
 
 // --- Helper to build the VPS URL ---
 function buildVpsUrl() {
@@ -48,8 +49,8 @@ function buildVpsUrl() {
     const host = process.env.VPS_HOST;
     const port =
       process.env.VPS_WS_PORT &&
-      process.env.VPS_WS_PORT !== "80" &&
-      process.env.VPS_WS_PORT !== "443"
+        process.env.VPS_WS_PORT !== "80" &&
+        process.env.VPS_WS_PORT !== "443"
         ? `:${process.env.VPS_WS_PORT}`
         : "";
     if (!process.env.VPS_PATH) {
@@ -67,9 +68,7 @@ async function initializeServices() {
 
   try {
     // Initialize Bluetooth service
-    log("Bluetooth service will be initialized by service manager");
-
-    console.log("[DEV-SERVER2] Initializing NewStateServiceDemo...");
+    log("Initializing NewStateServiceDemo...");
 
     // Initialize the demo service, which loads data from the DB
     const stateService = newStateServiceDemo;
@@ -80,14 +79,14 @@ async function initializeServices() {
     serviceManager.registerService("state", stateService);
 
     // Start mock data generation for other systems
-    console.log("[DEV-SERVER2] Starting mock data generation...");
+    log("Starting mock data generation...");
     stateService.startMockMultipleTanksAndBatteries(5000); // Update every 5 seconds
 
-    console.log("[DEV-SERVER2] NewStateServiceDemo initialized.");
+    log("NewStateServiceDemo initialized.");
     return true;
   } catch (error) {
-    console.error(
-      "[DEV-SERVER2] Failed to initialize NewStateServiceDemo:",
+    logError(
+      "Failed to initialize NewStateServiceDemo:",
       error
     );
     throw error;
@@ -96,41 +95,43 @@ async function initializeServices() {
 
 // --- Bridge state and initialize dependent services ---
 async function bridgeStateToRelay() {
-  console.log(
-    "[DEV-SERVER2] Starting state bridge and initializing dependent services"
+  log(
+    "Starting state bridge and initializing dependent services"
+  );
+  const { stateManager2 } = await import(
+    "./relay/core/state/StateManager2.js"
   );
   try {
-    
     // Get the state service instance that was already created
     const stateService = serviceManager.getService("state");
     if (!stateService) {
       throw new Error("State service not found in service manager");
     }
-    
+
     // Initialize StateManager2 with initial state
     const stateManager = new StateManager2(stateData);
     stateManager.initialState = stateService.getState();
 
     // --- Wire up state events from provider to manager ---
-    console.log("[DEV-SERVER2] Wiring NewStateServiceDemo to StateManager2");
+    log("Wiring NewStateServiceDemo to StateManager2");
     stateService.on("state:patch", ({ data }) => {
       try {
-        // console.log("[DEV-SERVER2] 'state:patch' event received. Forwarding to StateManager2.");
+        // log("'state:patch' event received. Forwarding to StateManager2.");
         stateManager.applyPatchAndForward(data);
       } catch (err) {
-        console.error("[DEV-SERVER2] Error applying patch in relay:", err);
+        logError("Error applying patch in relay:", err);
       }
     });
 
     stateService.on("state:full-update", ({ data }) => {
       try {
-        console.log(
-          "[DEV-SERVER2] 'state:full-update' event received. Forwarding to StateManager2."
+        log(
+          "'state:full-update' event received. Forwarding to StateManager2."
         );
         stateManager.receiveExternalStateUpdate(data);
       } catch (err) {
-        console.error(
-          "[DEV-SERVER2] Error applying full update in relay:",
+        logError(
+          "Error applying full update in relay:",
           err
         );
       }
@@ -140,26 +141,33 @@ async function bridgeStateToRelay() {
     setTimeout(() => {
       initializeSecondaryServices(stateManager, serviceManager);
       stateService.startPlayback();
-      console.log(
-        "[DEV-SERVER2] State bridge to relay activated and all services running."
+      log(
+        "State bridge to relay activated and all services running."
       );
     }, 1000);
-
   } catch (err) {
-    console.error("[DEV-SERVER2] Failed to set up state bridge:", err);
+    logError("Failed to set up state bridge:", err);
     throw err;
   }
 }
 
- 
 // --- Bridge state and initialize dependent services ---
 async function initializeSecondaryServices(stateManager, serviceManager) {
-  console.log("[DEV-SERVER2] Starting secondary services...");
+  log("Starting secondary services...");
 
   const stateService = serviceManager.getService("state");
   const tidalService = new TidalService(stateService);
   const weatherService = new WeatherService(stateService);
-  const bluetoothService = new BluetoothService();
+  // Initialize BluetoothService with stateManager for direct state updates
+  const bluetoothService = new BluetoothService({
+    // Standard options from BluetoothServiceOptions
+    scanDuration: 10000,
+    scanInterval: 30000,
+    debug: true,
+    logLevel: "debug",
+    // Add stateManager reference for direct state integration
+    stateManager: stateManager,
+  });
 
   serviceManager.registerService("tidal", tidalService);
   serviceManager.registerService("weather", weatherService);
@@ -167,308 +175,145 @@ async function initializeSecondaryServices(stateManager, serviceManager) {
 
   // --- Wire up tide and weather updates back to the state manager ---
   if (tidalService) {
-    console.log(
-      "[DEV-SERVER2] Setting up tide:update listener on tidalService"
-    );
     tidalService.on("tide:update", (data) => {
-      console.log(
-        "[DEV-SERVER2] Received tide:update, forwarding to state manager"
+      log(
+        "Received tide:update, forwarding to state manager"
       );
       stateManager.setTideData(data);
     });
   }
 
   if (weatherService) {
-    console.log(
-      "[DEV-SERVER2] Setting up weather:update listener on weatherService"
-    );
     weatherService.on("weather:update", (data) => {
-      console.log(
-        "[DEV-SERVER2] Received weather:update, forwarding to state manager"
+      log(
+        "Received weather:update, forwarding to state manager"
       );
       stateManager.setWeatherData(data);
     });
   }
 
   if (bluetoothService) {
-    console.log("[DEV-SERVER2] Setting up Bluetooth service event listeners");
-    
-    // Initialize the Bluetooth service
-    try {
-      // Start the Bluetooth service and log detailed information about the process
-      console.log("[DEV-SERVER2] Starting Bluetooth service with detailed logging...");
-      await bluetoothService.start();
-      console.log("[DEV-SERVER2] Bluetooth service start() method completed");
-      
-      // Always register parsers at startup
-      const parserRegistry = bluetoothService.parserRegistry;
-      if (parserRegistry) {
-        const allParsers = parserRegistry.getAllParsers ? parserRegistry.getAllParsers() : [];
-        console.log(`[DEV-SERVER2] Bluetooth service parser registry contains ${allParsers.length || 0} parsers`);
-        
-        // Always register RuuviParser explicitly
-        console.log("[DEV-SERVER2] Registering RuuviParser...");
-        const { RuuviParser } = await import("./bluetooth/parsers/RuuviParser.js");
-        console.log("[DEV-SERVER2] RuuviParser imported:", {
-          exists: !!RuuviParser,
-          manufacturerId: RuuviParser ? RuuviParser.manufacturerId : undefined
-        });
-        if (RuuviParser && RuuviParser.manufacturerId) {
-          const result = bluetoothService.registerParser(RuuviParser.manufacturerId, RuuviParser);
-          console.log(`[DEV-SERVER2] RuuviParser registration result: ${result}`);
-        } else {
-          console.log("[DEV-SERVER2] ERROR: RuuviParser or its manufacturerId is undefined");
-        }
-      }
-      
-      // Update Bluetooth service status
-      stateManager.updateBluetoothStatus({ 
-        state: 'enabled',
-        error: null 
-      });
-      
-      // Device discovery events
-      bluetoothService.on("device:discovered", (device) => {
-        // Only log device discoveries if debug mode is enabled
-        if (process.env.LOG_DEVICE_DISCOVERIES === 'true') {
-          console.log(`[DEV-SERVER2] Device discovered: ${device.id} (${device.name || 'Unnamed'})`);
-        }
-        stateManager.updateBluetoothDevice(device);
-      });
-      
-      // Device update events (sensor data changes, etc.)
-      bluetoothService.on("device:updated", (device) => {
-        stateManager.updateBluetoothDevice(device);
-      });
-      
-      // Device sensor data events (parsed data from sensors)
-      bluetoothService.on("device:data", ({ id, data }) => {
-        console.log(`[DEV-SERVER2] Received sensor data for device ${id}`);
-        
-        // Log data preview
-        const dataPreview = {};
-        if (data.temperature) dataPreview.temperature = data.temperature.value;
-        if (data.humidity) dataPreview.humidity = data.humidity.value;
-        if (data.pressure) dataPreview.pressure = data.pressure.value;
-        if (data.battery && data.battery.voltage) dataPreview.battery = data.battery.voltage.value;
-        
-        console.log(`[DEV-SERVER2] Sensor data preview: ${JSON.stringify(dataPreview)}`);
-        console.log(`[DEV-SERVER2] Forwarding sensor data to state manager...`);
-        
-        // Update state with sensor data
-        const result = stateManager.updateBluetoothDeviceSensorData(id, data);
-        console.log(`[DEV-SERVER2] State update ${result ? 'successful' : 'failed'}`);
-      });
-      
-      // Set up periodic state inspection for debugging
-      const stateInspectionInterval = 30000; // 30 seconds
-      console.log(`[DEV-SERVER2] Setting up state inspection every ${stateInspectionInterval/1000} seconds`);
-      
-      setInterval(() => {
-        // Get all Bluetooth devices from state
-        const bluetoothState = stateManager.appState?.bluetooth;
-        if (!bluetoothState || !bluetoothState.devices) {
-          console.log('[DEV-SERVER2] No Bluetooth devices in state');
-          return;
-        }
-        
-        // Count devices with sensor data
-        const allDevices = Object.values(bluetoothState.devices);
-        const devicesWithSensorData = allDevices.filter(device => device.sensorData);
-        
-        console.log(`[DEV-SERVER2] STATE INSPECTION: ${allDevices.length} total devices, ${devicesWithSensorData.length} with sensor data`);
-        
-        // Log details of devices with sensor data
-        if (devicesWithSensorData.length > 0) {
-          devicesWithSensorData.forEach(device => {
-            const sensorDataPreview = {};
-            const sensorData = device.sensorData;
-            
-            if (sensorData.temperature) sensorDataPreview.temperature = sensorData.temperature.value;
-            if (sensorData.humidity) sensorDataPreview.humidity = sensorData.humidity.value;
-            if (sensorData.pressure) sensorDataPreview.pressure = sensorData.pressure.value;
-            if (sensorData.battery && sensorData.battery.voltage) {
-              sensorDataPreview.battery = sensorData.battery.voltage.value;
-            }
-            
-            console.log(`[DEV-SERVER2] Device ${device.id} (${device.name || 'Unknown'}) sensor data:`, sensorDataPreview);
-          });
-        }
-      }, stateInspectionInterval);
-      
-      // Device selection events
-      bluetoothService.on("device:selected", (device) => {
-        console.log(`[DEV-SERVER2] Device selected: ${device.id}`);
-        stateManager.setBluetoothDeviceSelected(device.id, true);
-      });
-      
-      bluetoothService.on("device:unselected", (device) => {
-        console.log(`[DEV-SERVER2] Device unselected: ${device.id}`);
-        stateManager.setBluetoothDeviceSelected(device.id, false);
-      });
-      
-      // Bluetooth service status events
-      bluetoothService.on("scanStart", () => {
-        console.log("[DEV-SERVER2] Bluetooth scan started");
-        stateManager.updateBluetoothStatus({
-          scanning: true,
-          state: 'enabled'
-        });
-      });
-      
-      // Add debounce for device count logging
-      let lastScanStopTime = 0;
-      const scanStopDebounceTime = 500; // 500ms debounce
-      
-      bluetoothService.on("scanStop", () => {
-        console.log("[DEV-SERVER2] Bluetooth scan stopped");
-        
-        // Update state immediately
-        stateManager.updateBluetoothStatus({
-          scanning: false
-        });
-        
-        // Debounce the device count logging to prevent multiple logs per scan cycle
-        const now = Date.now();
-        if (now - lastScanStopTime > scanStopDebounceTime) {
-          lastScanStopTime = now;
-          
-          // Log the number of discovered and selected devices
-          setTimeout(() => {
-            const allDevices = bluetoothService.getDevices();
-            const selectedDevices = bluetoothService.getSelectedDevices();
-            console.log(`[BluetoothService] Devices: ${allDevices.length} discovered, ${selectedDevices.length} selected`);
-          }, 200); // Small delay to ensure all processing is complete
-        }
-      });
-      
-      bluetoothService.on("error", (error) => {
-        console.error("[DEV-SERVER2] Bluetooth service error:", error);
-        stateManager.updateBluetoothStatus({ 
-          state: 'error',
-          error: error.message || 'Unknown Bluetooth error' 
-        });
-      });
-      
-    } catch (error) {
-      console.error("[DEV-SERVER2] Failed to initialize Bluetooth service:", error);
-      stateManager.updateBluetoothStatus({ 
-        state: 'error',
-        error: error.message || 'Failed to initialize Bluetooth service' 
-      });
+    // Initialize the Bluetooth service with state manager
+       await bluetoothService.start();
     }
-  }
-
-    // --- Start all other services ---
-  console.log("[DEV-SERVER2] Starting all services (Tidal, Weather, Bluetooth)...");
+ 
+  // --- Start all other services ---
+  log(
+    "Starting all services (Tidal, Weather, Bluetooth)..."
+  );
   await serviceManager.startAll(); // This will start tidal and weather services
 
   // --- Set up Bluetooth API endpoints ---
-  console.log("[DEV-SERVER2] Setting up Bluetooth API endpoints...");
+  log("Setting up Bluetooth API endpoints...");
   app.use(express.json());
-  
+
   // Bluetooth API endpoints
   function setupBluetoothRoutes(app) {
     try {
-      const bluetoothService = serviceManager.getService('bluetooth');
+      const bluetoothService = serviceManager.getService("bluetooth");
       if (!bluetoothService) {
-        console.warn('Bluetooth service not available. Bluetooth API endpoints will not be available.');
+        log(
+          "Bluetooth service not available. Bluetooth API endpoints will not be available."
+        );
         return;
       }
-      
-      console.log('Bluetooth service found, setting up routes...');
+
+      log("Bluetooth service found, setting up routes...");
       const router = express.Router();
-      
+
       // Get list of discovered devices
-      router.get('/devices', async (req, res) => {
+      router.get("/devices", async (req, res) => {
         try {
           const devices = bluetoothService.getDevices();
           res.json(devices);
         } catch (error) {
-          console.error('Error getting devices:', error);
-          res.status(500).json({ error: 'Failed to get devices' });
+          logError("Error getting devices:", error);
+          res.status(500).json({ error: "Failed to get devices" });
         }
       });
 
       // Start/stop scanning
-      router.post('/scan', async (req, res) => {
+      router.post("/scan", async (req, res) => {
         try {
           const { action } = req.body;
           if (!action) {
-            return res.status(400).json({ error: 'Action is required' });
+            return res.status(400).json({ error: "Action is required" });
           }
-          
-          if (action === 'start') {
+
+          if (action === "start") {
             await bluetoothService.start();
-            res.json({ 
-              status: 'scanning',
-              message: 'Bluetooth scanning started successfully'
+            res.json({
+              status: "scanning",
+              message: "Bluetooth scanning started successfully",
             });
-          } else if (action === 'stop') {
+          } else if (action === "stop") {
             await bluetoothService.stop();
-            res.json({ 
-              status: 'stopped',
-              message: 'Bluetooth scanning stopped'
+            res.json({
+              status: "stopped",
+              message: "Bluetooth scanning stopped",
             });
           } else {
-            res.status(400).json({ 
-              error: 'Invalid action',
-              validActions: ['start', 'stop']
+            res.status(400).json({
+              error: "Invalid action",
+              validActions: ["start", "stop"],
             });
           }
         } catch (error) {
-          console.error('Error controlling scan:', error);
-          res.status(500).json({ 
-            error: 'Failed to control scanning',
-            details: error.message 
+          logError("Error controlling scan:", error);
+          res.status(500).json({
+            error: "Failed to control scanning",
+            details: error.message,
           });
         }
       });
 
       // Get scan status
-      router.get('/status', (req, res) => {
+      router.get("/status", (req, res) => {
         try {
           res.json({
-            status: 'success',
+            status: "success",
             data: {
               isRunning: bluetoothService.isRunning,
               isScanning: bluetoothService.scanning,
               lastScan: bluetoothService.lastScanTime,
-              serviceAvailable: true
-            }
+              serviceAvailable: true,
+            },
           });
         } catch (error) {
-          console.error('Error getting status:', error);
-          res.status(500).json({ 
-            error: 'Failed to get status',
-            details: error.message 
+          logError("Error getting status:", error);
+          res.status(500).json({
+            error: "Failed to get status",
+            details: error.message,
           });
         }
       });
 
       // Health check endpoint
-      router.get('/health', (req, res) => {
+      router.get("/health", (req, res) => {
         res.json({
-          status: 'ok',
-          service: 'bluetooth',
+          status: "ok",
+          service: "bluetooth",
           available: true,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         });
       });
 
-      app.use('/api/bluetooth', router);
-      console.log('[DEV-SERVER2] Bluetooth API endpoints registered at /api/bluetooth');
-      
+      app.use("/api/bluetooth", router);
+      log(
+        "Bluetooth API endpoints registered at /api/bluetooth"
+      );
     } catch (error) {
-      console.error('Failed to set up Bluetooth routes:', error);
+      logError("Failed to set up Bluetooth routes:", error);
     }
   }
 
   // Setup Bluetooth routes if service is available
-  if (serviceManager.getService('bluetooth')) {
+  if (serviceManager.getService("bluetooth")) {
     setupBluetoothRoutes(app);
   } else {
-    console.warn('Bluetooth service not available. Bluetooth API endpoints will not be registered.');
+    log(
+      "Bluetooth service not available. Bluetooth API endpoints will not be registered."
+    );
   }
 }
 
@@ -477,7 +322,7 @@ async function initializeSecondaryServices(stateManager, serviceManager) {
 async function startDevServer() {
   try {
     // 1. Initialize all services
-    console.log("[DEV-SERVER2] Initializing services...");
+    log("Initializing services...");
     await initializeServices();
 
     // 2. Bridge state to relay
@@ -511,8 +356,8 @@ async function startDevServer() {
       );
     }
 
-    console.log(
-      `[DEV-SERVER2] Starting WebSocket server on port ${directPort}`
+    log(
+      `Starting WebSocket server on port ${directPort}`
     );
 
     // Ensure the relay port is different from the direct port
@@ -541,10 +386,10 @@ async function startDevServer() {
     }
 
     // 4. Start relay server
-    console.log(
-      `[DEV-SERVER2] Starting relay server on port ${relayPortFinal}`
+    log(
+      `Starting relay server on port ${relayPortFinal}`
     );
-    console.log(`[DEV-SERVER2] VPS URL: ${relayConfig.vpsUrl}`);
+    log(`VPS URL: ${relayConfig.vpsUrl}`);
 
     // Set connection parameters from environment
     relayConfig.reconnectInterval = parseInt(process.env.RECONNECT_DELAY, 10);
@@ -555,22 +400,22 @@ async function startDevServer() {
     // Log when the relay server connects to the VPS
     if (relayServer && relayServer.vpsConnector) {
       relayServer.vpsConnector.on("connected", () => {
-        console.log(
-          `[DEV-SERVER2] Successfully connected to VPS at ${relayConfig.vpsUrl}`
+        log(
+          `Successfully connected to VPS at ${relayConfig.vpsUrl}`
         );
       });
 
       relayServer.vpsConnector.on("disconnected", () => {
-        console.log(`[DEV-SERVER2] Disconnected from VPS`);
+        log(`Disconnected from VPS`);
       });
 
       relayServer.vpsConnector.on("error", (error) => {
-        console.error(`[DEV-SERVER2] VPS connection error:`, error.message);
+        logError(`VPS connection error:`, error.message);
       });
     }
 
     // 5. Start direct server
-    console.log(`[DEV-SERVER2] Starting direct server on port ${directPort}`);
+    log(`Starting direct server on port ${directPort}`);
     const directServer = await startDirectServerWrapper(directConfig);
 
     // 6. Create Express app and set up API routes
@@ -579,7 +424,7 @@ async function startDevServer() {
     // Middleware
     app.use(express.json());
     app.use((req, res, next) => {
-      console.log(
+      log(
         `[HTTP] ${new Date().toISOString()} ${req.method} ${req.url}`
       );
       next();
@@ -610,59 +455,59 @@ async function startDevServer() {
 
     // Set up Bluetooth API routes if Bluetooth service is available
     try {
-      const bluetoothService = serviceManager.getService('bluetooth');
+      const bluetoothService = serviceManager.getService("bluetooth");
       if (bluetoothService) {
         const router = express.Router();
-        
+
         // Get list of discovered devices
-        router.get('/bluetooth/devices', async (req, res) => {
+        router.get("/bluetooth/devices", async (req, res) => {
           try {
             const devices = bluetoothService.getDevices();
             res.json(devices);
           } catch (error) {
-            console.error('Error getting devices:', error);
-            res.status(500).json({ error: 'Failed to get devices' });
+            logError("Error getting devices:", error);
+            res.status(500).json({ error: "Failed to get devices" });
           }
         });
 
         // Start/stop scanning
-        router.post('/bluetooth/scan', async (req, res) => {
+        router.post("/bluetooth/scan", async (req, res) => {
           try {
             const { action } = req.body;
-            if (action === 'start') {
+            if (action === "start") {
               await bluetoothService.start();
-              res.json({ status: 'scanning' });
-            } else if (action === 'stop') {
+              res.json({ status: "scanning" });
+            } else if (action === "stop") {
               await bluetoothService.stop();
-              res.json({ status: 'stopped' });
+              res.json({ status: "stopped" });
             } else {
-              res.status(400).json({ error: 'Invalid action' });
+              res.status(400).json({ error: "Invalid action" });
             }
           } catch (error) {
-            console.error('Error controlling scan:', error);
-            res.status(500).json({ error: 'Failed to control scanning' });
+            logError("Error controlling scan:", error);
+            res.status(500).json({ error: "Failed to control scanning" });
           }
         });
 
         // Get scan status
-        router.get('/bluetooth/status', (req, res) => {
+        router.get("/bluetooth/status", (req, res) => {
           try {
             res.json({
               isRunning: bluetoothService.isRunning,
               isScanning: bluetoothService.scanning,
-              lastScan: bluetoothService.lastScanTime
+              lastScan: bluetoothService.lastScanTime,
             });
           } catch (error) {
-            console.error('Error getting status:', error);
-            res.status(500).json({ error: 'Failed to get status' });
+            logError("Error getting status:", error);
+            res.status(500).json({ error: "Failed to get status" });
           }
         });
 
-        app.use('/api', router);
-        console.log("Bluetooth API endpoints registered at /api/bluetooth/*");
+        app.use("/api", router);
+        log("Bluetooth API endpoints registered at /api/bluetooth/*");
       }
     } catch (error) {
-      console.error('Failed to set up Bluetooth API:', error);
+      logError("Failed to set up Bluetooth API:", error);
     }
 
     // Build VPS URL from environment variables
@@ -674,8 +519,8 @@ async function startDevServer() {
         const host = process.env.VPS_HOST;
         const port =
           process.env.VPS_WS_PORT &&
-          process.env.VPS_WS_PORT !== "80" &&
-          process.env.VPS_WS_PORT !== "443"
+            process.env.VPS_WS_PORT !== "80" &&
+            process.env.VPS_WS_PORT !== "443"
             ? `:${process.env.VPS_WS_PORT}`
             : "";
         const path = process.env.VPS_PATH || "/api/register";
@@ -725,42 +570,42 @@ async function startDevServer() {
 
     // Start the server
     httpServer.listen(PORT, "0.0.0.0", () => {
-      console.log(`[HTTP] Server started on port ${PORT}`);
-      console.log(`[HTTP] Access the API at http://localhost:${PORT}/`);
-      console.log("\nAvailable endpoints:");
-      console.log(`  GET  http://localhost:${PORT}/api/boat-info`);
-      console.log(`  POST http://localhost:${PORT}/api/vps/register`);
-      console.log(`  GET  http://localhost:${PORT}/api/vps/health`);
+      log(`[HTTP] Server started on port ${PORT}`);
+      log(`[HTTP] Access the API at http://localhost:${PORT}/`);
+      log("\nAvailable endpoints:");
+      log(`  GET  http://localhost:${PORT}/api/boat-info`);
+      log(`  POST http://localhost:${PORT}/api/vps/register`);
+      log(`  GET  http://localhost:${PORT}/api/vps/health`);
     });
 
-    console.log("[DEV-SERVER2] Development server started with HTTP");
+    log("Development server started with HTTP");
 
     // Return all server instances for graceful shutdown
     return { relayServer, directServer, httpServer };
   } catch (error) {
-    console.error("[DEV-SERVER2] Fatal error during startup:", error);
+    logError("Fatal error during startup:", error);
     process.exit(1);
   }
 }
 
 // Graceful shutdown handler
 async function shutdown(signal) {
-  console.log(`\n${signal} received. Shutting down gracefully...`);
+  log(`\n${signal} received. Shutting down gracefully...`);
 
   try {
     // Clean up Bluetooth service if it was initialized
-    const bluetoothService = serviceManager.getService('bluetooth');
+    const bluetoothService = serviceManager.getService("bluetooth");
     if (bluetoothService) {
       await bluetoothService.stop();
     }
     // Stop all background services
     await serviceManager.stopAll();
-    console.log("[DEV-SERVER2] All services stopped.");
+    log("All services stopped.");
 
     // Close the HTTP server
     if (servers.httpServer) {
       await new Promise((resolve) => servers.httpServer.close(resolve));
-      console.log("[DEV-SERVER2] HTTP server closed.");
+      log("HTTP server closed.");
     }
 
     // Close the Direct server
@@ -769,41 +614,41 @@ async function shutdown(signal) {
       typeof servers.directServer.shutdown === "function"
     ) {
       await servers.directServer.shutdown();
-      console.log("[DEV-SERVER2] Direct server closed.");
+      log("Direct server closed.");
     } else if (
       servers.directServer &&
       typeof servers.directServer.close === "function"
     ) {
       // Fallback for older directServer instances that might still return wss directly
       await servers.directServer.close();
-      console.log("[DEV-SERVER2] Direct server (old style) closed.");
+      log("Direct server (old style) closed.");
     } else {
-      console.warn(
-        "[DEV-SERVER2] Direct server object found, but no recognized close or shutdown method."
+      log(
+        "[WARN] Direct server object found, but no recognized close or shutdown method."
       );
     }
 
     // Close the Relay server
     if (servers.relayServer) {
-      console.log("[DEV-SERVER2] Closing relay server...");
+      log("Closing relay server...");
       if (typeof servers.relayServer.shutdown === "function") {
         servers.relayServer.shutdown();
-        console.log("[DEV-SERVER2] Relay server shutdown initiated.");
+        log("Relay server shutdown initiated.");
       } else if (typeof servers.relayServer.close === "function") {
         servers.relayServer.close(() => {
-          console.log("[DEV-SERVER2] Relay server closed.");
+          log("Relay server closed.");
         });
       } else {
-        console.log(
-          "[DEV-SERVER2] Relay server has no close or shutdown method."
+        log(
+          "Relay server has no close or shutdown method."
         );
       }
     }
 
-    console.log("[DEV-SERVER2] Shutdown complete.");
+    log("Shutdown complete.");
     process.exit(0);
   } catch (error) {
-    console.error("[DEV-SERVER2] Error during graceful shutdown:", error);
+    logError("Error during graceful shutdown:", error);
     process.exit(1);
   }
 }
@@ -813,9 +658,9 @@ let servers = {};
 async function main() {
   try {
     servers = await startDevServer();
-    console.log("[DEV-SERVER2] All components started successfully.");
+    log("All components started successfully.");
   } catch (error) {
-    console.error("[DEV-SERVER2] Failed to start development server:", error);
+    logError("Failed to start development server:", error);
     process.exit(1);
   }
 }

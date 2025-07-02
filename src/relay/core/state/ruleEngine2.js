@@ -1,5 +1,10 @@
 import { EventEmitter } from 'events';
 import debounce from 'lodash/debounce.js';
+import debug from 'debug';
+
+const log = debug('compendium:rule-engine2');
+const logWarn = debug('compendium:rule-engine2:warn');
+const logError = debug('compendium:rule-engine2:error');
 
 /**
  * Optimized Rule Engine for Raspberry Pi (including Pi Zero)
@@ -57,7 +62,7 @@ export class RuleEngine2 extends EventEmitter {
    */
   addRule(rule) {
     if (this.rules.length >= this.options.maxRules) {
-      console.warn(`[RuleEngine] Maximum rules (${this.options.maxRules}) reached, skipping rule`);
+      logWarn(`Maximum rules (${this.options.maxRules}) reached, skipping rule`);
       return false;
     }
 
@@ -67,9 +72,9 @@ export class RuleEngine2 extends EventEmitter {
     }
 
     if (!Array.isArray(rule.dependsOn) || rule.dependsOn.length === 0) {
-      console.warn('Rule added without dependencies, will be evaluated on every state change');
+      logWarn('Rule added without dependencies, will be evaluated on every state change');
     } else if (rule.dependsOn.length > this.options.maxConditionsPerRule) {
-      console.warn(`Rule has ${rule.dependsOn.length} dependencies (max ${this.options.maxConditionsPerRule})`);
+      logWarn(`Rule has ${rule.dependsOn.length} dependencies (max ${this.options.maxConditionsPerRule})`);
     }
 
     // Add to rules array
@@ -80,7 +85,7 @@ export class RuleEngine2 extends EventEmitter {
     };
 
     this.rules.push(ruleWithDefaults);
-    console.log(`[RuleEngine2] Added rule: ${ruleWithDefaults.name || ruleWithDefaults.id}`);
+    log(`Added rule: ${ruleWithDefaults.name || ruleWithDefaults.id}`);
 
     // Update dependencies map
     rule.dependsOn?.forEach(path => {
@@ -191,7 +196,7 @@ export class RuleEngine2 extends EventEmitter {
           }
         }
       } catch (error) {
-        console.error(`[RuleEngine] Error evaluating rule ${rule.name || rule.id}:`, error);
+        logError(`Error evaluating rule ${rule.name || rule.id}: %o`, error);
       }
     }
 

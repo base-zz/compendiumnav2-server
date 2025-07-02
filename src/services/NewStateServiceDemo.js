@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 export class NewStateServiceDemo extends ContinuousService {
   constructor() {
     super("newStateServiceDemo");
-    this.log = console.log.bind(console, "[StateService]");
+    // this.log = console.log.bind(console, "[StateService]");
 
     // Configuration
     this.config = {

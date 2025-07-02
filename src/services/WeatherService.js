@@ -105,8 +105,8 @@ export class WeatherService extends ScheduledService {
         // Log every 5 seconds
         const now = Date.now();
         if (now - lastLogTime >= logInterval) {
-          console.log(`[WeatherService] Waiting for valid position data... (${Math.round((now - startTime) / 1000)}s elapsed)`);
-          console.log('[WeatherService] Current position state:', JSON.stringify({
+          this.log(`Waiting for valid position data... (${Math.round((now - startTime) / 1000)}s elapsed)`);
+          this.log('Current position state:', JSON.stringify({
             hasPosition: !!position,
             latitude: position?.latitude,
             longitude: position?.longitude
@@ -118,14 +118,14 @@ export class WeatherService extends ScheduledService {
         await new Promise(resolve => setTimeout(resolve, 1000));
         
       } catch (error) {
-        console.error('[WeatherService] Error checking position:', error.message);
+        this.error('Error checking position:', error.message);
         // Continue waiting even if there's an error checking position
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
     
     const errorMsg = `Timed out waiting for position data after ${timeout}ms`;
-    console.error(`[WeatherService] ${errorMsg}`);
+    this.error(`${errorMsg}`);
     throw new Error(errorMsg);
   }
 
@@ -135,12 +135,12 @@ export class WeatherService extends ScheduledService {
    */
   async start() {
     if (this._isRunning) {
-      console.log('[WeatherService] Service already running');
+      this.log('Service already running');
       return;
     }
     
     this._isRunning = true;
-    console.log('[WeatherService] Starting weather service...');
+    this.log('Starting weather service...');
     
     try {
       // Initialize state service connection
@@ -155,13 +155,13 @@ export class WeatherService extends ScheduledService {
       }
     } catch (error) {
       this._isRunning = false;
-      console.error('[WeatherService] Failed to start service:', error);
+      this.error('Failed to start service:', error);
       throw error;
     }
   }
   
   async stop() {
-    console.log('[WeatherService] Stopping service...');
+    this.log('Stopping service...');
     this._isRunning = false;
     
     // Cancel any in-progress fetch
@@ -169,7 +169,7 @@ export class WeatherService extends ScheduledService {
       try {
         await this._currentFetch;
       } catch (error) {
-        console.warn('[WeatherService] Error during cleanup of in-progress fetch:', error);
+        this.warn('Error during cleanup of in-progress fetch:', error);
       }
       this._currentFetch = null;
     }
@@ -180,7 +180,7 @@ export class WeatherService extends ScheduledService {
       this._positionCheckInterval = null;
     }
     
-    console.log('[WeatherService] Service stopped');
+    this.log('Service stopped');
   }
   
   async _initializeStateService() {
@@ -191,16 +191,16 @@ export class WeatherService extends ScheduledService {
     
     // If the state service has an initialization method, call it
     if (typeof this.stateService.initialize === 'function') {
-      console.log('[WeatherService] Initializing state service...');
+      this.log('Initializing state service...');
       try {
         await this.stateService.initialize();
       } catch (error) {
-        console.error('[WeatherService] Error initializing state service:', error.message);
+        this.error('Error initializing state service:', error.message);
         throw new Error(`State service initialization failed: ${error.message}`);
       }
     }
     
-    console.log('[WeatherService] State service is ready');
+    this.log('State service is ready');
   }
   
   _startPositionUpdates() {
@@ -208,7 +208,7 @@ export class WeatherService extends ScheduledService {
     this._positionCheckInterval = setInterval(() => {
       if (this._isRunning) {
         this.run().catch(error => {
-          console.error('[WeatherService] Error in scheduled position update:', error);
+          this.error('Error in scheduled position update:', error);
         });
       }
     }, 30000);
@@ -216,28 +216,28 @@ export class WeatherService extends ScheduledService {
   
   async run() {
     if (this._currentFetch) {
-      console.log('[WeatherService] Update already in progress, queuing next update');
+      this.log('Update already in progress, queuing next update');
       return this._currentFetch;
     }
     
-    console.log('[WeatherService] Starting weather data fetch...');
+    this.log('Starting weather data fetch...');
     
     try {
       // Create a promise that resolves when the current fetch completes
       this._currentFetch = (async () => {
         try {
           // Wait for position data with retry logic
-          console.log('[WeatherService] Waiting for position data...');
+          this.log('Waiting for position data...');
           const position = await this._waitForPosition(60000); // 60 second timeout for position
           
           if (!position?.latitude || !position?.longitude) {
             throw new Error('Invalid position data received');
           }
           
-          console.log(`[WeatherService] Got position: ${position.latitude}, ${position.longitude}`);
+          this.log(`Got position: ${position.latitude}, ${position.longitude}`);
           
           // Fetch weather data with the obtained position
-          console.log('[WeatherService] Fetching weather data...');
+          this.log('Fetching weather data...');
           const weatherData = await this.fetchWeatherData(position.latitude, position.longitude);
           
           // Emit the weather update event
@@ -251,7 +251,7 @@ export class WeatherService extends ScheduledService {
       
       return await this._currentFetch;
     } catch (error) {
-      console.error('[WeatherService] Error in run:', error);
+      this.error('Error in run:', error);
       this.emit('weather:error', { error: error.message });
       throw error;
     }
@@ -271,7 +271,7 @@ export class WeatherService extends ScheduledService {
       // Fall back to imperial defaults if no preferences found
       return UNIT_PRESETS.IMPERIAL;
     } catch (error) {
-      console.warn('[WeatherService] Could not get unit preferences, using defaults:', error.message);
+      this.warn('Could not get unit preferences, using defaults:', error.message);
       return UNIT_PRESETS.IMPERIAL;
     }
   }
@@ -287,13 +287,13 @@ export class WeatherService extends ScheduledService {
       try {
         const result = await this._fetchWeatherData(latitude, longitude);
         if (attempt > 1) {
-          console.log(`[WeatherService] Successfully fetched weather data after ${attempt} attempts`);
+          this.log(`Successfully fetched weather data after ${attempt} attempts`);
         }
         return result;
       } catch (error) {
         lastError = error;
         const waitTime = 1000 * Math.pow(2, attempt - 1); // Exponential backoff
-        console.warn(`[WeatherService] Attempt ${attempt} failed, retrying in ${waitTime}ms:`, error.message);
+        this.warn(`Attempt ${attempt} failed, retrying in ${waitTime}ms:`, error.message);
         
         if (attempt < retries) {
           await new Promise(resolve => setTimeout(resolve, waitTime));
@@ -301,7 +301,7 @@ export class WeatherService extends ScheduledService {
       }
     }
     
-    console.error(`[WeatherService] All ${retries} attempts failed`);
+    this.error(`All ${retries} attempts failed`);
     throw lastError;
   }
   
@@ -349,7 +349,7 @@ export class WeatherService extends ScheduledService {
         timeformat: 'iso8601'
       });
 
-      // console.log(`[WeatherService] Fetching weather data from: ${this.baseUrl}?${params.toString()}`);
+      // this.log(`Fetching weather data from: ${this.baseUrl}?${params.toString()}`);
       
       const response = await fetch(`${this.baseUrl}?${params.toString()}`);
       if (!response.ok) {
@@ -374,7 +374,7 @@ export class WeatherService extends ScheduledService {
       };
       
       // Log the data we're about to store
-      // console.log('[WeatherService] Prepared forecast data:', JSON.stringify(forecastData, null, 2));
+      // this.log('Prepared forecast data:', JSON.stringify(forecastData, null, 2));
       
       try {
         // Update the state with the new forecast data
@@ -384,15 +384,15 @@ export class WeatherService extends ScheduledService {
         
         this.emit('weather:update', forecastData);
 
-        console.log('[WeatherService] Successfully updated state with forecast data');
+        this.log('Successfully updated state with forecast data');
       } catch (error) {
-        console.error('[WeatherService] Error updating state:', error);
+        this.error('Error updating state:', error);
         throw error;
       }
    
       return forecastData;
     } catch (error) {
-      console.error('[WeatherService] Error fetching weather data:', error);
+      this.error('Error fetching weather data:', error);
       this.emit('error', error);
       throw error;
     }

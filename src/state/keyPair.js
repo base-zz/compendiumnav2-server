@@ -2,7 +2,11 @@ import forge from 'node-forge';
 import fs from 'fs';
 import path from 'path';
 import fetch from 'node-fetch';
+import debug from 'debug';
 import { getOrCreateAppUuid } from './uniqueAppId.js';
+
+const log = debug('cn2:key-pair');
+const logError = debug('cn2:key-pair:error');
 
 // Default key file paths (can be overridden by environment variables)
 const DEFAULT_PRIVATE_KEY_FILE = `${process.env.HOME || process.env.USERPROFILE || ''}/.compendium/keys/private-key`;
@@ -18,6 +22,7 @@ const PUBLIC_KEY_FILE = process.env.COMPENDIUM_PUBLIC_KEY_FILE || DEFAULT_PUBLIC
 export function getOrCreateKeyPair() {
   const existingKeyPair = loadKeyPair();
   if (existingKeyPair) {
+    log('Loaded existing key pair from disk');
     return existingKeyPair;
   }
 
@@ -37,7 +42,7 @@ function loadKeyPair() {
       return { privateKey, publicKey };
     }
   } catch (error) {
-    console.error('Error loading key pair:', error);
+    logError('Error loading key pair:', error);
   }
   return null;
 }
@@ -49,16 +54,18 @@ function loadKeyPair() {
 function generateAndSaveKeyPair() {
   try {
     // Generate a deterministic key pair based on the boat ID
+    log('Generating new key pair...');
     const boatId = getOrCreateAppUuid();
     const { publicKey, privateKey } = generateKeyPair(boatId);
     
     // Save the keys to disk
     fs.writeFileSync(PRIVATE_KEY_FILE, privateKey);
     fs.writeFileSync(PUBLIC_KEY_FILE, publicKey);
+    log(`Saved new key pair to ${PRIVATE_KEY_FILE} and ${PUBLIC_KEY_FILE}`);
     
     return { privateKey, publicKey };
   } catch (error) {
-    console.error('Error generating key pair:', error);
+    logError('Error generating key pair:', error);
     throw error;
   }
 }
@@ -71,6 +78,7 @@ function generateAndSaveKeyPair() {
 function generateKeyPair(boatId) {
   try {
     // Use node-forge to generate RSA key pair
+    log(`Generating deterministic key pair for boat ID: ${boatId}`);
     const rsaKeypair = forge.pki.rsa.generateKeyPair({bits: 2048, workers: 2});
     
     // Convert to PEM format
@@ -79,7 +87,7 @@ function generateKeyPair(boatId) {
     
     return { privateKey, publicKey };
   } catch (error) {
-    console.error('Error generating key pair:', error);
+    logError('Error generating key pair:', error);
     throw new Error(`Failed to generate key pair: ${error.message}`);
   }
 }
@@ -94,6 +102,7 @@ export function signMessage(message, privateKey) {
   try {
     // If privateKey is not provided, get it from the key pair
     if (!privateKey) {
+      log('Private key not provided, retrieving from key store...');
       const keyPair = getOrCreateKeyPair();
       if (!keyPair || !keyPair.privateKey) {
         throw new Error('No private key available for signing');
@@ -111,7 +120,7 @@ export function signMessage(message, privateKey) {
     // Sign and return base64-encoded signature
     return forge.util.encode64(privateKeyObj.sign(md));
   } catch (error) {
-    console.error('Error signing message:', error);
+    logError('Error signing message:', error);
     throw new Error(`Failed to sign message: ${error.message}`);
   }
 }
@@ -148,10 +157,10 @@ export async function registerPublicKeyWithVPS(vpsUrl) {
     }
     
     const apiBaseUrl = `${protocol}://${hostname}`;
-    console.log(`[KEY-PAIR] API base URL: ${apiBaseUrl}`);
+    log(`API base URL: ${apiBaseUrl}`);
     
     const registrationUrl = `${apiBaseUrl}/api/boat/register-key`;
-    console.log(`[KEY-PAIR] Registering public key with VPS at ${registrationUrl}`);
+    log(`Registering public key with VPS at ${registrationUrl}`);
     
     // Create a timeout promise
     const timeout = new Promise((_, reject) => {
@@ -175,15 +184,15 @@ export async function registerPublicKeyWithVPS(vpsUrl) {
     const data = await response.json();
     
     if (response.ok && data.success) {
-      console.log(`[KEY-PAIR] Successfully registered public key with VPS for boat ${boatId}`);
+      log(`Successfully registered public key with VPS for boat ${boatId}`);
       return true;
     } else {
-      console.error(`[KEY-PAIR] Failed to register public key with VPS: ${data.error || 'Unknown error'}`);
+      logError(`Failed to register public key with VPS: ${data.error || 'Unknown error'}`);
       return false;
     }
   } catch (error) {
-    console.error('[KEY-PAIR] Error registering public key with VPS:', error);
-    console.log('[KEY-PAIR] Continuing with connection despite key registration failure');
+    logError('Error registering public key with VPS:', error);
+    log('Continuing with connection despite key registration failure');
     return false;
   }
 }
@@ -211,14 +220,14 @@ export async function registerPublicKey(vpsUrl) {
     const data = await response.json();
     
     if (!data.success) {
-      console.error('Failed to register public key:', data.error);
+      logError('Failed to register public key:', data.error);
       return { success: false, error: data.error };
     }
     
-    console.log('Public key registered successfully');
+    log('Public key registered successfully');
     return { success: true };
   } catch (error) {
-    console.error('Error registering public key:', error);
+    logError('Error registering public key:', error);
     return { success: false, error: error.message };
   }
 }
