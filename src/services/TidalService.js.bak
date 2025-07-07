@@ -15,6 +15,9 @@ export class TidalService extends ScheduledService {
   /** @type {NodeJS.Timeout|null} */
   _updateTimeout;
   
+  /** @type {boolean} */
+  _isRunning;
+  
   /** @type {Promise|null} */
   _currentFetch;
   constructor(stateService) {
@@ -30,6 +33,7 @@ export class TidalService extends ScheduledService {
     
     this.stateService = stateService;
     this.baseUrl = "https://marine-api.open-meteo.com/v1/marine";
+    this._isRunning = false;
     this._currentFetch = null;
     this._updateTimeout = null;
 
@@ -54,7 +58,7 @@ export class TidalService extends ScheduledService {
       // Fall back to imperial defaults if no preferences found
       return UNIT_PRESETS.IMPERIAL;
     } catch (error) {
-      this.log('[TidalService] Could not get unit preferences, using defaults:', error.message);
+      this.warn('[TidalService] Could not get unit preferences, using defaults:', error.message);
       return UNIT_PRESETS.IMPERIAL;
     }
   }
@@ -156,7 +160,7 @@ export class TidalService extends ScheduledService {
               await this.stateService.initialize();
               this.log("[TidalService] State service is now ready");
             } catch (error) {
-              this.logError("[TidalService] Error initializing state service:", error.message);
+              this.error("[TidalService] Error initializing state service:", error.message);
               throw error;
             }
           }
@@ -224,6 +228,11 @@ export class TidalService extends ScheduledService {
         timeformat: 'iso8601'
       };
 
+      // this.log(
+      //   `[TidalService] Fetching data from: ${this.baseUrl} with params:`,
+      //   JSON.stringify(params, null, 2)
+      // );
+
       // Make the API request using openmeteo's fetchWeatherApi
       const responses = await fetchWeatherApi(this.baseUrl, params);
 
@@ -255,8 +264,14 @@ export class TidalService extends ScheduledService {
       const now = new Date().toISOString();
       // Extract position values safely, ensuring they're primitive numbers
       const positionData = {
-        latitude: position?.latitude != null ? Number(position.latitude) : null,
-        longitude: position?.longitude != null ? Number(position.longitude) : null,
+        latitude:
+          position?.latitude?.value != null
+            ? Number(position.latitude.value)
+            : null,
+        longitude:
+          position?.longitude?.value != null
+            ? Number(position.longitude.value)
+            : null,
       };
 
       // Process the marine data into our state format
@@ -339,7 +354,9 @@ export class TidalService extends ScheduledService {
       // Log the raw data for debugging
       this.log("[TidalService] Processed marine data:");
  
+      // Emit the event both directly and through the event emitter
       this.emit('tide:update', marineData);
+      this._eventEmitter.emit('tide:update', marineData);
       
       // Also log the event emission for debugging
       this.log(`[TidalService] Emitted 'tide:update' event with data:`, 
@@ -354,7 +371,7 @@ export class TidalService extends ScheduledService {
       
       return await this._currentFetch;
     } catch (error) {
-      this.logError("[TidalService] Error fetching tidal data:", error);
+      this.error("[TidalService] Error fetching tidal data:", error);
       throw error;
     }
   }

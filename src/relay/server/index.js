@@ -26,20 +26,20 @@ function verifySignature(message, signature, publicKey) {
   }
 }
 
-export async function startRelayServer(config = {}) {
-  relayServerInstance = new RelayServer(config);
+export async function startRelayServer(stateManager, options = {}) {
+  relayServerInstance = new RelayServer({ ...options, stateManager });
   // Initialize the relay server (this will connect to the VPS)
   try {
     await relayServerInstance.initialize();
-    console.log('[RELAY] Relay server initialized and started on port', config.port);
+    console.log('[RELAY] Relay server initialized and started on port', options.port);
   } catch (error) {
     console.error('[RELAY] Failed to initialize relay server:', error.message);
   }
   return relayServerInstance;
 }
 
-export async function startDirectServerWrapper(options = {}) {
-  directServerInstance = await startDirectServer(options);
+export async function startDirectServerWrapper(stateManager, options = {}) {
+  directServerInstance = await startDirectServer(stateManager, options);
   console.log('[DIRECT] Direct server started');
   return directServerInstance;
 }

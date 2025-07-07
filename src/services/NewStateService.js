@@ -362,10 +362,10 @@ class NewStateService extends ContinuousService {
  * @property {string} config.signalKBaseUrl - Base URL for SignalK
  * @property {number} config.pingInterval - Current ping interval in ms
  */
-  status() {
+  getStatus() {
     return {
       // Base status from ContinuousService
-      ...super.status(),
+      ...super.getStatus(),
       
       // Service-specific status
       isInitialized: this.isInitialized,

@@ -174,68 +174,47 @@ export class ParserRegistry {
       logError(`Invalid data provided to findParserFor:`, data);
       return null;
     }
-    
+
     // Extract manufacturer ID from the first 2 bytes (little endian)
     const manufacturerId = data.readUInt16LE(0);
-    log(`Looking for parser for manufacturer ID: 0x${manufacturerId.toString(16).toUpperCase()}`);
-    
-    // Debug the state of the registry
-    log(`Current registry state:`);
-    log(`- Total parsers: ${this.allParsers.size}`);
-    log(`- Manufacturer map size: ${this.manufacturerParsers.size}`);
-    log(`- Manufacturer map keys:`, [...this.manufacturerParsers.keys()].map(id => `0x${id.toString(16).toUpperCase()}`));
-    
-    // First try to find a parser by manufacturer ID
+
+    // First, check if we have any parsers for this manufacturer ID.
     const parsers = this.manufacturerParsers.get(manufacturerId);
-    log(`Found ${parsers ? parsers.size : 0} registered parsers for this manufacturer ID`);
-    
+
+    // If no parsers are registered for this ID, silently return null.
+    // This is the key change to stop logging for unsupported devices.
     if (!parsers || parsers.size === 0) {
-      log(`No parsers registered for manufacturer ID: 0x${manufacturerId.toString(16).toUpperCase()}`);
       return null;
     }
 
-    // If only one parser, use it
+    // --- From this point on, we know a parser exists, so logging is useful for debugging. ---
+    
+    log(`Found ${parsers.size} registered parser(s) for manufacturer ID: 0x${manufacturerId.toString(16).toUpperCase()}`);
+
+    // If only one parser, use it.
     if (parsers.size === 1) {
       const parser = parsers.values().next().value;
       log(`Using single registered parser: ${parser.name || parser.constructor.name}`);
-      log(
-        `Using single registered parser: ${
-          parser.name || parser.constructor.name
-        }`
-      );
       return parser;
     }
 
-    // If multiple parsers, try to find the best match using the matches() method if available
-    log(
-      `Multiple parsers found, looking for best match...`
-    );
+    // If multiple parsers, try to find the best match using the matches() method.
+    log(`Multiple parsers found, looking for best match...`);
     for (const parser of parsers) {
       if (typeof parser.matches === "function") {
-        log(
-          `Testing parser ${
-            parser.name || parser.constructor.name
-          } with matches() method`
-        );
+        log(`Testing parser: ${parser.name || parser.constructor.name}`);
         if (parser.matches(data)) {
-          log(
-            `Found matching parser: ${
-              parser.name || parser.constructor.name
-            }`
-          );
+          log(`Found matching parser: ${parser.name || parser.constructor.name}`);
           return parser;
         }
       }
     }
-
-    // If no specific matcher, return the first parser for this manufacturer
-    const defaultParser = parsers.values().next().value;
-    log(
-      `No specific match found, using default parser: ${
-        defaultParser.name || defaultParser.constructor.name
-      }`
-    );
-    return defaultParser;
+    
+    // Fallback: if no specific match found, return the first registered parser.
+    // This case might need refinement depending on desired behavior.
+    const fallbackParser = parsers.values().next().value;
+    log(`No specific match found, using first registered parser as fallback: ${fallbackParser.name || fallbackParser.constructor.name}`);
+    return fallbackParser;
   }
 
   /**
@@ -277,4 +256,4 @@ export class ParserRegistry {
   }
 }
 
-export default ParserRegistry;
+

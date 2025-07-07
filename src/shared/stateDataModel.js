@@ -14,6 +14,7 @@ import { UNIT_PRESETS } from "./unitPreferences.js";
  */
 export function createStateDataModel(unitPreferences = UNIT_PRESETS.IMPERIAL) {
   return {
+    position: {},
     navigation: {
       position: {
         latitude: {
@@ -652,13 +653,14 @@ export function createStateDataModel(unitPreferences = UNIT_PRESETS.IMPERIAL) {
     tides: {},
     forecast: {},
     bluetooth: {
-      enabled: false,
+      enabled: true,
+      discovering: false,
       scanning: false,
       lastUpdated: null,
       devices: {},
       selectedDevices: {},
       status: {
-        state: 'disabled', // 'enabled', 'disabled', 'unauthorized', 'unsupported'
+        hardwareState: 'disabled', // e.g., 'poweredOn', 'poweredOff', 'unauthorized', 'unsupported'
         error: null
       }
     },

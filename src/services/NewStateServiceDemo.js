@@ -200,8 +200,6 @@ export class NewStateServiceDemo extends ContinuousService {
 
       this.isReady = true;
       this.emit && this.emit("ready");
-
-      return true;
     } catch (error) {
       this.log("Error starting service:", error);
       this.isReady = false;
@@ -596,7 +594,11 @@ export class NewStateServiceDemo extends ContinuousService {
 
       // Apply the data point to the state
       // this.log("Applying update:", JSON.stringify(dataPoint.data, null, 2));
-      const result = stateData.batchUpdate(dataPoint.data);
+      // Emit the raw patch for any provider services to consume
+    this.emit('sk-patch', dataPoint.data);
+
+    // Apply the data point to the state
+    const result = stateData.batchUpdate(dataPoint.data);
 
       if (result && result.error) {
         throw new Error(`Batch update failed: ${result.error}`);

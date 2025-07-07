@@ -47,7 +47,7 @@ export class DeviceManager {
    * @returns {Promise<Object>} The updated/created device
    */
   async registerDevice(id, data) {
-    console.log(`[DeviceManager] Registering device ${id} (${data.name || 'unnamed'})`);
+    // console.log(`[DeviceManager] Registering device ${id} (${data.name || 'unnamed'})`);
     
     if (!this.initialized) {
       console.log(`[DeviceManager] DeviceManager not initialized, initializing now...`);
@@ -115,8 +115,8 @@ export class DeviceManager {
     
     // Update in memory
     this.devices.set(id, device);
-    console.log(`[DeviceManager] Device ${id} updated in memory, total devices: ${this.devices.size}`);
-    console.log(`[DeviceManager] Device isSelected: ${device.isSelected}, in selectedDevices set: ${this.selectedDevices.has(id)}`);
+    // console.log(`[DeviceManager] Device ${id} updated in memory, total devices: ${this.devices.size}`);
+    // console.log(`[DeviceManager] Device isSelected: ${device.isSelected}, in selectedDevices set: ${this.selectedDevices.has(id)}`);
     
     // Only persist selected devices to storage with debouncing
     if (this.selectedDevices.has(id)) {

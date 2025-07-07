@@ -10,7 +10,7 @@ import EventEmitter from 'events';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { stateData } from './StateData.js';
-import { stateManager2 as stateManager } from '../relay/core/state/StateManager2.js';
+import { stateManager } from '../relay/core/state/StateManager.js';
 import sqlite3 from 'sqlite3';
 
 const __filename = fileURLToPath(import.meta.url);

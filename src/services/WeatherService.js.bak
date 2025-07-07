@@ -14,6 +14,9 @@ export class WeatherService extends ScheduledService {
   /** @type {string} */
   baseUrl;
   
+  /** @type {boolean} */
+  _isRunning;
+  
   /** @type {Promise|null} */
   _currentFetch;
   
@@ -34,6 +37,7 @@ export class WeatherService extends ScheduledService {
     
     this.stateService = stateService;
     this.baseUrl = 'https://api.open-meteo.com/v1/forecast';
+    this._isRunning = false;
     this._currentFetch = null;
     this._positionCheckInterval = null;
     this._updateTimeout = null;
@@ -114,18 +118,70 @@ export class WeatherService extends ScheduledService {
         await new Promise(resolve => setTimeout(resolve, 1000));
         
       } catch (error) {
-        this.logError('Error checking position:', error.message);
+        this.error('Error checking position:', error.message);
         // Continue waiting even if there's an error checking position
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
     
     const errorMsg = `Timed out waiting for position data after ${timeout}ms`;
-    this.logError(`${errorMsg}`);
+    this.error(`${errorMsg}`);
     throw new Error(errorMsg);
   }
 
-
+  /**
+   * Start the weather service
+   * @override
+   */
+  async start() {
+    if (this._isRunning) {
+      this.log('Service already running');
+      return;
+    }
+    
+    this._isRunning = true;
+    this.log('Starting weather service...');
+    
+    try {
+      // Initialize state service connection
+      await this._initializeStateService();
+      
+      // Start position updates listener - this runs this every 30 seconds - BAD
+      // this._startPositionUpdates();
+      
+      // Run initial update if runOnInit is true
+      if (this.options.runOnInit) {
+        await this.run();
+      }
+    } catch (error) {
+      this._isRunning = false;
+      this.error('Failed to start service:', error);
+      throw error;
+    }
+  }
+  
+  async stop() {
+    this.log('Stopping service...');
+    this._isRunning = false;
+    
+    // Cancel any in-progress fetch
+    if (this._currentFetch) {
+      try {
+        await this._currentFetch;
+      } catch (error) {
+        this.warn('Error during cleanup of in-progress fetch:', error);
+      }
+      this._currentFetch = null;
+    }
+    
+    // Clear any intervals
+    if (this._positionCheckInterval) {
+      clearInterval(this._positionCheckInterval);
+      this._positionCheckInterval = null;
+    }
+    
+    this.log('Service stopped');
+  }
   
   async _initializeStateService() {
     // Check if state service is available and has getState method
@@ -139,7 +195,7 @@ export class WeatherService extends ScheduledService {
       try {
         await this.stateService.initialize();
       } catch (error) {
-        this.logError('Error initializing state service:', error.message);
+        this.error('Error initializing state service:', error.message);
         throw new Error(`State service initialization failed: ${error.message}`);
       }
     }
@@ -147,7 +203,16 @@ export class WeatherService extends ScheduledService {
     this.log('State service is ready');
   }
   
-
+  _startPositionUpdates() {
+    // Check position every 30 seconds
+    this._positionCheckInterval = setInterval(() => {
+      if (this._isRunning) {
+        this.run().catch(error => {
+          this.error('Error in scheduled position update:', error);
+        });
+      }
+    }, 30000);
+  }
   
   async run() {
     if (this._currentFetch) {
@@ -186,7 +251,7 @@ export class WeatherService extends ScheduledService {
       
       return await this._currentFetch;
     } catch (error) {
-      this.logError('Error in run:', error);
+      this.error('Error in run:', error);
       this.emit('weather:error', { error: error.message });
       throw error;
     }
@@ -206,7 +271,7 @@ export class WeatherService extends ScheduledService {
       // Fall back to imperial defaults if no preferences found
       return UNIT_PRESETS.IMPERIAL;
     } catch (error) {
-      this.log('Could not get unit preferences, using defaults:', error.message);
+      this.warn('Could not get unit preferences, using defaults:', error.message);
       return UNIT_PRESETS.IMPERIAL;
     }
   }
@@ -228,7 +293,7 @@ export class WeatherService extends ScheduledService {
       } catch (error) {
         lastError = error;
         const waitTime = 1000 * Math.pow(2, attempt - 1); // Exponential backoff
-        this.log(`Attempt ${attempt} failed, retrying in ${waitTime}ms:`, error.message);
+        this.warn(`Attempt ${attempt} failed, retrying in ${waitTime}ms:`, error.message);
         
         if (attempt < retries) {
           await new Promise(resolve => setTimeout(resolve, waitTime));
@@ -236,7 +301,7 @@ export class WeatherService extends ScheduledService {
       }
     }
     
-    this.logError(`All ${retries} attempts failed`);
+    this.error(`All ${retries} attempts failed`);
     throw lastError;
   }
   
@@ -321,13 +386,13 @@ export class WeatherService extends ScheduledService {
 
         this.log('Successfully updated state with forecast data');
       } catch (error) {
-        this.logError('Error updating state:', error);
+        this.error('Error updating state:', error);
         throw error;
       }
    
       return forecastData;
     } catch (error) {
-      this.logError('Error fetching weather data:', error);
+      this.error('Error fetching weather data:', error);
       this.emit('error', error);
       throw error;
     }

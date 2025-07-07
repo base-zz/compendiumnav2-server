@@ -1,5 +1,5 @@
 // Simple script to print the current state
-import { stateManager2 as stateManager } from './src/relay/core/state/StateManager2.js';
+import { stateManager } from './src/relay/core/state/StateManager.js';
 
 // Wait for state to initialize
 setTimeout(() => {

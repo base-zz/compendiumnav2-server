@@ -1,6 +1,6 @@
 //@ts-nocheck
 import noble from "@abandonware/noble";
-import { promises as fs } from "fs";
+import fs from "fs/promises";
 import * as yaml from "js-yaml";
 import path from "path";
 import { fileURLToPath, URL } from "url";
@@ -344,17 +344,20 @@ export class BluetoothService extends ContinuousService {
       // Initialize DeviceManager with error handling
       try {
         // Check if there's a lock file and remove it if it exists
-        const fs = require('fs');
-        const path = require('path');
+
         const lockFilePath = path.join(process.cwd(), 'data', 'devices.db', 'LOCK');
         
-        if (fs.existsSync(lockFilePath)) {
+        try {
+          // Check for stale lock file and remove it asynchronously.
+          // fs.stat will throw an error if the file doesn't exist (e.g., code 'ENOENT').
+          await fs.stat(lockFilePath);
           this.log(`Found stale lock file at ${lockFilePath}, attempting to remove...`);
-          try {
-            fs.unlinkSync(lockFilePath);
-            this.log(`Successfully removed stale lock file`);
-          } catch (lockError) {
-            this.log(`Failed to remove lock file: ${lockError.message}`);
+          await fs.unlink(lockFilePath);
+          this.log(`Successfully removed stale lock file`);
+        } catch (error) {
+          if (error.code !== 'ENOENT') {
+            // Log errors other than 'file not found', as that is an expected case.
+            this.logError(`Error handling stale lock file: ${error.message}`);
           }
         }
         
@@ -612,7 +615,7 @@ export class BluetoothService extends ContinuousService {
         await fs.access(ymlPath);
         this.log("Located company identifier YAML file");
       } catch (err) {
-        this.error("YAML file does not exist:", err);
+        this.logError("YAML file does not exist:", err);
         return;
       }
 
@@ -690,7 +693,7 @@ export class BluetoothService extends ContinuousService {
         noble.on("stateChange", stateChangeHandler);
       });
     } catch (error) {
-      this.log(`Error loading company identifiers: ${error.message}`, "error");
+      this.logError(`Error loading company identifiers: ${error.message}`, "error");
       throw error; // Re-throw to allow caller to handle the error
     }
   }

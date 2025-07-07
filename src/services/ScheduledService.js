@@ -150,7 +150,7 @@ class ScheduledService extends BaseService {
       
       // Execute the task
       const startTime = process.hrtime();
-      const result = await this.run();
+      const result = await this.run.call(this);
       const [seconds, nanoseconds] = process.hrtime(startTime);
       const duration = Math.round((seconds * 1000) + (nanoseconds / 1000000));
       
@@ -205,9 +205,9 @@ class ScheduledService extends BaseService {
    * @override
    * @returns {Object} Service status
    */
-  status() {
+  getStatus() {
     return {
-      ...super.status(),
+      ...super.getStatus(),
       runCount: this.runCount,
       lastRun: this.lastRun,
       nextRun: this.nextRun,

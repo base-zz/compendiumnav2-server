@@ -2,6 +2,7 @@
 import "./module-alias.js";
 
 import dotenv from "dotenv";
+dotenv.config();
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import express from "express";
@@ -9,6 +10,8 @@ import { serviceManager } from "./services/ServiceManager.js";
 import newStateServiceDemo from "./services/NewStateServiceDemo.js";
 import { TidalService } from "./services/TidalService.js";
 import { WeatherService } from "./services/WeatherService.js";
+import { PositionService } from "./services/PositionService.js";
+import { SignalKPositionProvider } from "./services/SignalKPositionProvider.js";
 import {
   startRelayServer,
   startDirectServerWrapper,
@@ -20,8 +23,9 @@ import http from "http";
 import fs from "fs";
 import path from "path";
 import { stateData } from "./state/StateData.js";
-import { StateManager2 } from "./relay/core/state/StateManager2.js";
+import { StateManager } from "./relay/core/state/StateManager.js";
 import { BluetoothService } from "./services/BluetoothService.js";
+
 
 // Create Express app
 const app = express();
@@ -36,9 +40,6 @@ const __dirname = dirname(__filename);
 
 log("Loading .env file from:", resolve(__dirname, "../.env"));
 dotenv.config({ path: resolve(__dirname, "../.env") });
-
-// Using key-based authentication
-log("Authentication: key-based");
 
 // --- Helper to build the VPS URL ---
 function buildVpsUrl() {
@@ -99,7 +100,7 @@ async function bridgeStateToRelay() {
     "Starting state bridge and initializing dependent services"
   );
   const { stateManager2 } = await import(
-    "./relay/core/state/StateManager2.js"
+    "./relay/core/state/StateManager.js"
   );
   try {
     // Get the state service instance that was already created
@@ -108,25 +109,20 @@ async function bridgeStateToRelay() {
       throw new Error("State service not found in service manager");
     }
 
-    // Initialize StateManager2 with initial state
-    const stateManager = new StateManager2(stateData);
+    // Initialize StateManager with initial state
+    const stateManager = new StateManager(stateData);
     stateManager.initialState = stateService.getState();
 
-    // --- Wire up state events from provider to manager ---
-    log("Wiring NewStateServiceDemo to StateManager2");
-    stateService.on("state:patch", ({ data }) => {
-      try {
-        // log("'state:patch' event received. Forwarding to StateManager2.");
-        stateManager.applyPatchAndForward(data);
-      } catch (err) {
-        logError("Error applying patch in relay:", err);
-      }
-    });
+    // --- Wire up state events from all services to the manager ---
+    log("Wiring services to StateManager");
+
+    // Service event listeners are now attached via stateManager.listenToService()
+    // in the initializeSecondaryServices function for better modularity.
 
     stateService.on("state:full-update", ({ data }) => {
       try {
         log(
-          "'state:full-update' event received. Forwarding to StateManager2."
+          "'state:full-update' event received. Forwarding to StateManager."
         );
         stateManager.receiveExternalStateUpdate(data);
       } catch (err) {
@@ -138,13 +134,11 @@ async function bridgeStateToRelay() {
     });
 
     // --- Initialize secondary services ---
-    setTimeout(() => {
-      initializeSecondaryServices(stateManager, serviceManager);
-      stateService.startPlayback();
-      log(
-        "State bridge to relay activated and all services running."
-      );
-    }, 1000);
+    initializeSecondaryServices(stateManager, serviceManager);
+    stateService.startPlayback();
+    log("State bridge to relay activated and all services running.");
+
+    return stateManager;
   } catch (err) {
     logError("Failed to set up state bridge:", err);
     throw err;
@@ -158,166 +152,45 @@ async function initializeSecondaryServices(stateManager, serviceManager) {
   const stateService = serviceManager.getService("state");
   const tidalService = new TidalService(stateService);
   const weatherService = new WeatherService(stateService);
-  // Initialize BluetoothService with stateManager for direct state updates
+
+  // --- Initialize Position Service ---
+  const positionSources = {
+    signalk: { priority: 1, timeout: 10000 },
+    // Add other position sources here, e.g.:
+    // raymarine: { priority: 2, timeout: 5000 }
+  };
+  const positionService = new PositionService({ sources: positionSources });
+  const signalKProvider = new SignalKPositionProvider();
   const bluetoothService = new BluetoothService({
-    // Standard options from BluetoothServiceOptions
     scanDuration: 10000,
     scanInterval: 30000,
     debug: true,
     logLevel: "debug",
-    // Add stateManager reference for direct state integration
     stateManager: stateManager,
   });
 
   serviceManager.registerService("tidal", tidalService);
   serviceManager.registerService("weather", weatherService);
+  serviceManager.registerService("position", positionService);
+  serviceManager.registerService("signalk-position-provider", signalKProvider);
   serviceManager.registerService("bluetooth", bluetoothService);
 
-  // --- Wire up tide and weather updates back to the state manager ---
-  if (tidalService) {
-    tidalService.on("tide:update", (data) => {
-      log(
-        "Received tide:update, forwarding to state manager"
-      );
-      stateManager.setTideData(data);
-    });
-  }
+  // --- Wire up services to the State Manager ---
+  // StateManager will now listen for 'state:patch' events from these services.
+  log("Wiring services to StateManager...");
+  stateManager.listenToService(stateService);
+  stateManager.listenToService(positionService);
+  stateManager.listenToService(tidalService);
+  stateManager.listenToService(weatherService);
+  log("Service wiring complete.");
 
-  if (weatherService) {
-    weatherService.on("weather:update", (data) => {
-      log(
-        "Received weather:update, forwarding to state manager"
-      );
-      stateManager.setWeatherData(data);
-    });
-  }
+  // --- Start all services ---
+  log("Starting all registered services...");
+  await serviceManager.startAll();
 
-  if (bluetoothService) {
-    // Initialize the Bluetooth service with state manager
-       await bluetoothService.start();
-    }
- 
-  // --- Start all other services ---
-  log(
-    "Starting all services (Tidal, Weather, Bluetooth)..."
-  );
-  await serviceManager.startAll(); // This will start tidal and weather services
-
-  // --- Set up Bluetooth API endpoints ---
-  log("Setting up Bluetooth API endpoints...");
-  app.use(express.json());
-
-  // Bluetooth API endpoints
-  function setupBluetoothRoutes(app) {
-    try {
-      const bluetoothService = serviceManager.getService("bluetooth");
-      if (!bluetoothService) {
-        log(
-          "Bluetooth service not available. Bluetooth API endpoints will not be available."
-        );
-        return;
-      }
-
-      log("Bluetooth service found, setting up routes...");
-      const router = express.Router();
-
-      // Get list of discovered devices
-      router.get("/devices", async (req, res) => {
-        try {
-          const devices = bluetoothService.getDevices();
-          res.json(devices);
-        } catch (error) {
-          logError("Error getting devices:", error);
-          res.status(500).json({ error: "Failed to get devices" });
-        }
-      });
-
-      // Start/stop scanning
-      router.post("/scan", async (req, res) => {
-        try {
-          const { action } = req.body;
-          if (!action) {
-            return res.status(400).json({ error: "Action is required" });
-          }
-
-          if (action === "start") {
-            await bluetoothService.start();
-            res.json({
-              status: "scanning",
-              message: "Bluetooth scanning started successfully",
-            });
-          } else if (action === "stop") {
-            await bluetoothService.stop();
-            res.json({
-              status: "stopped",
-              message: "Bluetooth scanning stopped",
-            });
-          } else {
-            res.status(400).json({
-              error: "Invalid action",
-              validActions: ["start", "stop"],
-            });
-          }
-        } catch (error) {
-          logError("Error controlling scan:", error);
-          res.status(500).json({
-            error: "Failed to control scanning",
-            details: error.message,
-          });
-        }
-      });
-
-      // Get scan status
-      router.get("/status", (req, res) => {
-        try {
-          res.json({
-            status: "success",
-            data: {
-              isRunning: bluetoothService.isRunning,
-              isScanning: bluetoothService.scanning,
-              lastScan: bluetoothService.lastScanTime,
-              serviceAvailable: true,
-            },
-          });
-        } catch (error) {
-          logError("Error getting status:", error);
-          res.status(500).json({
-            error: "Failed to get status",
-            details: error.message,
-          });
-        }
-      });
-
-      // Health check endpoint
-      router.get("/health", (req, res) => {
-        res.json({
-          status: "ok",
-          service: "bluetooth",
-          available: true,
-          timestamp: new Date().toISOString(),
-        });
-      });
-
-      app.use("/api/bluetooth", router);
-      log(
-        "Bluetooth API endpoints registered at /api/bluetooth"
-      );
-    } catch (error) {
-      logError("Failed to set up Bluetooth routes:", error);
-    }
-  }
-
-  // Setup Bluetooth routes if service is available
-  if (serviceManager.getService("bluetooth")) {
-    setupBluetoothRoutes(app);
-  } else {
-    log(
-      "Bluetooth service not available. Bluetooth API endpoints will not be registered."
-    );
-  }
 }
 
-//////////////////////
+
 
 async function startDevServer() {
   try {
@@ -325,8 +198,13 @@ async function startDevServer() {
     log("Initializing services...");
     await initializeServices();
 
-    // 2. Bridge state to relay
-    await bridgeStateToRelay();
+    // 2. Bridge state to relay and get stateManager
+    const stateManager = await bridgeStateToRelay();
+    if (!stateManager) {
+      throw new Error(
+        "bridgeStateToRelay did not return a stateManager instance."
+      );
+    }
 
     // 3. Build relay and direct server configs
     const requiredVars = [
@@ -395,7 +273,7 @@ async function startDevServer() {
     relayConfig.reconnectInterval = parseInt(process.env.RECONNECT_DELAY, 10);
     relayConfig.maxRetries = parseInt(process.env.MAX_RETRIES, 10);
 
-    const relayServer = await startRelayServer(relayConfig);
+    const relayServer = await startRelayServer(stateManager, relayConfig);
 
     // Log when the relay server connects to the VPS
     if (relayServer && relayServer.vpsConnector) {

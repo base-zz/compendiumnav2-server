@@ -17,7 +17,7 @@ const { applyPatch } = pkg;
 
 const RECORD_DATA = false;
 
-export class StateManager2 extends EventEmitter {
+export class StateManager extends EventEmitter {
   getState() {
     const state = { ...(this.appState || {}) };
     return state;
@@ -53,8 +53,8 @@ export class StateManager2 extends EventEmitter {
   constructor(initialState) {
     super();
 
-    this.log = debug("cn2:state-manager2");
-    this.logError = debug("cn2:state-manager2:error");
+    this.log = debug("cn2:state-manager");
+    this.logError = debug("cn2:state-manager:error");
     
     // Initialize Bluetooth update queuing
     this._bluetoothDebounceDelays = {
@@ -162,6 +162,56 @@ export class StateManager2 extends EventEmitter {
   }
 
   /**
+   * Listens to a service for 'state:patch' events and forwards them.
+   * This is the primary mechanism for services to update the central state.
+   * @param {EventEmitter} service - The service instance to listen to.
+   */
+  listenToService(service) {
+    if (service && typeof service.on === 'function') {
+      const serviceName = service['name'] || 'unnamed service';
+      this.log(`Now listening to '${serviceName}' for events.`);
+
+      service.on('state:patch', ({ data }) => {
+        try {
+          this.log(`Received state:patch from '${serviceName}', forwarding.`);
+          this.applyPatchAndForward(data);
+        } catch (err) {
+          this.logError(`Error applying patch from '${serviceName}':`, err);
+        }
+      });
+
+      service.on('state:full-update', ({ data }) => {
+        try {
+          this.log(`Received state:full-update from '${serviceName}', forwarding.`);
+          this.setFullState(data);
+        } catch (err) {
+          this.logError(`Error applying full state update from '${serviceName}':`, err);
+        }
+      });
+
+      service.on('tide:update', (data) => {
+        try {
+          this.log(`Received tide:update from '${serviceName}', forwarding.`);
+          this.setTideData(data);
+        } catch (err) {
+          this.logError(`Error applying tide update from '${serviceName}':`, err);
+        }
+      });
+
+      service.on('weather:update', (data) => {
+        try {
+          this.log(`Received weather:update from '${serviceName}', forwarding.`);
+          this.setWeatherData(data);
+        } catch (err) {
+          this.logError(`Error applying weather update from '${serviceName}':`, err);
+        }
+      });
+    } else {
+      this.logError('listenToService called with an invalid service object.');
+    }
+  }
+
+  /**
    * Apply a JSON patch (RFC 6902) to the managed state and emit to clients.
    * Emits 'state:patch' with the patch array.
    * Triggers rule evaluation after patch is applied.
@@ -197,7 +247,7 @@ export class StateManager2 extends EventEmitter {
       applyPatch(currentState, validPatch, true, true);
 
       // this.log(
-      //   "[StateManager2] this.appState.navigation AFTER applyPatch:",
+      //   "[StateManager] this.appState.navigation AFTER applyPatch:",
       //   JSON.stringify(this.appState.navigation, null, 2)
       // );
 
@@ -216,16 +266,6 @@ export class StateManager2 extends EventEmitter {
         timestamp: Date.now(),
       });
 
-      // const payload = {
-      //   type: "state:patch",
-      //   data: validPatch,
-      //   boatId: this._boatId,
-      //   timestamp: Date.now(),
-      // };
-      // this.log(
-      //   "[StateManager2] PAYLOAD AFTER emit patch:",
-      //   JSON.stringify(payload, null, 2)
-      // );
 
       if (RECORD_DATA) {
         recordPatch(validPatch);
@@ -263,7 +303,7 @@ export class StateManager2 extends EventEmitter {
     // Always emit full state updates regardless of client count
     const timestamp = new Date().toISOString();
 
-    // this.log('[StateManager2][emitFullState] called. Anchor state:',
+    // this.log('[StateManager][emitFullState] called. Anchor state:',
     //   JSON.stringify(this.appState?.anchor, null, 2)
     // );
 
@@ -331,6 +371,19 @@ export class StateManager2 extends EventEmitter {
     this.emitFullState(); // Broadcast the change to all clients
   }
 
+  setFullState(data) {
+    if (!data) return;
+    this.appState = this._safeClone(data);
+    this.emit('state:full-update', { 
+      type: 'state:full-update',
+      data: this.appState,
+      boatId: this._boatId,
+      role: 'boat-server',
+      timestamp: Date.now(),
+    });
+    this.ruleEngine.updateState(this.appState);
+  }
+
   setWeatherData(weatherData) {
     if (!weatherData) return;
     this.weatherData = weatherData;
@@ -376,9 +429,9 @@ export class StateManager2 extends EventEmitter {
    * @param {Object} anchorData - The anchor data from the client
    */
   updateAnchorState(anchorData) {
-    this.log('[StateManager2][updateAnchorState] called. Stack:', new Error().stack);
+    this.log('[StateManager][updateAnchorState] called. Stack:', new Error().stack);
     if (!anchorData) {
-      this.log("[StateManager2] Received empty anchor data");
+      this.log("[StateManager] Received empty anchor data");
       return;
     }
 
@@ -386,13 +439,13 @@ export class StateManager2 extends EventEmitter {
     if (anchorData.anchorLocation && anchorData.anchorLocation.position) {
       const pos = anchorData.anchorLocation.position;
       this.log(
-        `[StateManager2] Anchor position: ${pos.latitude}, ${pos.longitude}`
+        `[StateManager] Anchor position: ${pos.latitude}, ${pos.longitude}`
       );
     }
 
     if (anchorData.rode) {
       this.log(
-        `[StateManager2] Rode length: ${anchorData.rode.value} ${anchorData.rode.unit}`
+        `[StateManager] Rode length: ${anchorData.rode.value} ${anchorData.rode.unit}`
       );
     }
 
@@ -402,7 +455,7 @@ export class StateManager2 extends EventEmitter {
     ) {
       const pos = anchorData.anchorDropLocation.position;
       this.log(
-        `[StateManager2] Drop position: ${pos.latitude}, ${pos.longitude}`
+        `[StateManager] Drop position: ${pos.latitude}, ${pos.longitude}`
       );
     }
 
@@ -414,8 +467,8 @@ export class StateManager2 extends EventEmitter {
 
       // Apply the patch using our existing method
       this.applyPatchAndForward(patch);
-      this.log('[StateManager2][updateAnchorState] anchor after update:', JSON.stringify(this.appState?.anchor, null, 2));
-      this.log("[StateManager2] Anchor state updated successfully");
+      this.log('[StateManager][updateAnchorState] anchor after update:', JSON.stringify(this.appState?.anchor, null, 2));
+      this.log("[StateManager] Anchor state updated successfully");
 
       return true;
     } catch (error) {
@@ -433,13 +486,13 @@ export class StateManager2 extends EventEmitter {
 
   applyDomainUpdate(update) {
     if (!update || typeof update !== "object") {
-      this.log("[StateManager2] Invalid update received:", update);
+      this.log("[StateManager] Invalid update received:", update);
       return;
     }
 
     // Debug logging
     this.log(
-      "[StateManager2] Applying domain update:",
+      "[StateManager] Applying domain update:",
       JSON.stringify(update)
     );
 
@@ -472,7 +525,7 @@ export class StateManager2 extends EventEmitter {
 
     // Debug logging
     // this.log(
-    //   "[StateManager2] State after update:",
+    //   "[StateManager] State after update:",
     //   JSON.stringify({
     //     anchor: this.appState.anchor, // Just log anchor instead of full state
     //     updateSize: Object.keys(update).length,
@@ -480,7 +533,7 @@ export class StateManager2 extends EventEmitter {
     // );
 
     if (!this.appState.anchor) {
-      this.log("[StateManager2] Anchor missing after update!");
+      this.log("[StateManager] Anchor missing after update!");
     }
 
     // Pass the update to the rule engine for evaluation
@@ -635,7 +688,7 @@ export class StateManager2 extends EventEmitter {
       this.appState.bluetooth.selectedDevices = selectedDevicesObj;
       
       // Log the change for debugging
-      this.log(`[StateManager2] Loaded ${Object.keys(selectedDevicesObj).length} selected devices as objects`);
+      this.log(`[StateManager] Loaded ${Object.keys(selectedDevicesObj).length} selected devices as objects`);
       
       // Emit initial state with the new object structure
       this.emit('state:patch', {
@@ -918,7 +971,7 @@ updateBluetoothDevice(device, updateType = 'update') {
   // this.log(`[DEBUG-STATE] Device update received: ${JSON.stringify(device, null, 2)}`);
 
   if (!device || !device.id) {
-    this.log('[StateManager2] Cannot update device: Invalid device object');
+    this.log('[StateManager] Cannot update device: Invalid device object');
     return;
   }
 
@@ -983,7 +1036,7 @@ updateBluetoothDevice(device, updateType = 'update') {
       return;
     }
     
-    this.log(`[StateManager2] Committing ${this._bluetoothDeviceQueue.size} Bluetooth device updates`);
+    this.log(`[StateManager] Committing ${this._bluetoothDeviceQueue.size} Bluetooth device updates`);
     
     // Clear any existing timeout for this update type
     if (this._bluetoothUpdateTimeouts && this._bluetoothUpdateTimeouts[updateType]) {
@@ -1084,7 +1137,7 @@ updateBluetoothDevice(device, updateType = 'update') {
    */
   updateBluetoothDeviceSensorData(deviceId, sensorData) {
     if (!deviceId || !sensorData) {
-      this.log('[StateManager2] Cannot update device sensor data: Invalid parameters');
+      this.log('[StateManager] Cannot update device sensor data: Invalid parameters');
       return false;
     }
 
@@ -1097,19 +1150,19 @@ updateBluetoothDevice(device, updateType = 'update') {
         status: {},
         lastUpdated: new Date().toISOString()
       };
-      this.log(`[StateManager2] Initialized Bluetooth state`);
+      this.log(`[StateManager] Initialized Bluetooth state`);
     }
 
     // Initialize devices object if it doesn't exist
     if (!this.appState.bluetooth.devices) {
       this.appState.bluetooth.devices = {};
-      this.log(`[StateManager2] Initialized Bluetooth devices object`);
+      this.log(`[StateManager] Initialized Bluetooth devices object`);
     }
 
     // Get the current device or create a new one
     const existingDevice = this.appState.bluetooth.devices[deviceId] || {};
     const isNewDevice = Object.keys(existingDevice).length === 0;
-    this.log(`[StateManager2] ${isNewDevice ? 'Creating new' : 'Updating existing'} device ${deviceId}`);
+    this.log(`[StateManager] ${isNewDevice ? 'Creating new' : 'Updating existing'} device ${deviceId}`);
     
     // Log sensor data preview
     const dataPreview = {};
@@ -1117,7 +1170,7 @@ updateBluetoothDevice(device, updateType = 'update') {
     if (sensorData.humidity) dataPreview.humidity = sensorData.humidity.value;
     if (sensorData.pressure) dataPreview.pressure = sensorData.pressure.value;
     if (sensorData.battery) dataPreview.battery = sensorData.battery.voltage?.value;
-    this.log(`[StateManager2] Sensor data for device ${deviceId}: ${JSON.stringify(dataPreview)}`);
+    this.log(`[StateManager] Sensor data for device ${deviceId}: ${JSON.stringify(dataPreview)}`);
     
     // Update the device with new sensor data
     const updatedDevice = {
@@ -1156,12 +1209,12 @@ updateBluetoothDevice(device, updateType = 'update') {
     });
     
     // Log state update completion
-    this.log(`[StateManager2] Updated state with sensor data for device ${deviceId}`);
-    this.log(`[StateManager2] Current state now has ${Object.keys(this.appState.bluetooth.devices).length} Bluetooth devices`);
+    this.log(`[StateManager] Updated state with sensor data for device ${deviceId}`);
+    this.log(`[StateManager] Current state now has ${Object.keys(this.appState.bluetooth.devices).length} Bluetooth devices`);
     
     // Log device details in state
     const deviceInState = this.appState.bluetooth.devices[deviceId];
-    this.log(`[StateManager2] Device ${deviceId} in state:`, {
+    this.log(`[StateManager] Device ${deviceId} in state:`, {
       name: deviceInState.name || 'Unknown',
       lastSeen: deviceInState.lastSeen,
       lastSensorUpdate: deviceInState.lastSensorUpdate,
@@ -1179,7 +1232,7 @@ updateBluetoothDevice(device, updateType = 'update') {
    */
   async updateBluetoothDeviceMetadata(deviceId, metadata) {
     if (!deviceId || !metadata) {
-      this.log('[StateManager2] Cannot update device metadata: Invalid parameters');
+      this.log('[StateManager] Cannot update device metadata: Invalid parameters');
       return false;
     }
 
@@ -1256,7 +1309,7 @@ updateBluetoothDevice(device, updateType = 'update') {
    */
   updateBluetoothScanningStatus(isScanning) {
     if (typeof isScanning !== 'boolean') {
-      this.log('[StateManager2] Invalid scanning status parameter, must be boolean');
+      this.log('[StateManager] Invalid scanning status parameter, must be boolean');
       return false;
     }
     
@@ -1289,7 +1342,7 @@ updateBluetoothDevice(device, updateType = 'update') {
    */
   toggleBluetooth(enabled) {
     if (typeof enabled !== 'boolean') {
-      this.log('[StateManager2] Invalid Bluetooth toggle parameter, must be boolean');
+      this.log('[StateManager] Invalid Bluetooth toggle parameter, must be boolean');
       return false;
     }
     
@@ -1301,4 +1354,4 @@ updateBluetoothDevice(device, updateType = 'update') {
   }
 }
 
-export const stateManager2 = new StateManager2();
+export const stateManager = new StateManager();

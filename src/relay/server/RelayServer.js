@@ -1,6 +1,6 @@
 import EventEmitter from "events";
 import debug from 'debug';
-import { StateManager2 } from "../core/state/StateManager2.js";
+import { StateManager } from "../core/state/StateManager.js";
 import { syncOrchestrator } from "./core/sync/SyncOrchestrator.js";
 import { VPSConnector } from "./services/VPSConnector.js";
 
@@ -33,7 +33,8 @@ export class RelayServer extends EventEmitter {
     this._stateVersion = 0;
     this._messageBuffer = [];
     this._maxBufferSize = 100;
-    this.stateManager = new StateManager2();
+    if (!config.stateManager) throw new Error('RelayServer requires a stateManager instance.');
+    this.stateManager = config.stateManager;
 
     // Client management
     this.clients = new Map();
@@ -97,6 +98,37 @@ export class RelayServer extends EventEmitter {
       });
       throw error;
     }
+  }
+
+  close() {
+    log('Closing RelayServer...');
+
+    // Clear maintenance intervals
+    for (const key in this._maintenanceIntervals) {
+      clearInterval(this._maintenanceIntervals[key]);
+    }
+
+    // Disconnect from VPS
+    if (this.vpsConnector) {
+      this.vpsConnector.disconnect();
+    }
+
+    // Remove all event listeners from the state manager that this instance created
+    if (this._stateEventHandler) {
+      this.stateManager.removeListener('state:full-update', this._stateEventHandler);
+      this.stateManager.removeListener('state:patch', this._stateEventHandler);
+    }
+    if (this._tideUpdateHandler) {
+      this.stateManager.removeListener('tide:update', this._tideUpdateHandler);
+    }
+    if (this._weatherUpdateHandler) {
+      this.stateManager.removeListener('weather:update', this._weatherUpdateHandler);
+    }
+    
+    // Remove all listeners on this emitter
+    this.removeAllListeners();
+
+    log('RelayServer closed.');
   }
 
   // ========== PRIVATE METHODS ========== //

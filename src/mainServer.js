@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { stateService, setStateManager } from "./state/StateService.js";
 import { startRelayServer, startDirectServer } from "./relay/server/index.js";
-import { stateManager2 as stateManager } from "./relay/core/state/StateManager2.js";
+import { stateManager } from "./relay/core/state/StateManager.js";
 import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
 import { registerVpsRoutes } from "./server/vps/registration.js";
 import debug from 'debug';

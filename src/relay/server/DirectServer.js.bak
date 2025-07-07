@@ -3,7 +3,6 @@ import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import debug from 'debug';
-import { stateManager } from "../core/state/StateManager.js";
 
 /**
  * @typedef {import('ws').WebSocket} WebSocket
@@ -18,6 +17,7 @@ import { stateManager } from "../core/state/StateManager.js";
  * @property {string} [role]
  * @property {NetSocket} [_socket]
  */
+import { stateManager2 as stateManager } from "../core/state/StateManager2.js";
 
 const log = debug('compendium:direct-server');
 const logWarn = debug('compendium:direct-server:warn');
@@ -30,16 +30,11 @@ const logTrace = debug('compendium:direct-server:trace');
  * @param {string} [options.host]
  * @param {boolean} [options.noServer]
  */
-
 // Get the directory name in ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-async function startDirectServer(stateManager, options = {}) {
-  if (!stateManager) throw new Error('StateManager instance must be provided');
-
-  
-
+async function startDirectServer(options = {}) {
   const PORT = options.port || parseInt(process.env.DIRECT_WS_PORT, 10);
   if (!PORT) throw new Error("DIRECT_WS_PORT must be specified");
   
@@ -74,13 +69,7 @@ async function startDirectServer(stateManager, options = {}) {
   
   // Start the HTTP server
   httpServer.listen(PORT, HOST, () => {
-    console.log(`[DIRECT] HTTP server running on http://${HOST}:${PORT}`);
-    console.log(`[DIRECT] WebSocket server should be available at ws://${HOST}:${PORT}`);
-  });
-  
-  // Add connection attempt listener to HTTP server
-  httpServer.on('upgrade', (request, socket, head) => {
-    console.log(`[DIRECT] Upgrade request received from ${request.socket.remoteAddress}`);
+    log(`HTTP server running on http://${HOST}:${PORT}`);
   });
   
   // Store the server instance for later use
@@ -109,10 +98,8 @@ async function startDirectServer(stateManager, options = {}) {
     const origin = request.headers.origin || 'unknown';
     let isAlive = true;
     
-    console.log(`[DIRECT] *** NEW CONNECTION *** from ${clientIp} (${clientId}), Origin: ${origin}`);
-    console.log(`[DIRECT] Active clients: ${wss.clients.size}`);
-    console.log(`[DIRECT] Request URL: ${request.url}`);
-    console.log(`[DIRECT] Request headers:`, request.headers);
+    log(`New connection from ${clientIp} (${clientId}), Origin: ${origin}`);
+    log(`Active clients: ${wss.clients.size}`);
     
     // Function to get a safe copy of the state
     const getSafeStateCopy = (state) => {
@@ -145,39 +132,21 @@ async function startDirectServer(stateManager, options = {}) {
 
     const onStateUpdate = (payload) => {
       console.log("----------------------------------------------------------");
-      console.log(`[DEBUG] onStateUpdate called for client ${clientId}`);
-      console.log(`[DEBUG] Payload type: ${payload?.type}`);
-      console.log(`[DEBUG] Sending state update to client ${clientId}:`, payload);
-      console.log(`[DEBUG] Client ${clientId} is alive:`, isAlive);
-      console.log(`[DEBUG] Client ${clientId} is open:`, ws.readyState === ws.OPEN);
-      console.log(`[DEBUG] Client readyState value: ${ws.readyState}`);
+      console.log(`Sending state update to client ${clientId}:`, payload);
+      console.log(`Client ${clientId} is alive:`, isAlive);
+      console.log(`Client ${clientId} is open:`, ws.readyState === ws.OPEN);
       console.log("----------------------------------------------------------");
 
       if (isAlive && ws.readyState === ws.OPEN) {
          ws.send(JSON.stringify(payload));
-         console.log(`[DEBUG] Message sent to client ${clientId}`);
-      } else {
-         console.log(`[DEBUG] Message NOT sent to client ${clientId} - client not alive or not open`);
       }
     };
 
     // Register event listeners
     stateManager.on('tide:update', onTideUpdate);
     stateManager.on('weather:update', onWeatherUpdate);
-    stateManager.on('state:patch', onStateUpdate);
     stateManager.on('state:full-update', onStateUpdate);
-    log(`[DIRECT] Client ${clientId}: Added state listeners. Total 'state:patch' listeners now: ${stateManager.listenerCount('state:patch')}`);
-    
-    // Test: Emit a state:patch event after client connects
-    setTimeout(() => {
-      console.log('[TEST] Emitting test state:patch event for client', clientId);
-      stateManager.emit('state:patch', {
-        type: 'state:patch',
-        data: [{ op: 'replace', path: '/test', value: 'test-value-' + Date.now() }],
-        boatId: 'test-boat',
-        timestamp: Date.now()
-      });
-    }, 2000);
+    stateManager.on('state:patch', onStateUpdate);
 
     // Function to send initial state
     const sendInitialState = () => {
@@ -424,23 +393,6 @@ async function startDirectServer(stateManager, options = {}) {
             return;
           }
           
-          // Handle identity messages
-          if (data.type === 'identity' && data.data) {
-            // Store identity info on the WebSocket connection
-            ws.clientId = data.data.clientId || clientId; // Use provided ID or fallback to generated ID
-            ws.platform = data.data.platform;
-            ws.role = data.data.role;
-            
-            log(`Identity received from ${clientId}:`, {
-              clientId: ws.clientId,
-              platform: ws.platform,
-              role: ws.role,
-              timestamp: new Date().toISOString(),
-              clientIp: clientIp
-            });
-            return;
-          }
-
           // Handle ping messages
           if (data.type === 'ping') {
             // Respond with a pong message
@@ -568,7 +520,17 @@ async function startDirectServer(stateManager, options = {}) {
     });
   }
 
+  // Store handler references for proper cleanup
+  // const fullUpdateHandler = (data) => broadcast('state:full-update', data);
+  // const patchHandler = (patch) => broadcast('state:patch', patch);
 
+  // Register state listeners
+  const stateEventHandler = (payload) => {
+    broadcast(payload);
+  }
+
+  stateManager.on('state:full-update', stateEventHandler);
+  stateManager.on('state:patch', stateEventHandler);
   
 
   // Log active client count for debugging
@@ -582,6 +544,129 @@ async function startDirectServer(stateManager, options = {}) {
     return count;
   }
   
+  wss.on("connection", (/** @type {WebSocket & ExtendedWebSocket} */ ws, req) => {
+    log(`[DIRECT] New connection from ${req.socket.remoteAddress}`);
+    
+    // Log active client count
+    log(`[DIRECT] Active clients: ${getActiveClientCount()}`);
+
+    // Send initial state ONLY to this client
+    ws.send(
+      JSON.stringify({
+        type: "state:full-update",
+        data: stateManager.getState(),
+        boatId: stateManager.boatId,
+        timestamp: Date.now()
+      }),
+      (err) => {
+        if (err) {
+          logError("[DIRECT] Initial state send failed:", err);
+          ws.terminate();
+          return;
+        }
+        log("[DIRECT] Initial state sent successfully");
+      }
+    );
+
+    // Handle incoming messages
+    // Type assertion for extended WebSocket properties
+    const extendedWs = /** @type {WebSocket & ExtendedWebSocket} */ (ws);
+    
+    ws.on("message", (data) => {
+      try {
+        // Safely parse message data whether it's a string or buffer
+        const rawMessage = data.toString();
+        log(`[DIRECT] Raw message received: ${rawMessage}`);
+        
+        const message = JSON.parse(rawMessage);
+        const socket = extendedWs._socket;
+        const clientIp = (socket && socket.remoteAddress) ? 
+          socket.remoteAddress : 'unknown';
+        
+        // Log all messages with more detail
+        log(`[DIRECT] Message received:`, {
+          type: message.type,
+          clientIp,
+          timestamp: new Date().toISOString(),
+          data: message.data ? '[...]' : 'none',
+          rawLength: rawMessage.length
+        });
+        
+        // Special handling for identity messages
+        if (message.type === 'identity' && message.data) {
+          // Store identity info on the WebSocket connection
+          extendedWs.clientId = message.data.clientId;
+          extendedWs.platform = message.data.platform;
+          extendedWs.role = message.data.role;
+          
+          log('[DIRECT] Identity received:', {
+            clientId: extendedWs.clientId,
+            platform: extendedWs.platform,
+            role: extendedWs.role,
+            timestamp: new Date().toISOString(),
+            clientIp: clientIp
+          });
+        }
+        
+        // Handle ping messages
+        if (message.type === 'ping') {
+          ws.send(JSON.stringify({
+            type: 'pong',
+            timestamp: Date.now()
+          }));
+        }
+        
+        // Handle anchor state updates
+        if (message.type === 'anchor:update' && message.data) {
+          log('[DIRECT] Processing anchor:update message:', JSON.stringify(message.data, null, 2));
+          try {
+            const success = stateManager.updateAnchorState(message.data);
+            log(`[DIRECT] Anchor update ${success ? 'succeeded' : 'failed'}`);
+            
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'anchor:update:ack',
+                success,
+                timestamp: Date.now(),
+                receivedData: message.data // Echo back the received data for debugging
+              }));
+            }
+          } catch (error) {
+            logError('[DIRECT] Error processing anchor update:', error);
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'error',
+                error: 'Failed to process anchor update',
+                details: error.message,
+                timestamp: Date.now()
+              }));
+            }
+          }
+          return;
+        }
+      } catch (e) {
+        logWarn("[DIRECT] Invalid message from client:", e);
+      }
+    });
+
+    // Setup heartbeat
+    const heartbeat = setInterval(() => {
+      if (ws.readyState === 1) ws.ping();  // 1 = OPEN
+    }, 30000);
+
+    // Cleanup on disconnect
+    ws.on("close", () => {
+      clearInterval(heartbeat);
+      log("[DIRECT] Client disconnected");
+      
+      // Log active client count
+      log(`[DIRECT] Active clients: ${getActiveClientCount()}`);
+    });
+
+    ws.on("error", (err) => {
+      logWarn("[DIRECT] Client error:", err);
+    });
+  });
 
   // Close all connections
   function closeAllConnections() {
@@ -596,8 +681,8 @@ async function startDirectServer(stateManager, options = {}) {
   function shutdown() {
     log("[DIRECT] Shutting down...");
 
-    // No need to remove global event listeners as they've been removed
-    // We rely on per-connection handlers which are cleaned up when connections close
+    stateManager.off('state:full-update', stateEventHandler);
+    stateManager.off('state:patch', stateEventHandler);
 
     // Close all connections
     wss.clients.forEach((client) => {

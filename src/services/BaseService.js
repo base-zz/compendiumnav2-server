@@ -18,34 +18,23 @@ class BaseService extends EventEmitter {
     this.isRunning = false;
     this.isReady = false; // Indicates if service is fully initialized
     this._dependencies = []; // Array of service names this service depends on
+    this.dependencies = {}; // Object to hold instances of resolved dependencies
     this.lastUpdated = null;
-    
+    /** @type {import('./ServiceManager.js').ServiceManager | null} */
+    this.serviceManager = null; // Injected by ServiceManager upon registration
+
     // Set up debug logging
     this.log = debug(`cn2:${name}-service`);
     this.logError = debug(`cn2:${name}-service:error`);
-    
+
     // Enable error logging by default
     if (this.logError.enabled === undefined) {
       debug.enable(`cn2:${name}-service:error`);
     }
     
-    this._eventEmitter = new EventEmitter();
-    
-    // Forward events from the internal emitter to this instance
-    this._eventEmitter.on('*', (event, ...args) => {
-      this.emit(event, ...args);
-    });
-    
     this.log(`Initialized ${name} service (${type})`);
   }
 
-  /**
-   * Start the service
-   * @emits {string} service:{name}:starting - Emitted when the service is starting
-   * @emits {string} service:{name}:started - Emitted when the service has started successfully
-   * @emits {Error} service:{name}:error - Emitted when an error occurs
-   * @returns {Promise<void>}
-   */
   /**
    * Add a service dependency
    * @param {string} serviceName - Name of the service to depend on
@@ -60,10 +49,48 @@ class BaseService extends EventEmitter {
   }
 
   /**
+   * Start the service
+   * @emits {string} service:{name}:starting - Emitted when the service is starting
+   * @emits {string} service:{name}:started - Emitted when the service has started successfully
+   * @emits {Error} service:{name}:error - Emitted when an error occurs
+   * @returns {Promise<void>}
+   */
+  async start() {
+    if (this.isRunning) {
+      this.log('Service is already running');
+      return;
+    }
+
+    try {
+      this.emit(`service:${this.name}:starting`);
+      this.log('Starting service');
+
+      // Wait for dependencies before starting
+      if (this.serviceManager) {
+        await this._waitForDependencies(this.serviceManager);
+      }
+
+      this.isRunning = true;
+      this.lastUpdated = new Date();
+      this.isReady = true; // Mark service as ready
+      this.emit(`service:${this.name}:started`);
+      this.log('Service started successfully and is ready');
+    } catch (error) {
+      this.isReady = false;
+      this.isRunning = false;
+      this.logError(`Failed to start service: ${error.message}`);
+      this.emit(`service:${this.name}:error`, error);
+      throw error; // Re-throw the error to be caught by the caller
+    }
+  }
+
+  /**
    * Wait for all dependencies to be ready
    * @private
-   * @param {ServiceManager} serviceManager - The service manager instance
+   * @param {import('./ServiceManager.js').ServiceManager} serviceManager - The service manager instance
    * @param {number} [timeout=10000] - Timeout in milliseconds
+   * @returns {Promise<void>}
+   * @throws {Error} If a dependency fails to become ready
    */
   async _waitForDependencies(serviceManager, timeout = 10000) {
     if (!this._dependencies || this._dependencies.length === 0) {
@@ -72,47 +99,16 @@ class BaseService extends EventEmitter {
 
     this.log(`Waiting for dependencies: ${this._dependencies.join(', ')}`);
     await Promise.all(
-      this._dependencies.map(name => 
-        serviceManager.waitForServiceReady(name, timeout)
-          .catch(error => {
-            throw new Error(`Dependency ${name} failed to become ready: ${error.message}`);
-          })
-      )
+      this._dependencies.map(async (name) => {
+        try {
+          await serviceManager.waitForServiceReady(name, timeout);
+          this.dependencies[name] = serviceManager.getService(name);
+          this.log(`Successfully resolved dependency: ${name}`);
+        } catch (error) {
+          throw new Error(`Dependency ${name} failed to become ready: ${error.message}`);
+        }
+      })
     );
-  }
-
-  async start() {
-    if (this.isRunning) {
-      this.log('Service is already running');
-      return;
-    }
-    
-    try {
-      this.emit(`service:${this.name}:starting`);
-      this.log('Starting service');
-      
-      // Wait for dependencies before starting
-      if (this.serviceManager) {
-        await this._waitForDependencies(this.serviceManager);
-      }
-      
-      this.isRunning = true;
-      this.lastUpdated = new Date();
-      
-      // Mark as ready after successful start
-      this.isReady = true;
-      this.emit(`service:${this.name}:started`, { timestamp: this.lastUpdated });
-      this.emit('ready');
-      this.log('Service started successfully and is ready');
-    } catch (error) {
-      this.logError('Failed to start service:', error);
-      this.emit(`service:${this.name}:error`, { 
-        error: error.message,
-        code: error.code,
-        timestamp: new Date()
-      });
-      throw error;
-    }
   }
 
   /**
@@ -150,67 +146,34 @@ class BaseService extends EventEmitter {
   }
 
   /**
-   * Get the current status of the service
-   * @returns {Object} Service status with the following structure:
-   * @property {string} name - Service name
-   * @property {string} type - Service type
-   * @property {boolean} isRunning - Whether the service is running
-   * @property {Date|null} lastUpdated - When the service was last updated
-   * @property {string} status - Human-readable status
+   * Get the status of the service
+   * @returns {{name: string, type: string, isRunning: boolean, isReady: boolean, lastUpdated: Date|null}}
    */
-  status() {
+  getStatus() {
     return {
       name: this.name,
       type: this.type,
       isRunning: this.isRunning,
-      lastUpdated: this.lastUpdated,
-      status: this.isRunning ? 'running' : 'stopped',
-      // Add any additional status information here
+      isReady: this.isReady,
+      lastUpdated: this.lastUpdated
     };
   }
-
+  
   /**
-   * Add a listener for a specific event
-   * @param {string} event - The event name
-   * @param {Function} listener - The callback function
-   * @returns {BaseService} This instance for chaining
+   * Event listener for when the service is ready
+   * @param {() => void} listener - The listener to call when the service is ready
+   * @returns {this}
    */
-  on(event, listener) {
-    super.on(event, listener);
+  onReady(listener) {
+    if (this.isReady) {
+      listener();
+    } else {
+      this.once(`service:${this.name}:started`, listener);
+    }
     return this;
   }
 
-  /**
-   * Add a one-time listener for a specific event
-   * @param {string} event - The event name
-   * @param {Function} listener - The callback function
-   * @returns {BaseService} This instance for chaining
-   */
-  once(event, listener) {
-    super.once(event, listener);
-    return this;
-  }
 
-  /**
-   * Remove a listener for a specific event
-   * @param {string} event - The event name
-   * @param {Function} listener - The callback function
-   * @returns {BaseService} This instance for chaining
-   */
-  off(event, listener) {
-    super.off(event, listener);
-    return this;
-  }
-
-  /**
-   * Emit an event
-   * @param {string} event - The event name
-   * @param {...*} args - Arguments to pass to the listeners
-   * @returns {boolean} True if the event had listeners, false otherwise
-   */
-  emit(event, ...args) {
-    return super.emit(event, ...args);
-  }
   
   /**
    * Wait until the service is ready
