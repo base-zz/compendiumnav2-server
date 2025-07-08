@@ -388,6 +388,29 @@ export class VPSConnector extends EventEmitter {
   }
 
   /**
+   * Gracefully shut down the connection and clean up resources
+   */
+  shutdown() {
+    log("Shutting down VPS connection...");
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+    if (this.connection) {
+      // Remove all listeners to prevent reconnection attempts
+      this.connection.removeAllListeners();
+      this.connection.close();
+      this.connection = null;
+    }
+    this.connected = false;
+    log("VPS connection shut down.");
+  }
+
+  /**
    * Send data to the VPS relay proxy
    * @param {Object|Array} data - Data to send
    * @returns {boolean} - Success status

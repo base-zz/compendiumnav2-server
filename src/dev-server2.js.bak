@@ -99,8 +99,8 @@ async function bridgeStateToRelay() {
   log(
     "Starting state bridge and initializing dependent services"
   );
-  const { StateManager } = await import(
-    "./relay/core/state/StateManager.js"
+  const { stateManager2 } = await import(
+    "./relay/core/state/StateManager2.js"
   );
   try {
     // Get the state service instance that was already created
@@ -110,7 +110,7 @@ async function bridgeStateToRelay() {
     }
 
     // Initialize StateManager2 with initial state
-    const stateManager = new StateManager(stateData);
+    const stateManager = new StateManager2(stateData);
     stateManager.initialState = stateService.getState();
 
     // --- Wire up state events from all services to the manager ---

@@ -37,6 +37,7 @@ export class WeatherService extends ScheduledService {
     this._currentFetch = null;
     this._positionCheckInterval = null;
     this._updateTimeout = null;
+    this._positionAvailable = false;
     
     // Set up a default position (can be overridden by state updates)
     this.position = {
@@ -52,6 +53,44 @@ export class WeatherService extends ScheduledService {
     // Initialize methods
     this._handlePositionUpdate = this._handlePositionUpdate?.bind?.(this) || (() => {});
     this._scheduleNextUpdate = this._scheduleNextUpdate?.bind?.(this) || (() => {});
+    this._onPositionAvailable = this._onPositionAvailable.bind(this);
+    
+    // Listen for position:available events from state service
+    if (stateService && typeof stateService.on === 'function') {
+      this.log('[WeatherService] Setting up position:available event listener');
+      stateService.on('position:available', this._onPositionAvailable);
+    }
+  }
+
+  /**
+   * Handle position:available event from state service
+   * @private
+   * @param {Object} positionData - Position data from event
+   */
+  _onPositionAvailable(positionData) {
+    if (!positionData || !positionData.latitude || !positionData.longitude) {
+      this.log('[WeatherService] Received position:available event but position data is invalid');
+      return;
+    }
+
+    this.log(`[WeatherService] Received position:available event: ${positionData.latitude}, ${positionData.longitude}`);
+    
+    // Update internal position state
+    this.position = {
+      latitude: positionData.latitude,
+      longitude: positionData.longitude
+    };
+    this._positionAvailable = true;
+    
+    // If we're not currently fetching, trigger a run with a slight delay
+    // to allow for any other state updates to complete
+    if (!this._currentFetch) {
+      this.log('[WeatherService] Position updated, scheduling weather data fetch');
+      clearTimeout(this._updateTimeout);
+      this._updateTimeout = setTimeout(() => {
+        this.run().catch(err => this.logError('[WeatherService] Error running after position update:', err));
+      }, 1000); // 1 second delay
+    }
   }
 
   /**
@@ -76,24 +115,56 @@ export class WeatherService extends ScheduledService {
    * @param {number} timeout - Timeout in milliseconds
    * @returns {Promise<{latitude: number, longitude: number}>}
    */
-  async _waitForPosition(timeout = 60000) {
+  async _waitForPosition(timeout = 300000) { // 5 minutes timeout
+    // First check if we already have position from an event
+    if (this._positionAvailable && this.position?.latitude != null && this.position?.longitude != null) {
+      this.log(`[WeatherService] Using position from event: ${this.position.latitude}, ${this.position.longitude}`);
+      return { 
+        latitude: this.position.latitude, 
+        longitude: this.position.longitude 
+      };
+    }
+    
     const startTime = Date.now();
     let lastLogTime = 0;
     const logInterval = 5000; // Log every 5 seconds
+    let attemptCount = 0;
+    
+    this.log("[WeatherService] Starting to wait for position data with timeout of", timeout, "ms");
+    
+    // Log the state service instance for debugging
+    this.log("[WeatherService] State service instance:", {
+      type: this.stateService.constructor.name,
+      serviceId: this.stateService.serviceId,
+      stateServiceRef: this.stateService
+    });
     
     while (Date.now() - startTime < timeout) {
+      attemptCount++;
       try {
         // Get the current state
-        const state = this.stateService.getState();
+        const stateData = this.stateService.getState();
+        
+        // Add memory address/reference logging to help debug instance sharing
+        const stateRef = `${stateData}`;
+        
+        this.log(`[WeatherService] Got state data (attempt ${attemptCount}):`, {
+          hasStateData: !!stateData,
+          stateDataType: typeof stateData,
+          stateRef: stateRef,
+          hasNavigation: !!stateData?.navigation,
+          hasPosition: !!stateData?.navigation?.position
+        });
         
         // Check if we have valid position data
-        const position = state?.navigation?.position;
+        const position = stateData?.navigation?.position;
         if (position?.latitude?.value != null && position?.longitude?.value != null) {
           const lat = Number(position.latitude.value);
           const lon = Number(position.longitude.value);
           
           // Validate the position values
           if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+            this.log(`[WeatherService] Found valid position in state: ${lat}, ${lon}`);
             return { latitude: lat, longitude: lon };
           }
         }
@@ -101,11 +172,11 @@ export class WeatherService extends ScheduledService {
         // Log every 5 seconds
         const now = Date.now();
         if (now - lastLogTime >= logInterval) {
-          this.log(`Waiting for valid position data... (${Math.round((now - startTime) / 1000)}s elapsed)`);
-          this.log('Current position state:', JSON.stringify({
+          this.log(`[WeatherService] Waiting for valid position data... (${Math.round((now - startTime) / 1000)}s elapsed)`);
+          this.log('[WeatherService] Current position state:', JSON.stringify({
             hasPosition: !!position,
-            latitude: position?.latitude,
-            longitude: position?.longitude
+            latitude: position?.latitude?.value,
+            longitude: position?.longitude?.value
           }, null, 2));
           lastLogTime = now;
         }
@@ -114,14 +185,14 @@ export class WeatherService extends ScheduledService {
         await new Promise(resolve => setTimeout(resolve, 1000));
         
       } catch (error) {
-        this.logError('Error checking position:', error.message);
+        this.logError('[WeatherService] Error checking position:', error.message);
         // Continue waiting even if there's an error checking position
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
     
     const errorMsg = `Timed out waiting for position data after ${timeout}ms`;
-    this.logError(`${errorMsg}`);
+    this.logError(`[WeatherService] ${errorMsg}`);
     throw new Error(errorMsg);
   }
 

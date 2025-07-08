@@ -54,6 +54,14 @@ export class NewStateServiceDemo extends ContinuousService {
   }
 
   /**
+   * Returns the current state object.
+   * @returns {object} The application state.
+   */
+  getState() {
+    return stateData;
+  }
+
+  /**
    * Initialize the state data structures according to Signal K specification
    * @private
    */
@@ -115,50 +123,16 @@ export class NewStateServiceDemo extends ContinuousService {
       }
 
       this.log("State initialized with Signal K structure");
-      this.log("State structure:", {
-        hasVessels: !!stateData.vessels,
-        hasSelfVessel: !!(stateData.vessels && stateData.vessels.self),
-        hasPosition: !!stateData.vessels?.self?.navigation?.position,
-        hasBatchUpdate: typeof stateData.batchUpdate === "function",
-      });
+      // this.log("State structure:", {
+      //   hasVessels: !!stateData.vessels,
+      //   hasSelfVessel: !!(stateData.vessels && stateData.vessels.self),
+      //   hasPosition: !!stateData.vessels?.self?.navigation?.position,
+      //   hasBatchUpdate: typeof stateData.batchUpdate === "function",
+      // });
     } catch (error) {
       this.log("Error initializing state:", error);
       throw error;
     }
-
-    // Mock data state
-    this.mockState = {
-      tanks: {
-        freshWater1: { level: 100 },
-        freshWater2: { level: 95 },
-        wasteWater1: { level: 10 },
-        wasteWater2: { level: 15 },
-        blackWater1: { level: 20 },
-        blackWater2: { level: 25 },
-      },
-      batteries: {
-        battery1: { level: 95, voltage: 12.5, current: 5.2 },
-        battery2: { level: 90, voltage: 12.3, current: 4.8 },
-        battery3: { level: 85, voltage: 12.4, current: 5.0 },
-        battery4: { level: 80, voltage: 12.2, current: 4.5 },
-      },
-      engines: {
-        engine1: {
-          running: false,
-          rpm: 0,
-          hours: 1200,
-          temp: 70,
-          oilPressure: 0,
-        },
-        engine2: {
-          running: false,
-          rpm: 0,
-          hours: 1100,
-          temp: 70,
-          oilPressure: 0,
-        },
-      },
-    };
   }
 
   // ====================
@@ -172,10 +146,10 @@ export class NewStateServiceDemo extends ContinuousService {
 
     try {
       // Initialize database connection
-      await this._initializeDatabase();
+      await this.connectToDatabase();
 
       // Load initial state data
-      const initialStateLoaded = await this._loadInitialData();
+      const initialStateLoaded = await this.loadInitialData();
 
       if (!initialStateLoaded) {
         this.log("Warning: Could not load initial state from database");
@@ -183,20 +157,23 @@ export class NewStateServiceDemo extends ContinuousService {
         this._initializeState();
       }
 
+      // Start mock data generation
+      this.startMockDataUpdates();
+
       // Mark as ready after initial data is loaded
       this.isReady = true;
       this.emit("ready");
 
       // Log initial state before loading any data
-      this.log("[StateService] Initial state before loading data:", {
-        hasStateData: !!stateData,
-        hasVessels: !!(stateData && stateData.vessels),
-        hasSelfVessel: !!(
-          stateData &&
-          stateData.vessels &&
-          stateData.vessels.self
-        ),
-      });
+      // this.log("[StateService] Initial state before loading data:", {
+      //   hasStateData: !!stateData,
+      //   hasVessels: !!(stateData && stateData.vessels),
+      //   hasSelfVessel: !!(
+      //     stateData &&
+      //     stateData.vessels &&
+      //     stateData.vessels.self
+      //   ),
+      // });
 
       this.isReady = true;
       this.emit && this.emit("ready");
@@ -257,13 +234,24 @@ export class NewStateServiceDemo extends ContinuousService {
       // Load recorded data
       await this.loadRecordedData();
 
-      this.log("[StateService] Loaded ---->>>>>>>>>>>", this.recordedData.length, "rows from DB");
-
+      this.log(
+        "[StateService] Loaded ---->>>>>>>>>>>>",
+        this.recordedData.length,
+        "rows from DB"
+      );
 
       // Start with the first data point
       if (this.recordedData.length > 0) {
         this.startPlayback();
+        
+        // Mark as ready and emit ready event after data is loaded
+        this.isReady = true;
+        this.emit("ready");
+        this.log("[StateService] Emitted ready event after loading initial data");
+        
+        return true;
       }
+      return false;
     } catch (error) {
       this.log("Error loading initial data:", error);
       throw error;
@@ -343,17 +331,12 @@ export class NewStateServiceDemo extends ContinuousService {
     }
   }
 
-  async createFilteredTable() {
-    // Implementation for creating the filtered table
-    // This would be similar to the existing _createFilteredTable method
-    // but with better error handling and logging
-  }
-
   // ====================
   // Playback Methods
   // ====================
 
   startPlayback(speed = this.config.defaultPlaybackSpeed) {
+    console.log("FIRST Starting playback at", speed, "x speed");
     if (this.isPlaying) return;
 
     this.log(`Starting playback at ${speed}x speed`);
@@ -418,7 +401,6 @@ export class NewStateServiceDemo extends ContinuousService {
         this.currentIndex++;
         return this.playNext(); // Skip to next point
       }
-
 
       if (this.currentIndex % 10 === 0) {
         this.log(
@@ -554,78 +536,75 @@ export class NewStateServiceDemo extends ContinuousService {
     }
 
     try {
-      // this.log(
-      //   `[StateService] Starting applyDataPoint at ${new Date().toISOString()}`
-      // );
-      // this.log(
-      //   `[StateService] Input dataPoint:`,
-      //   JSON.stringify(dataPoint, null, 2)
-      // );
-
       // Log the first few paths being updated for debugging
       const paths = Object.keys(dataPoint.data);
       // this.log(`Updating ${paths.length} paths, first few:`, paths.slice(0, 3));
+      
+      // Log the full data structure for debugging
+      // this.log("DataPoint structure:", JSON.stringify(dataPoint.data, null, 2));
 
       if (!stateData || typeof stateData.batchUpdate !== "function") {
         throw new Error("stateData.batchUpdate is not a function");
       }
-
-      // Debug: Log the position data if it exists
-      // if (dataPoint.data.some((patch) => patch.path.includes("position"))) {
-      //   const positionPatch = dataPoint.data.find(
-      //     (p) => p.path === "/navigation/position"
-      //   );
-      //   if (positionPatch) {
-      //     this.log(
-      //       `Position update: ${JSON.stringify(positionPatch.value, null, 2)}`
-      //     );
-      //   }
-      // }
-
-      // // Log state before update
-      // let beforeState = {};
-      // if (stateData.getState) {
-      //   beforeState.position = stateData.getState("/navigation/position");
-      //   beforeState.timestamp = stateData.getState(
-      //     "/navigation/position/timestamp"
-      //   );
-      // }
-      // // this.log("State BEFORE update:", JSON.stringify(beforeState, null, 2));
-
-      // Apply the data point to the state
-      // this.log("Applying update:", JSON.stringify(dataPoint.data, null, 2));
-      // Emit the raw patch for any provider services to consume
-    this.emit('sk-patch', dataPoint.data);
-
-    // Apply the data point to the state
-    const result = stateData.batchUpdate(dataPoint.data);
-
-      if (result && result.error) {
-        throw new Error(`Batch update failed: ${result.error}`);
+      
+      // Find position patch
+      const positionPatch = dataPoint.data.find(patch =>
+        patch.path === "/navigation/position" && patch.value &&
+        patch.value.latitude && patch.value.longitude);
+      
+      if (positionPatch) {
+        
+        // Ensure navigation and position exist
+        if (!stateData.navigation) {
+          this.log("Creating navigation object in state");
+          stateData.navigation = {};
+        }
+        
+        if (!stateData.navigation.position) {
+          this.log("Creating position structure in state");
+          stateData.navigation.position = {
+            latitude: { value: null, units: "deg", label: "Lat", displayLabel: "Latitude", description: "Latitude" },
+            longitude: { value: null, units: "deg", label: "Lon", displayLabel: "Longitude", description: "Longitude" },
+            timestamp: null
+          };
+        } else {
+          this.log("Position structure already exists in state");
+        }
+        
+        // Apply position values directly
+        const oldLat = stateData.navigation.position.latitude.value;
+        const oldLon = stateData.navigation.position.longitude.value;
+        const oldTimestamp = stateData.navigation.position.timestamp;
+        
+        stateData.navigation.position.latitude.value = positionPatch.value.latitude.value;
+        stateData.navigation.position.longitude.value = positionPatch.value.longitude.value;
+        stateData.navigation.position.timestamp = positionPatch.value.timestamp;
+        
+        this.log(`Applied position directly: lat=${stateData.navigation.position.latitude.value} (was ${oldLat}), lon=${stateData.navigation.position.longitude.value} (was ${oldLon}), timestamp=${stateData.navigation.position.timestamp} (was ${oldTimestamp})`);
+      } else {
+        this.log("No position patch found in this data point");
       }
-
-      // Log state after update
-      // let afterState = {};
-      // if (stateData.getState) {
-      //   afterState.position = stateData.getState("/navigation/position");
-      //   afterState.timestamp = stateData.getState(
-      //     "/navigation/position/timestamp"
-      //   );
-      //   afterState.allPositionPaths = stateData.getState(
-      //     "/navigation/position/*"
-      //   );
-      // }
-      // this.log("State AFTER update:", JSON.stringify(afterState, null, 2));
-
-      // Log the raw state data structure if available
-      // if (stateData.getState) {
-      //   try {
-      //     const rawState = stateData.getState("*");
-      //     this.log("Raw state keys:", Object.keys(rawState || {}));
-      //   } catch (e) {
-      //     this.log("Could not get raw state:", e.message);
-      //   }
-      // }
+      
+      // Apply all patches
+      this.log("Applying all patches via batchUpdate...");
+      const result = stateData.batchUpdate(dataPoint.data);
+      if (result && result.error) {
+        this.log("Batch update failed with error:", result.error);
+        throw new Error(`Batch update failed: ${result.error}`);
+      } else {
+        this.log("Batch update completed successfully");
+      }
+      
+      // Emit an event if position data is available after update
+      if (stateData.navigation?.position?.latitude?.value != null && 
+          stateData.navigation?.position?.longitude?.value != null) {
+        this.log("Emitting position:available event");
+        this.emit('position:available', {
+          latitude: stateData.navigation.position.latitude.value,
+          longitude: stateData.navigation.position.longitude.value,
+          timestamp: stateData.navigation.position.timestamp
+        });
+      }
 
       // Emit event for listeners
       const updateEvent = {
@@ -828,10 +807,6 @@ export class NewStateServiceDemo extends ContinuousService {
   // ====================
   // Public API
   // ====================
-
-  getState() {
-    return stateData.getState();
-  }
 
   async waitUntilReady(timeout = 5000) {
     if (this.isReady) return Promise.resolve();

@@ -1,4 +1,5 @@
 import ScheduledService from './ScheduledService.js';
+import { fetchWeatherApi } from 'openmeteo';
 
 export class TidalService extends ScheduledService {
   constructor(stateService) {

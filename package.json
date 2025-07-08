@@ -11,10 +11,6 @@
     "dev2": "node -r module-alias/register src/dev-server2.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "_moduleAliases": {
-    "@capacitor/preferences": "./src/mocks/capacitor-preferences.js",
-    "@compendiumnav2/shared": "./src/shared"
-  },
   "dependencies": {
     "@abandonware/noble": "^1.9.2-15",
     "@capacitor/app": "^7.0.1",
