@@ -2,9 +2,9 @@ import { EventEmitter } from 'events';
 import debounce from 'lodash/debounce.js';
 import debug from 'debug';
 
-const log = debug('compendium:rule-engine2');
-const logWarn = debug('compendium:rule-engine2:warn');
-const logError = debug('compendium:rule-engine2:error');
+const log = debug('rule-engine2');
+const logWarn = debug('rule-engine2:warn');
+const logError = debug('rule-engine2:error');
 
 /**
  * Optimized Rule Engine for Raspberry Pi (including Pi Zero)

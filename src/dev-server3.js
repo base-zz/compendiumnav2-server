@@ -11,7 +11,6 @@ import { NewStateServiceDemo } from "./services/NewStateServiceDemo.js";
 import { TidalService } from "./services/TidalService.js";
 import { WeatherService } from "./services/WeatherService.js";
 import { PositionService } from "./services/PositionService.js";
-import { SignalKPositionProvider } from "./services/SignalKPositionProvider.js";
 import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
 import { registerVpsRoutes } from "./server/vps/registration.js";
 import debug from "debug";
@@ -32,8 +31,8 @@ const app = express();
 app.use(express.json());
 const server = http.createServer(app);
 
-const log = debug("cn2:dev-server3");
-const logError = debug("cn2:error:dev-server3");
+const log = debug("dev-server3");
+const logError = debug("error:dev-server3");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -84,22 +83,39 @@ async function initializeServices() {
     log("State service is ready, initializing other services...");
 
     // Initialize other services with the ready state service
+    log("Creating service instances...");
     const bluetoothService = new BluetoothService();
-    const positionService = new PositionService(newStateService);
-    const tidalService = new TidalService(newStateService);
-    const weatherService = new WeatherService(newStateService);
+    log("BluetoothService created");
+    
+    // Initialize PositionService with source configurations
+    const positionSources = {
+      gps: { priority: 1, timeout: 10000 },
+      ais: { priority: 2, timeout: 15000 },
+      state: { priority: 3, timeout: 20000 }
+    };
+    const positionService = new PositionService({ sources: positionSources });
+    const tidalService = new TidalService(newStateService, positionService);
+    const weatherService = new WeatherService(newStateService, positionService);
 
+    log("Registering services with serviceManager...");
     serviceManager.registerService("bluetooth", bluetoothService);
-    serviceManager.registerService("position", positionService);
-    serviceManager.registerService("tide", tidalService);
-    serviceManager.registerService("weather", weatherService);
+    log("Registered bluetooth service");
+    
+    serviceManager.registerService("position-service", positionService);
+    log("Registered position service");
+    
+    serviceManager.registerService("tidal-service", tidalService);
+    log("Registered tide service");
+    
+    serviceManager.registerService("weather-service", weatherService);
+    log("Registered weather service");
     // State service already registered above
     
 
     // --- Register Transport Servers as Services ---
     const directConfig = {
-      port: process.env.DIRECT_PORT || 3001,
-      host: process.env.DIRECT_HOST || "localhost",
+      port: process.env.DIRECT_WS_PORT || 3001,
+      host: process.env.DIRECT_WS_HOST || "localhost",
     };
     const directServer = new DirectServer(directConfig);
     serviceManager.registerService("direct", directServer);
@@ -112,8 +128,15 @@ async function initializeServices() {
     const relayServer = new RelayServer(relayConfig);
     serviceManager.registerService("relay", relayServer);
 
+    log("Starting all services via serviceManager.startAll()...");
     await serviceManager.startAll();
-    log("All services started.");
+    log("All services started successfully.");
+    
+    // Log the status of key services
+    log("Service status check:");
+    log("- TidalService running:", tidalService.isRunning);
+    log("- WeatherService running:", weatherService.isRunning);
+    log("- PositionService running:", positionService.isRunning);
   } catch (error) {
     logError("Error initializing services:", error);
     throw error;
@@ -131,6 +154,45 @@ async function startDevServer() {
     const stateService = serviceManager.getService("state");
     const initialState = stateService.getState();
     const stateManager = new StateManager(initialState);
+    
+    // Connect the StateManager to the state service
+    log("Connecting StateManager to state service events");
+    stateService.on('state:patch', (patch) => {
+      log("Forwarding state:patch from stateService to stateManager");
+      stateManager.emit('state:patch', patch);
+    });
+    
+    stateService.on('state:full-update', (state) => {
+      log("Forwarding state:full-update from stateService to stateManager");
+      stateManager.emit('state:full-update', state);
+    });
+    
+    // Connect the StateManager to listen for tide and weather updates
+    log("Connecting StateManager to tidal and weather services");
+    const tidalService = serviceManager.getService("tidal-service");
+    const weatherService = serviceManager.getService("weather-service");
+    const positionService = serviceManager.getService("position-service");
+    
+    if (tidalService) {
+      log("Connecting TidalService to StateManager");
+      stateManager.listenToService(tidalService);
+    } else {
+      logError("TidalService not found in serviceManager");
+    }
+    
+    if (weatherService) {
+      log("Connecting WeatherService to StateManager");
+      stateManager.listenToService(weatherService);
+    } else {
+      logError("WeatherService not found in serviceManager");
+    }
+    
+    if (positionService) {
+      log("Connecting PositionService to StateManager");
+      stateManager.listenToService(positionService);
+    } else {
+      logError("PositionService not found in serviceManager");
+    }    
     const stateMediator = new StateMediator({ stateManager });
 
     // --- 4. Register transports with the mediator ---
@@ -139,10 +201,25 @@ async function startDevServer() {
     stateMediator.registerTransport(directServerInstance);
     stateMediator.registerTransport(relayServerInstance);
     log("All transports registered with StateMediator.");
+    
+    // Set up a test interval to trigger state updates for debugging
+    const testStateUpdateInterval = setInterval(() => {
+      log("Triggering test state update from StateManager");
+      // Emit state:patch event with the correct format
+      stateManager.emit("state:patch", {
+        type: "state:patch",
+        data: [
+          { op: "replace", path: "/test/serverTimestamp", value: Date.now() },
+          { op: "replace", path: "/test/message", value: "Test update from dev-server3" }
+        ],
+        timestamp: Date.now()
+      });
+      log("Test state update triggered");
+    }, 15000); // Every 15 seconds
 
     // --- 6. Setup Express API routes ---
-    const boatInfo = await getBoatInfo();
-    registerBoatInfoRoutes(app, boatInfo);
+    await getBoatInfo(); // Get boat info but don't pass it to registerBoatInfoRoutes
+    registerBoatInfoRoutes(app); // Only pass the app parameter
     const relayServer = serviceManager.getService("relay");
     registerVpsRoutes(app, { vpsUrl: relayServer.config.vpsUrl });
 

@@ -6,7 +6,7 @@ export async function initializeServices() {
     
     // Create service instances with proper dependency injection
     const stateService = new StateService();
-    const weatherService = new WeatherService(stateService);
+    const weatherService = new WeatherService();
     const tidalService = new TidalService(stateService);
 
     // Register services

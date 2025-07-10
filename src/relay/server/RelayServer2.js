@@ -2,8 +2,8 @@ import EventEmitter from "events";
 import debug from 'debug';
 import { VPSConnector } from "./services/VPSConnector.js";
 
-const log = debug('cn2:relay');
-const logError = debug('cn2:error:relay');
+const log = debug('relay');
+const logError = debug('error:relay');
 
 /**
  * A complete, mediator-compliant server that connects to a remote VPS.

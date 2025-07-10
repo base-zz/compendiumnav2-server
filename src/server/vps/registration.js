@@ -3,7 +3,7 @@ import http from 'http';
 import { getBoatInfo } from '../api/boatInfo.js';
 import debug from 'debug';
 
-const log = debug('compendium:server:vps:registration');
+const log = debug('server:vps:registration');
 
 /**
  * Registers the boat with the VPS

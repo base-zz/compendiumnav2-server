@@ -598,11 +598,24 @@ export class NewStateServiceDemo extends ContinuousService {
       // Emit an event if position data is available after update
       if (stateData.navigation?.position?.latitude?.value != null && 
           stateData.navigation?.position?.longitude?.value != null) {
-        this.log("Emitting position:available event");
-        this.emit('position:available', {
+        this.log("Emitting position:update event with data:", {
           latitude: stateData.navigation.position.latitude.value,
           longitude: stateData.navigation.position.longitude.value,
           timestamp: stateData.navigation.position.timestamp
+        });
+        this.emit('position:update', {
+          latitude: stateData.navigation.position.latitude.value,
+          longitude: stateData.navigation.position.longitude.value,
+          timestamp: stateData.navigation.position.timestamp
+        });
+        this.log("position:update event emitted");
+      } else {
+        this.log("Not emitting position:update event - missing position data", {
+          hasPosition: !!stateData.navigation?.position,
+          hasLatitude: !!stateData.navigation?.position?.latitude,
+          hasLatValue: stateData.navigation?.position?.latitude?.value != null,
+          hasLongitude: !!stateData.navigation?.position?.longitude,
+          hasLonValue: stateData.navigation?.position?.longitude?.value != null
         });
       }
 

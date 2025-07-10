@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DirectServer2 Test Client</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+        }
+        #connection-status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .connecting {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        #message-log {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .received {
+            background-color: #e2f0fb;
+            border-left: 4px solid #0d6efd;
+        }
+        .sent {
+            background-color: #e2fbea;
+            border-left: 4px solid #198754;
+        }
+        .error {
+            background-color: #fbe2e2;
+            border-left: 4px solid #dc3545;
+        }
+        .system {
+            background-color: #f0e2fb;
+            border-left: 4px solid #6f42c1;
+        }
+        pre {
+            white-space: pre-wrap;
+            margin: 5px 0;
+            font-family: monospace;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #0d6efd;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #0b5ed7;
+        }
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>DirectServer2 Test Client</h1>
+    
+    <div id="connection-status" class="disconnected">Disconnected</div>
+    
+    <div>
+        <button id="connect-btn">Connect</button>
+        <button id="disconnect-btn" disabled>Disconnect</button>
+        <button id="clear-log-btn">Clear Log</button>
+    </div>
+    
+    <h3>Message Log</h3>
+    <div id="message-log"></div>
+    
+    <h3>Send Custom Message</h3>
+    <textarea id="message-input" rows="5">{"type":"test","data":{"message":"Hello from test client","timestamp":1746829223000}}</textarea>
+    <button id="send-btn" disabled>Send Message</button>
+    
+    <script>
+        // DOM Elements
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const clearLogBtn = document.getElementById('clear-log-btn');
+        const sendBtn = document.getElementById('send-btn');
+        const messageInput = document.getElementById('message-input');
+        const messageLog = document.getElementById('message-log');
+        const connectionStatus = document.getElementById('connection-status');
+        
+        // WebSocket instance
+        let ws = null;
+        
+        // Connect to WebSocket server
+        connectBtn.addEventListener('click', () => {
+            if (ws) {
+                logMessage('Already connected', 'system');
+                return;
+            }
+            
+            const host = 'localhost';
+            const port = 3001;
+            const url = `ws://${host}:${port}`;
+            
+            try {
+                connectionStatus.className = 'connecting';
+                connectionStatus.textContent = 'Connecting...';
+                
+                ws = new WebSocket(url);
+                
+                ws.onopen = () => {
+                    logMessage(`Connected to ${url}`, 'system');
+                    connectionStatus.className = 'connected';
+                    connectionStatus.textContent = `Connected to ${url}`;
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    sendBtn.disabled = false;
+                };
+                
+                ws.onclose = (event) => {
+                    logMessage(`Disconnected: Code ${event.code} - ${event.reason || 'No reason provided'}`, 'system');
+                    connectionStatus.className = 'disconnected';
+                    connectionStatus.textContent = 'Disconnected';
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    sendBtn.disabled = true;
+                    ws = null;
+                };
+                
+                ws.onerror = (error) => {
+                    logMessage(`WebSocket Error: ${error.message || 'Unknown error'}`, 'error');
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        const formattedMessage = formatMessage(message);
+                        logMessage(`Received: ${formattedMessage}`, 'received');
+                    } catch (error) {
+                        logMessage(`Error parsing message: ${error.message}\nRaw: ${event.data}`, 'error');
+                    }
+                };
+            } catch (error) {
+                logMessage(`Connection error: ${error.message}`, 'error');
+                connectionStatus.className = 'disconnected';
+                connectionStatus.textContent = 'Connection Failed';
+            }
+        });
+        
+        // Disconnect from WebSocket server
+        disconnectBtn.addEventListener('click', () => {
+            if (ws) {
+                ws.close();
+                logMessage('Disconnected by user', 'system');
+            }
+        });
+        
+        // Send custom message
+        sendBtn.addEventListener('click', () => {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                logMessage('Not connected', 'error');
+                return;
+            }
+            
+            try {
+                const message = messageInput.value.trim();
+                if (!message) {
+                    logMessage('Message is empty', 'error');
+                    return;
+                }
+                
+                // Try to parse as JSON to validate
+                const parsedMessage = JSON.parse(message);
+                
+                ws.send(message);
+                logMessage(`Sent: ${formatMessage(parsedMessage)}`, 'sent');
+            } catch (error) {
+                logMessage(`Error sending message: ${error.message}`, 'error');
+            }
+        });
+        
+        // Clear message log
+        clearLogBtn.addEventListener('click', () => {
+            messageLog.innerHTML = '';
+            logMessage('Log cleared', 'system');
+        });
+        
+        // Helper function to log messages
+        function logMessage(message, type) {
+            const messageElement = document.createElement('div');
+            messageElement.className = `message ${type}`;
+            
+            const timestamp = document.createElement('div');
+            timestamp.textContent = new Date().toLocaleTimeString();
+            timestamp.style.fontSize = '0.8em';
+            timestamp.style.color = '#666';
+            
+            const content = document.createElement('pre');
+            content.textContent = message;
+            
+            messageElement.appendChild(timestamp);
+            messageElement.appendChild(content);
+            messageLog.appendChild(messageElement);
+            
+            // Auto-scroll to bottom
+            messageLog.scrollTop = messageLog.scrollHeight;
+        }
+        
+        // Format message for display
+        function formatMessage(message) {
+            if (message.type === 'state:patch') {
+                let result = `Type: ${message.type}\n`;
+                
+                if (Array.isArray(message.data)) {
+                    result += `Patch operations (${message.data.length}):\n`;
+                    message.data.forEach((op, index) => {
+                        result += `  ${index + 1}. ${op.op} at ${op.path}: ${JSON.stringify(op.value)}\n`;
+                    });
+                } else {
+                    result += `Data: ${JSON.stringify(message.data)}\n`;
+                }
+                
+                if (message.timestamp) {
+                    result += `Timestamp: ${new Date(message.timestamp).toISOString()}`;
+                }
+                
+                return result;
+            } else {
+                return JSON.stringify(message, null, 2);
+            }
+        }
+        
+        // Initial log message
+        logMessage('Test client initialized. Click "Connect" to start.', 'system');
+    </script>
+</body>
+</html>

@@ -24,12 +24,12 @@ class BaseService extends EventEmitter {
     this.serviceManager = null; // Injected by ServiceManager upon registration
 
     // Set up debug logging
-    this.log = debug(`cn2:${name}-service`);
-    this.logError = debug(`cn2:${name}-service:error`);
+    this.log = debug(`${name}`);
+    this.logError = debug(`:${name}:error`);
 
     // Enable error logging by default
     if (this.logError.enabled === undefined) {
-      debug.enable(`cn2:${name}-service:error`);
+      debug.enable(`:${name}:error`);
     }
     
     this.log(`Initialized ${name} service (${type})`);

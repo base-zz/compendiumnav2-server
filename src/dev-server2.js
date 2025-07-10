@@ -11,7 +11,6 @@ import newStateServiceDemo from "./services/NewStateServiceDemo.js";
 import { TidalService } from "./services/TidalService.js";
 import { WeatherService } from "./services/WeatherService.js";
 import { PositionService } from "./services/PositionService.js";
-import { SignalKPositionProvider } from "./services/SignalKPositionProvider.js";
 import {
   startRelayServer,
   startDirectServerWrapper,
@@ -32,8 +31,8 @@ const app = express();
 app.use(express.json());
 const server = http.createServer(app);
 
-const log = debug("cn2:dev-server2");
-const logError = debug("cn2:dev-server2:error");
+const log = debug("dev-server2");
+const logError = debug("dev-server2:error");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -151,16 +150,15 @@ async function initializeSecondaryServices(stateManager, serviceManager) {
 
   const stateService = serviceManager.getService("state");
   const tidalService = new TidalService(stateService);
-  const weatherService = new WeatherService(stateService);
+  const weatherService = new WeatherService();
 
   // --- Initialize Position Service ---
   const positionSources = {
-    signalk: { priority: 1, timeout: 10000 },
-    // Add other position sources here, e.g.:
-    // raymarine: { priority: 2, timeout: 5000 }
+    gps: { priority: 1, timeout: 10000 },
+    ais: { priority: 2, timeout: 15000 },
+    state: { priority: 3, timeout: 20000 }
   };
   const positionService = new PositionService({ sources: positionSources });
-  const signalKProvider = new SignalKPositionProvider();
   const bluetoothService = new BluetoothService({
     scanDuration: 10000,
     scanInterval: 30000,
@@ -172,7 +170,7 @@ async function initializeSecondaryServices(stateManager, serviceManager) {
   serviceManager.registerService("tidal", tidalService);
   serviceManager.registerService("weather", weatherService);
   serviceManager.registerService("position", positionService);
-  serviceManager.registerService("signalk-position-provider", signalKProvider);
+  // SignalK position provider removed in favor of direct PositionService integration
   serviceManager.registerService("bluetooth", bluetoothService);
 
   // --- Wire up services to the State Manager ---
@@ -551,4 +549,4 @@ process.on("SIGTERM", shutdown);
 main();
 
 // Enable debug output for our services
-debug.enable("cn2:*");
+debug.enable("*");

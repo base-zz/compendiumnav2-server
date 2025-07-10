@@ -1,8 +1,9 @@
 import EventEmitter from 'events';
 import debug from 'debug';
 
-const log = debug('cn2:state-mediator');
-const logError = debug('cn2:state-mediator:error');
+const log = debug('state-mediator');
+const logError = debug('state-mediator:error');
+const logState = debug('state-mediator:state');
 
 /**
  * @class StateMediator
@@ -76,35 +77,79 @@ class StateMediator extends EventEmitter {
    */
   _setupStateListeners() {
     this.stateManager.on('state:patch', (patch) => {
-      const message = {
-        type: 'state:patch',
-        payload: patch,
-      };
-      this.broadcast(message);
+      logState('Received state:patch event from StateManager');
+      if (patch && patch.data) {
+        logState(`Patch contains ${Array.isArray(patch.data) ? patch.data.length : 'unknown'} operations`);
+      }
+      
+      // Ensure the patch has the correct type property
+      if (typeof patch === 'object' && patch !== null) {
+        // Make sure the type is explicitly 'state:patch' (not 'patch')
+        patch.type = 'state:patch';
+      }
+      
+      // Send the patch directly without nesting it in a payload property
+      // This matches the format expected by the client
+      this.broadcast(patch);
     });
 
     this.stateManager.on('state:full-update', (state) => {
-      const message = {
-        type: 'state:full-update',
-        payload: state,
-      };
-      this.broadcast(message);
+      logState('Received state:full-update event from StateManager');
+      if (state) {
+        logState(`Full state update with keys: ${Object.keys(state).join(', ')}`);
+      }
+      
+      // Make sure the state has the correct type property
+      if (typeof state === 'object' && state !== null) {
+        if (!state.type) {
+          state.type = 'state:full-update';
+        }
+      }
+      
+      // Send the state directly without nesting it in a payload property
+      // This matches the format expected by the client
+      this.broadcast(state);
     });
 
     this.stateManager.on('tide:update', (data) => {
-        const message = {
-            type: 'tide:update',
-            payload: data,
-        };
-        this.broadcast(message);
+        logState('Received tide:update event from StateManager');
+        
+        // Ensure the data has the correct type property
+        if (typeof data === 'object' && data !== null) {
+            if (!data.type) {
+                data.type = 'tide:update';
+            }
+        }
+        
+        // Send the data directly without nesting it in a payload property
+        // This matches the format expected by the client
+        this.broadcast(data);
     });
 
     this.stateManager.on('weather:update', (data) => {
-        const message = {
-            type: 'weather:update',
-            payload: data,
-        };
-        this.broadcast(message);
+        logState('Received weather:update event from StateManager');
+        logState(`Weather data type: ${typeof data}, is null: ${data === null}`);
+        
+        if (typeof data === 'object' && data !== null) {
+            logState(`Weather data keys: ${Object.keys(data).join(', ')}`);
+            logState(`Weather data has current: ${!!data.current}, has hourly: ${!!data.hourly}`);
+            
+            // Ensure the data has the correct type property
+            if (!data.type) {
+                logState('Adding missing type property to weather data');
+                data.type = 'weather:update';
+            } else {
+                logState(`Weather data already has type: ${data.type}`);
+            }
+        } else {
+            logError('Weather data is not an object or is null!');
+        }
+        
+        // Send the data directly without nesting it in a payload property
+        // This matches the format expected by the client
+        logState(`Broadcasting weather data with type: ${data.type}`);
+        this.broadcast(data);
+        logState('Weather data broadcast completed');
     });
 
     log('State listeners configured.');
@@ -116,7 +161,8 @@ class StateMediator extends EventEmitter {
    */
   broadcast(message) {
     const serializedMessage = JSON.stringify(message);
-    log(`Broadcasting message of type ${message.type}`);
+    logState(`Broadcasting message of type ${message.type} (${serializedMessage.length} bytes)`);
+    logState(`Active transports: ${this.transports.length}, Relay client count: ${this.relayClientCount}`);
 
     this.transports.forEach(transport => {
         // The transport must have a broadcast method to be considered.
@@ -131,14 +177,18 @@ class StateMediator extends EventEmitter {
         if (isRelay) {
             // Only send to the relay if it has active clients.
             if (this.relayClientCount > 0) {
-                log(`Forwarding to RelayServer (clients: ${this.relayClientCount})`);
+                logState(`Forwarding ${message.type} to RelayServer (clients: ${this.relayClientCount})`);
                 transport.broadcast(serializedMessage);
+                logState(`Successfully sent to RelayServer`);
             } else {
-                log(`Skipping broadcast to RelayServer (no clients connected)`);
+                logState(`Skipping broadcast to RelayServer (no clients connected)`);
             }
         } else {
             // Broadcast to all non-relay (i.e., direct) transports unconditionally.
+            const transportName = transport.constructor ? transport.constructor.name : 'UnknownTransport';
+            logState(`Forwarding ${message.type} to ${transportName}`);
             transport.broadcast(serializedMessage);
+            logState(`Successfully sent to ${transportName}`);
         }
     });
   }

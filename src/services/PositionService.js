@@ -16,17 +16,46 @@ export class PositionService extends ContinuousService {
   constructor(options = {}) {
     super('position-service');
 
-    const { sources = {} } = options;
-    this.sources = sources;
+    // Default timeout for position data freshness (1 minute)
+    this.defaultTimeout = 60000;
+    
+    // Get sources configuration from options
+    const { sources = {}, debug = false } = options;
+    this.sources = sources; // User-provided source configurations
+    this.debug = debug; // Enable extra logging for debugging
 
+    // Add dependency on state service
+    this.setServiceDependency('state');
  
     this._boundServices = []; // Keep track of services we've bound to for cleanup
+    this._positions = {}; // Store the latest position from each source
+    
+    // Track dynamically discovered sources
+    this._discoveredSources = new Set(); 
     this._onPositionUpdate = this._onPositionUpdate.bind(this);
+    
+    this.log('Position service initialized');
   }
 
   async start() {
     await super.start();
     this.log('Position service starting...');
+    this.log(`Initial event listeners for position:update: ${this.listenerCount('position:update')}`);
+
+    // Set up listener for position:update events from state service
+    if (this.dependencies.state) {
+      this.log('Setting up position:update event listener from state service');
+      this.dependencies.state.on('position:update', this._onPositionUpdate);
+      
+      // Store the service and handler for later cleanup
+      this._boundServices.push({ 
+        service: this.dependencies.state, 
+        handler: this._onPositionUpdate,
+        eventName: 'position:update'
+      });
+    } else {
+      this.log('State service dependency not available', 'warn');
+    }
 
     // Dynamically discover and bind to all position providers
     this.log('Searching for position provider services...');
@@ -37,23 +66,32 @@ export class PositionService extends ContinuousService {
       if (service && service.providesPosition) {
         this.log(`Found position provider: '${serviceName}'. Binding to its 'position:update' event.`);
         
-        const handler = (position) => this._onPositionUpdate(serviceName, position);
-        service.on('position:update', handler);
+        // Use the service name as the source name for consistency
+        const sourceName = serviceName;
+        // const handler = (position) => this._onPositionUpdate(sourceName, position);
+        // service.on('position:update', handler);
+        service.on('position:update', this._onPositionUpdate);
 
         // Store the service and handler for later cleanup
-        this._boundServices.push({ service, handler });
+        this._boundServices.push({ 
+          service, 
+          handler: this._onPositionUpdate,
+          eventName: 'position:update'
+        });
       }
     }
 
     this.log('Position service started successfully.');
   }
-
+  
+  
   async stop() {
     this.log('Stopping position service...');
     // Unbind all event listeners on stop
-    this._boundServices.forEach(({ service, handler }) => {
-      this.log(`Unbinding from ${service.name}`);
-      service.off('position:update', handler);
+    this._boundServices.forEach(({ service, handler, eventName }) => {
+      const serviceName = service?.name || 'unknown';
+      this.log(`Unbinding from ${serviceName} event ${eventName}`);
+      service.off(eventName, handler);
     });
     this._boundServices = [];
     await super.stop();
@@ -66,42 +104,72 @@ export class PositionService extends ContinuousService {
    * @param {object} position - The position object { latitude, longitude }.
    * @private
    */
-  _onPositionUpdate(sourceName, position) {
-    // Check if the source is configured in this service
-    if (!this.sources[sourceName]) {
-      this.log(`Received update from unconfigured source: ${sourceName}. Ignoring.`, 'warn');
+  /**
+   * Handles position:update events from the state service
+   * @param {Object} positionData - Position data from the state service
+   * @private
+   */
+  _onPositionUpdate(positionData) {
+    if (!positionData || typeof positionData.latitude !== 'number' || typeof positionData.longitude !== 'number') {
+      this.log('Received invalid position data from state service', 'warn');
       return;
     }
 
-    if (position && typeof position.latitude === 'number' && typeof position.longitude === 'number') {
-      this.log(`Received position from ${sourceName}: ${position.latitude}, ${position.longitude}. Emitting state:patch.`);
-      
-      const timestamp = new Date().toISOString();
+    // Use the source from the position data if available, otherwise use a default name
+    const sourceName = positionData.source || 'state';
+    this.log(`Received position:update from ${sourceName}: ${positionData.latitude}, ${positionData.longitude}`);
+    
+    // This allows us to have the data available if needed later
+    const timestamp = positionData.timestamp || new Date().toISOString();
+    
+    // Store the position data internally
+    this._positions[sourceName] = {
+      latitude: positionData.latitude,
+      longitude: positionData.longitude,
+      timestamp: timestamp
+    };
+    
+    // Create JSON Patch format (RFC 6902) expected by StateManager
+    const patch = [
+      {
+        op: 'add',
+        path: `/position/${sourceName}/latitude`,
+        value: positionData.latitude
+      },
+      {
+        op: 'add',
+        path: `/position/${sourceName}/longitude`,
+        value: positionData.longitude
+      },
+      {
+        op: 'add',
+        path: `/position/${sourceName}/timestamp`,
+        value: timestamp
+      },
+      {
+        op: 'add',
+        path: `/position/${sourceName}/source`,
+        value: sourceName
+      }
+    ];
 
-      // The 'value' is the core data. The StateManager will use the '$source'
-      // and 'timestamp' from the update to build the final state object.
-      const patch = {
-        updates: [{
-          values: [{
-            path: `position.${sourceName}`,
-            value: {
-              latitude: position.latitude,
-              longitude: position.longitude,
-            }
-          }],
-          $source: `compendium.positionservice.${sourceName}`,
-          timestamp: timestamp,
-        }]
-      };
-
-      // Emit the patch for the StateManager to consume
-      this.emit('state:patch', { data: patch });
-
-    } else {
-      this.log(`Received invalid position data from ${sourceName}`, position, 'warn');
-    }
+    // Emit the patch for the StateManager to consume
+    this.emit('state:position', { 
+      data: patch,
+      source: `${sourceName}`,
+      timestamp: timestamp,
+      trace: true
+    });
+    
+    // Always process position events from any source
+    this.log(`Processing position data from ${sourceName}`);
+    
+    // Always emit position:update events for any source
+    this.emit('position:update', {
+      latitude: positionData.latitude,
+      longitude: positionData.longitude,
+      timestamp: timestamp,
+      source: sourceName,
+    });
   }
 }
-
-// Note: This service must now be instantiated with a configuration object.
-// export default new PositionService();

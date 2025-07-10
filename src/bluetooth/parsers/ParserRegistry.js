@@ -1,7 +1,7 @@
 import debug from 'debug';
 
-const log = debug('cn2:parser-registry');
-const logError = debug('cn2:parser-registry:error');
+const log = debug('parser-registry');
+const logError = debug('parser-registry:error');
 
 /**
  * Registry for Bluetooth data parsers with support for multiple categories

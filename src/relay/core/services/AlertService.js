@@ -65,7 +65,7 @@ import { pushTokenStore } from './PushTokenStore.js';
  */
 
 // Constants
-const log = debug('compendium:alert-service');
+const log = debug('alert-service');
 const PUSH_NOTIFICATION_TIMEOUT = 5000; // 5 seconds
 
 /**

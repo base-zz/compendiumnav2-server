@@ -17,7 +17,7 @@ import fs from 'fs';
 import { join } from 'path';
 import fetch from 'node-fetch';
 
-const log = debug('compendium:dev-server');
+const log = debug('dev-server');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

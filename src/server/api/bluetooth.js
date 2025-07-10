@@ -1,6 +1,6 @@
 import debug from 'debug';
 
-const log = debug('cn2:api:bluetooth');
+const log = debug('api:bluetooth');
 
 export function registerBluetoothRoutes(app, serviceManager) {
   const bluetoothService = serviceManager.getService('bluetooth');

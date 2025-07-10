@@ -5,8 +5,8 @@ import fetch from 'node-fetch';
 import debug from 'debug';
 import { getOrCreateAppUuid } from './uniqueAppId.js';
 
-const log = debug('cn2:key-pair');
-const logError = debug('cn2:key-pair:error');
+const log = debug('key-pair');
+const logError = debug('key-pair:error');
 
 // Default key file paths (can be overridden by environment variables)
 const DEFAULT_PRIVATE_KEY_FILE = `${process.env.HOME || process.env.USERPROFILE || ''}/.compendium/keys/private-key`;

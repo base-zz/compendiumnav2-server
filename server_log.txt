@@ -172,19 +172,19 @@ Available endpoints:
 [StateManager2] Client count updated: 0 -> 0
 [StateService] Processing data point 1/3000
 [DEV-SERVER2] Starting secondary services...
-2025-06-27T23:48:52.831Z cn2:tidal-service Initialized tidal service (scheduled)
-2025-06-27T23:48:52.831Z cn2:tidal-service Initialized with interval: 7200000ms
-2025-06-27T23:48:52.831Z cn2:weather-service Initialized weather service (scheduled)
-2025-06-27T23:48:52.831Z cn2:weather-service Initialized with interval: 3600000ms
-2025-06-27T23:48:52.831Z cn2:bluetooth-service Initialized bluetooth service (continuous)
-2025-06-27T23:48:52.831Z cn2:bluetooth-service Initializing continuous service
+2025-06-27T23:48:52.831Z tidal-service Initialized tidal service (scheduled)
+2025-06-27T23:48:52.831Z tidal-service Initialized with interval: 7200000ms
+2025-06-27T23:48:52.831Z weather-service Initialized weather service (scheduled)
+2025-06-27T23:48:52.831Z weather-service Initialized with interval: 3600000ms
+2025-06-27T23:48:52.831Z bluetooth-service Initialized bluetooth service (continuous)
+2025-06-27T23:48:52.831Z bluetooth-service Initializing continuous service
 [ServiceManager] Registered service: tidal (scheduled)
 [ServiceManager] Registered service: weather (scheduled)
 [ServiceManager] Registered service: bluetooth (continuous)
 [DEV-SERVER2] Setting up tide:update listener on tidalService
 [DEV-SERVER2] Setting up weather:update listener on weatherService
 [DEV-SERVER2] Setting up Bluetooth service event listeners
-2025-06-27T23:48:52.831Z cn2:bluetooth-service Starting Bluetooth service...
+2025-06-27T23:48:52.831Z bluetooth-service Starting Bluetooth service...
 
 === YAML CHECK ===
 Current working directory: /Users/basselabul-hajj/compendiumnav2-server
@@ -203,35 +203,35 @@ File content (first 200 chars): company_identifiers:
     name: 'Shenzhen SuperSound Technology Co.,Ltd'
 
   - value: 
-2025-06-27T23:48:52.848Z cn2:bluetooth-service Found Apple entry: Apple, Inc. (0x004C)
-2025-06-27T23:48:52.848Z cn2:bluetooth-service Skipping invalid company entry debug
-2025-06-27T23:48:52.848Z cn2:bluetooth-service Successfully loaded 3864/3865 company identifiers
-2025-06-27T23:48:52.848Z cn2:bluetooth-service Apple company name: Apple, Inc.
-2025-06-27T23:48:52.911Z cn2:bluetooth-service Noble event listeners reset debug
-2025-06-27T23:48:52.912Z cn2:bluetooth-service Initializing Bluetooth adapter, current state: poweredOn
-2025-06-27T23:48:52.912Z cn2:bluetooth-service Bluetooth adapter is already powered on
-2025-06-27T23:48:52.912Z cn2:bluetooth-service Starting BLE scan cycle
-2025-06-27T23:48:52.912Z cn2:bluetooth-service Bluetooth service started successfully
+2025-06-27T23:48:52.848Z bluetooth-service Found Apple entry: Apple, Inc. (0x004C)
+2025-06-27T23:48:52.848Z bluetooth-service Skipping invalid company entry debug
+2025-06-27T23:48:52.848Z bluetooth-service Successfully loaded 3864/3865 company identifiers
+2025-06-27T23:48:52.848Z bluetooth-service Apple company name: Apple, Inc.
+2025-06-27T23:48:52.911Z bluetooth-service Noble event listeners reset debug
+2025-06-27T23:48:52.912Z bluetooth-service Initializing Bluetooth adapter, current state: poweredOn
+2025-06-27T23:48:52.912Z bluetooth-service Bluetooth adapter is already powered on
+2025-06-27T23:48:52.912Z bluetooth-service Starting BLE scan cycle
+2025-06-27T23:48:52.912Z bluetooth-service Bluetooth service started successfully
 [DEV-SERVER2] Bluetooth service started successfully
 [DEV-SERVER2] Starting all services (Tidal, Weather, Bluetooth)...
 [ServiceManager] Service 'state' is already running
 [ServiceManager] Starting service: tidal
-2025-06-27T23:48:52.914Z cn2:tidal-service Starting scheduled service
-2025-06-27T23:48:52.914Z cn2:tidal-service Next run scheduled in 7200 seconds
-2025-06-27T23:48:52.914Z cn2:tidal-service Scheduled service started successfully
-2025-06-27T23:48:52.914Z cn2:tidal-service Running initial task immediately
-2025-06-27T23:48:52.914Z cn2:tidal-service Starting task #1751068132914
+2025-06-27T23:48:52.914Z tidal-service Starting scheduled service
+2025-06-27T23:48:52.914Z tidal-service Next run scheduled in 7200 seconds
+2025-06-27T23:48:52.914Z tidal-service Scheduled service started successfully
+2025-06-27T23:48:52.914Z tidal-service Running initial task immediately
+2025-06-27T23:48:52.914Z tidal-service Starting task #1751068132914
 [TidalService] Starting tidal data fetch...
 [TidalService] Waiting for position data...
 [TidalService] Got valid position: 37.3036485, -76.4542491
 [TidalService] Got position: 37.3036485, -76.4542491
-2025-06-27T23:48:52.928Z cn2:bluetooth-service Noble state: poweredOn debug
-2025-06-27T23:48:52.928Z cn2:bluetooth-service Starting BLE scan... debug
-2025-06-27T23:48:52.928Z cn2:bluetooth-service BLE scan started debug
+2025-06-27T23:48:52.928Z bluetooth-service Noble state: poweredOn debug
+2025-06-27T23:48:52.928Z bluetooth-service Starting BLE scan... debug
+2025-06-27T23:48:52.928Z bluetooth-service BLE scan started debug
 [DEV-SERVER2] Bluetooth scan started
-2025-06-27T23:48:52.929Z cn2:bluetooth-service BLE scan started debug
+2025-06-27T23:48:52.929Z bluetooth-service BLE scan started debug
 [DEV-SERVER2] Bluetooth scan started
-2025-06-27T23:48:52.929Z cn2:bluetooth-service BLE scan started debug
+2025-06-27T23:48:52.929Z bluetooth-service BLE scan started debug
 [DEV-SERVER2] Bluetooth scan started
 [VPS-CONNECTOR] Registering public key via WebSocket
 [VPS-CONNECTOR] Sent key registration message via WebSocket
@@ -251,8 +251,8 @@ File content (first 200 chars): company_identifiers:
 [TidalService] Processed marine data:
 [DEV-SERVER2] Received tide:update, forwarding to state manager
 [TidalService] Emitted 'tide:update' event with data: current, hourly, daily, metadata
-2025-06-27T23:48:53.488Z cn2:tidal-service Task #1751068132914 completed in 574ms
-2025-06-27T23:48:53.488Z cn2:tidal-service Next run scheduled in 7200 seconds
+2025-06-27T23:48:53.488Z tidal-service Task #1751068132914 completed in 574ms
+2025-06-27T23:48:53.488Z tidal-service Next run scheduled in 7200 seconds
 [tidal] Running scheduled task...
 [TidalService] Starting tidal data fetch...
 [TidalService] Waiting for position data...
@@ -288,108 +288,108 @@ Bluetooth service found, setting up routes...
 [DEV-SERVER2] Bluetooth API endpoints registered at /api/bluetooth
 [BluetoothService] Auto-selecting Ruuvi device: c4d5653318b41ad4dce6b335160e7999
 [BluetoothService] Auto-selecting Ruuvi device: c4d5653318b41ad4dce6b335160e7999
-2025-06-27T23:49:02.930Z cn2:bluetooth-service Stopping scan after 10000ms debug
-2025-06-27T23:49:02.930Z cn2:bluetooth-service Stop scan event listeners set up debug
-2025-06-27T23:49:02.930Z cn2:bluetooth-service Calling noble.stopScanning() debug
-2025-06-27T23:49:02.930Z cn2:bluetooth-service Stop scan initiated, waiting for confirmation... debug
-2025-06-27T23:49:02.930Z cn2:bluetooth-service Stop scan event listeners set up debug
-2025-06-27T23:49:02.930Z cn2:bluetooth-service Calling noble.stopScanning() debug
-2025-06-27T23:49:02.930Z cn2:bluetooth-service Stop scan initiated, waiting for confirmation... debug
-2025-06-27T23:49:02.930Z cn2:bluetooth-service BLE scan stopped debug
-2025-06-27T23:49:02.931Z cn2:bluetooth-service Processing 42 device updates debug
-2025-06-27T23:49:02.931Z cn2:bluetooth-service BLE scan stopped debug
-2025-06-27T23:49:02.931Z cn2:bluetooth-service Processing 42 device updates debug
-2025-06-27T23:49:02.931Z cn2:bluetooth-service BLE scan stopped event received debug
-2025-06-27T23:49:02.931Z cn2:bluetooth-service Cleaning up stopScan listeners debug
+2025-06-27T23:49:02.930Z bluetooth-service Stopping scan after 10000ms debug
+2025-06-27T23:49:02.930Z bluetooth-service Stop scan event listeners set up debug
+2025-06-27T23:49:02.930Z bluetooth-service Calling noble.stopScanning() debug
+2025-06-27T23:49:02.930Z bluetooth-service Stop scan initiated, waiting for confirmation... debug
+2025-06-27T23:49:02.930Z bluetooth-service Stop scan event listeners set up debug
+2025-06-27T23:49:02.930Z bluetooth-service Calling noble.stopScanning() debug
+2025-06-27T23:49:02.930Z bluetooth-service Stop scan initiated, waiting for confirmation... debug
+2025-06-27T23:49:02.930Z bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:02.931Z bluetooth-service Processing 42 device updates debug
+2025-06-27T23:49:02.931Z bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:02.931Z bluetooth-service Processing 42 device updates debug
+2025-06-27T23:49:02.931Z bluetooth-service BLE scan stopped event received debug
+2025-06-27T23:49:02.931Z bluetooth-service Cleaning up stopScan listeners debug
 [DEV-SERVER2] Bluetooth scan stopped
-2025-06-27T23:49:02.931Z cn2:bluetooth-service BLE scan stopped event received debug
-2025-06-27T23:49:02.931Z cn2:bluetooth-service Cleaning up stopScan listeners debug
+2025-06-27T23:49:02.931Z bluetooth-service BLE scan stopped event received debug
+2025-06-27T23:49:02.931Z bluetooth-service Cleaning up stopScan listeners debug
 [DEV-SERVER2] Bluetooth scan stopped
-2025-06-27T23:49:02.931Z cn2:bluetooth-service Resting for 5000ms before next scan...
-2025-06-27T23:49:02.931Z cn2:bluetooth-service BLE scan stopped debug
-2025-06-27T23:49:02.931Z cn2:bluetooth-service Processing 42 device updates debug
-2025-06-27T23:49:02.931Z cn2:bluetooth-service BLE scan stopped debug
-2025-06-27T23:49:02.931Z cn2:bluetooth-service Processing 42 device updates debug
+2025-06-27T23:49:02.931Z bluetooth-service Resting for 5000ms before next scan...
+2025-06-27T23:49:02.931Z bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:02.931Z bluetooth-service Processing 42 device updates debug
+2025-06-27T23:49:02.931Z bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:02.931Z bluetooth-service Processing 42 device updates debug
 [BluetoothService] Devices: 40 discovered, 0 selected
-2025-06-27T23:49:03.197Z cn2:bluetooth-service Completed processing 42 device updates debug
+2025-06-27T23:49:03.197Z bluetooth-service Completed processing 42 device updates debug
 [DEV-SERVER2] Bluetooth scan stopped
-2025-06-27T23:49:03.250Z cn2:bluetooth-service Completed processing 42 device updates debug
+2025-06-27T23:49:03.250Z bluetooth-service Completed processing 42 device updates debug
 [DEV-SERVER2] Bluetooth scan stopped
-2025-06-27T23:49:03.338Z cn2:bluetooth-service Completed processing 42 device updates debug
+2025-06-27T23:49:03.338Z bluetooth-service Completed processing 42 device updates debug
 [DEV-SERVER2] Bluetooth scan stopped
-2025-06-27T23:49:03.352Z cn2:bluetooth-service Completed processing 42 device updates debug
+2025-06-27T23:49:03.352Z bluetooth-service Completed processing 42 device updates debug
 [DEV-SERVER2] Bluetooth scan stopped
 [StateService] Processing data point 11/3000
-2025-06-27T23:49:07.933Z cn2:bluetooth-service Noble state: poweredOn debug
-2025-06-27T23:49:07.933Z cn2:bluetooth-service Starting BLE scan... debug
-2025-06-27T23:49:07.933Z cn2:bluetooth-service BLE scan started debug
+2025-06-27T23:49:07.933Z bluetooth-service Noble state: poweredOn debug
+2025-06-27T23:49:07.933Z bluetooth-service Starting BLE scan... debug
+2025-06-27T23:49:07.933Z bluetooth-service BLE scan started debug
 [DEV-SERVER2] Bluetooth scan started
-2025-06-27T23:49:07.934Z cn2:bluetooth-service BLE scan started debug
+2025-06-27T23:49:07.934Z bluetooth-service BLE scan started debug
 [DEV-SERVER2] Bluetooth scan started
-2025-06-27T23:49:07.934Z cn2:bluetooth-service BLE scan started debug
+2025-06-27T23:49:07.934Z bluetooth-service BLE scan started debug
 [DEV-SERVER2] Bluetooth scan started
 [BluetoothService] No parser found for selected device c4d5653318b41ad4dce6b335160e7999
 [BluetoothService] No parser found for selected device c4d5653318b41ad4dce6b335160e7999
 [BluetoothService] No parser found for selected device c4d5653318b41ad4dce6b335160e7999
 [BluetoothService] No parser found for selected device c4d5653318b41ad4dce6b335160e7999
-2025-06-27T23:49:17.933Z cn2:bluetooth-service Stopping scan after 10000ms debug
-2025-06-27T23:49:17.934Z cn2:bluetooth-service Stop scan event listeners set up debug
-2025-06-27T23:49:17.934Z cn2:bluetooth-service Calling noble.stopScanning() debug
-2025-06-27T23:49:17.934Z cn2:bluetooth-service Stop scan initiated, waiting for confirmation... debug
-2025-06-27T23:49:17.936Z cn2:bluetooth-service Stop scan event listeners set up debug
-2025-06-27T23:49:17.936Z cn2:bluetooth-service Calling noble.stopScanning() debug
-2025-06-27T23:49:17.936Z cn2:bluetooth-service Stop scan initiated, waiting for confirmation... debug
-2025-06-27T23:49:17.936Z cn2:bluetooth-service BLE scan stopped debug
-2025-06-27T23:49:17.936Z cn2:bluetooth-service Processing 38 device updates debug
-2025-06-27T23:49:17.937Z cn2:bluetooth-service BLE scan stopped debug
-2025-06-27T23:49:17.937Z cn2:bluetooth-service Processing 38 device updates debug
-2025-06-27T23:49:17.937Z cn2:bluetooth-service BLE scan stopped event received debug
-2025-06-27T23:49:17.937Z cn2:bluetooth-service Cleaning up stopScan listeners debug
+2025-06-27T23:49:17.933Z bluetooth-service Stopping scan after 10000ms debug
+2025-06-27T23:49:17.934Z bluetooth-service Stop scan event listeners set up debug
+2025-06-27T23:49:17.934Z bluetooth-service Calling noble.stopScanning() debug
+2025-06-27T23:49:17.934Z bluetooth-service Stop scan initiated, waiting for confirmation... debug
+2025-06-27T23:49:17.936Z bluetooth-service Stop scan event listeners set up debug
+2025-06-27T23:49:17.936Z bluetooth-service Calling noble.stopScanning() debug
+2025-06-27T23:49:17.936Z bluetooth-service Stop scan initiated, waiting for confirmation... debug
+2025-06-27T23:49:17.936Z bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:17.936Z bluetooth-service Processing 38 device updates debug
+2025-06-27T23:49:17.937Z bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:17.937Z bluetooth-service Processing 38 device updates debug
+2025-06-27T23:49:17.937Z bluetooth-service BLE scan stopped event received debug
+2025-06-27T23:49:17.937Z bluetooth-service Cleaning up stopScan listeners debug
 [DEV-SERVER2] Bluetooth scan stopped
-2025-06-27T23:49:17.937Z cn2:bluetooth-service BLE scan stopped event received debug
-2025-06-27T23:49:17.937Z cn2:bluetooth-service Cleaning up stopScan listeners debug
+2025-06-27T23:49:17.937Z bluetooth-service BLE scan stopped event received debug
+2025-06-27T23:49:17.937Z bluetooth-service Cleaning up stopScan listeners debug
 [DEV-SERVER2] Bluetooth scan stopped
-2025-06-27T23:49:17.938Z cn2:bluetooth-service Resting for 5000ms before next scan...
-2025-06-27T23:49:17.939Z cn2:bluetooth-service BLE scan stopped debug
-2025-06-27T23:49:17.939Z cn2:bluetooth-service Processing 38 device updates debug
-2025-06-27T23:49:17.939Z cn2:bluetooth-service BLE scan stopped debug
-2025-06-27T23:49:17.939Z cn2:bluetooth-service Processing 38 device updates debug
+2025-06-27T23:49:17.938Z bluetooth-service Resting for 5000ms before next scan...
+2025-06-27T23:49:17.939Z bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:17.939Z bluetooth-service Processing 38 device updates debug
+2025-06-27T23:49:17.939Z bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:17.939Z bluetooth-service Processing 38 device updates debug
 [BluetoothService] Devices: 44 discovered, 1 selected
-2025-06-27T23:49:18.186Z cn2:bluetooth-service Completed processing 38 device updates debug
+2025-06-27T23:49:18.186Z bluetooth-service Completed processing 38 device updates debug
 [DEV-SERVER2] Bluetooth scan stopped
-2025-06-27T23:49:18.220Z cn2:bluetooth-service Completed processing 38 device updates debug
+2025-06-27T23:49:18.220Z bluetooth-service Completed processing 38 device updates debug
 [DEV-SERVER2] Bluetooth scan stopped
-2025-06-27T23:49:18.340Z cn2:bluetooth-service Completed processing 38 device updates debug
+2025-06-27T23:49:18.340Z bluetooth-service Completed processing 38 device updates debug
 [DEV-SERVER2] Bluetooth scan stopped
-2025-06-27T23:49:18.402Z cn2:bluetooth-service Completed processing 38 device updates debug
+2025-06-27T23:49:18.402Z bluetooth-service Completed processing 38 device updates debug
 [DEV-SERVER2] Bluetooth scan stopped
-2025-06-27T23:49:22.939Z cn2:bluetooth-service Noble state: poweredOn debug
-2025-06-27T23:49:22.940Z cn2:bluetooth-service Starting BLE scan... debug
-2025-06-27T23:49:22.940Z cn2:bluetooth-service BLE scan started debug
+2025-06-27T23:49:22.939Z bluetooth-service Noble state: poweredOn debug
+2025-06-27T23:49:22.940Z bluetooth-service Starting BLE scan... debug
+2025-06-27T23:49:22.940Z bluetooth-service BLE scan started debug
 [DEV-SERVER2] Bluetooth scan started
-2025-06-27T23:49:22.940Z cn2:bluetooth-service BLE scan started debug
+2025-06-27T23:49:22.940Z bluetooth-service BLE scan started debug
 [DEV-SERVER2] Bluetooth scan started
-2025-06-27T23:49:22.940Z cn2:bluetooth-service BLE scan started debug
+2025-06-27T23:49:22.940Z bluetooth-service BLE scan started debug
 [DEV-SERVER2] Bluetooth scan started
 
 SIGINT received. Shutting down gracefully...
-2025-06-27T23:49:23.638Z cn2:bluetooth-service Stopping Bluetooth service...
-2025-06-27T23:49:23.638Z cn2:bluetooth-service Stop scan event listeners set up debug
-2025-06-27T23:49:23.638Z cn2:bluetooth-service Calling noble.stopScanning() debug
-2025-06-27T23:49:23.639Z cn2:bluetooth-service Stop scan initiated, waiting for confirmation... debug
-2025-06-27T23:49:23.639Z cn2:bluetooth-service BLE scan stopped debug
-2025-06-27T23:49:23.639Z cn2:bluetooth-service Processing 10 device updates debug
-2025-06-27T23:49:23.639Z cn2:bluetooth-service BLE scan stopped debug
-2025-06-27T23:49:23.639Z cn2:bluetooth-service Processing 10 device updates debug
-2025-06-27T23:49:23.639Z cn2:bluetooth-service BLE scan stopped event received debug
-2025-06-27T23:49:23.639Z cn2:bluetooth-service Cleaning up stopScan listeners debug
+2025-06-27T23:49:23.638Z bluetooth-service Stopping Bluetooth service...
+2025-06-27T23:49:23.638Z bluetooth-service Stop scan event listeners set up debug
+2025-06-27T23:49:23.638Z bluetooth-service Calling noble.stopScanning() debug
+2025-06-27T23:49:23.639Z bluetooth-service Stop scan initiated, waiting for confirmation... debug
+2025-06-27T23:49:23.639Z bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:23.639Z bluetooth-service Processing 10 device updates debug
+2025-06-27T23:49:23.639Z bluetooth-service BLE scan stopped debug
+2025-06-27T23:49:23.639Z bluetooth-service Processing 10 device updates debug
+2025-06-27T23:49:23.639Z bluetooth-service BLE scan stopped event received debug
+2025-06-27T23:49:23.639Z bluetooth-service Cleaning up stopScan listeners debug
 [DEV-SERVER2] Bluetooth scan stopped
-2025-06-27T23:49:23.639Z cn2:bluetooth-service Noble event listeners reset debug
-2025-06-27T23:49:23.639Z cn2:bluetooth-service Bluetooth service stopped
+2025-06-27T23:49:23.639Z bluetooth-service Noble event listeners reset debug
+2025-06-27T23:49:23.639Z bluetooth-service Bluetooth service stopped
 [ServiceManager] Stopping service: tidal
-2025-06-27T23:49:23.639Z cn2:tidal-service Stopping service
-2025-06-27T23:49:23.639Z cn2:tidal-service Service stopped successfully
-2025-06-27T23:49:23.639Z cn2:tidal-service Scheduled service stopped
+2025-06-27T23:49:23.639Z tidal-service Stopping service
+2025-06-27T23:49:23.639Z tidal-service Service stopped successfully
+2025-06-27T23:49:23.639Z tidal-service Scheduled service stopped
 [ServiceManager] Stopping service: state
 [StateService] Stopping State Service
 [StateService] Stopping playback

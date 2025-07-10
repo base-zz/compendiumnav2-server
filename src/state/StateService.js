@@ -66,7 +66,7 @@ class StateService extends EventEmitter {
     super();
     this.isInitialized = false;
     this.selfMmsi = null;
-    this._debug = debug("compendium:state");
+    this._debug = debug("state");
     this._lastFullEmit = 0;
     this._batchTimer = null;
     this._batchUpdates = {};

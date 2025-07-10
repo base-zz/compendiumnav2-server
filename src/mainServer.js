@@ -12,7 +12,7 @@ import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
 import { registerVpsRoutes } from "./server/vps/registration.js";
 import debug from 'debug';
 
-const log = debug('compendium:server:main');
+const log = debug('server:main');
 
 // Set up circular dependency
 setStateManager(stateManager);

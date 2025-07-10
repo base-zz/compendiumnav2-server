@@ -4,10 +4,10 @@ import { StateManager } from "../core/state/StateManager.js";
 import { syncOrchestrator } from "./core/sync/SyncOrchestrator.js";
 import { VPSConnector } from "./services/VPSConnector.js";
 
-const log = debug('compendium:relay-server');
-const logWarn = debug('compendium:relay-server:warn');
-const logError = debug('compendium:relay-server:error');
-const logTrace = debug('compendium:relay-server:trace');
+const log = debug('relay-server');
+const logWarn = debug('relay-server:warn');
+const logError = debug('relay-server:error');
+const logTrace = debug('relay-server:trace');
 
 export class RelayServer extends EventEmitter {
   constructor(config = {}) {

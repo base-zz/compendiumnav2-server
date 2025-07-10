@@ -6,11 +6,11 @@ import { stateManager } from "./relay/core/state/StateManager.js";
 import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
 import { registerVpsRoutes } from "./server/vps/registration.js";
 import { TidalService } from "./services/TidalService.js";
-import { WeatherService } from "./services/WeatherService.js";
+import { WeatherService } from "./services/WeatherService.js/index.js";
 import { newStateService } from "./services/NewStateService.js";
 import debug from 'debug';
 
-const log = debug('compendium:server:main');
+const log = debug('server:main');
 
 // Load environment variables
 dotenv.config({ path: ".env" });
@@ -44,7 +44,7 @@ async function initializeServices() {
       
       // Register other services with the state service
       serviceManager.registerService('tidal', new TidalService(stateService));
-      serviceManager.registerService('weather', new WeatherService(stateService));
+      serviceManager.registerService('weather', new WeatherService());
   
       // Start all services
       await serviceManager.startAll();

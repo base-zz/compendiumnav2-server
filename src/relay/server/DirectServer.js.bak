@@ -19,10 +19,10 @@ import { stateManager } from "../core/state/StateManager.js";
  * @property {NetSocket} [_socket]
  */
 
-const log = debug('compendium:direct-server');
-const logWarn = debug('compendium:direct-server:warn');
-const logError = debug('compendium:direct-server:error');
-const logTrace = debug('compendium:direct-server:trace');
+const log = debug('direct-server');
+const logWarn = debug('direct-server:warn');
+const logError = debug('direct-server:error');
+const logTrace = debug('direct-server:trace');
 
 /**
  * @param {Object} [options]

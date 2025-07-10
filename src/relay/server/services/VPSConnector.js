@@ -7,10 +7,10 @@ import { getOrCreateKeyPair, signMessage, registerPublicKeyWithVPS } from "../..
 
 const boatId = getOrCreateAppUuid();
 
-const log = debug("compendium:vps-connector");
-const logWarn = debug("compendium:vps-connector:warn");
-const logError = debug("compendium:vps-connector:error");
-const logTrace = debug("compendium:vps-connector:trace");
+const log = debug("vps-connector");
+const logWarn = debug("vps-connector:warn");
+const logError = debug("vps-connector:error");
+const logTrace = debug("vps-connector:trace");
 
 /**
  * VPSConnector

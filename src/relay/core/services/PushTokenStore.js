@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import debug from 'debug';
 
-const log = debug('compendium:push:token-store');
+const log = debug('push:token-store');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 

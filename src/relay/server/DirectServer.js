@@ -19,10 +19,11 @@ import { stateManager } from "../core/state/StateManager.js";
  * @property {NetSocket} [_socket]
  */
 
-const log = debug('compendium:direct-server');
-const logWarn = debug('compendium:direct-server:warn');
-const logError = debug('compendium:direct-server:error');
-const logTrace = debug('compendium:direct-server:trace');
+const log = debug('direct-server');
+const logWarn = debug('direct-server:warn');
+const logError = debug('direct-server:error');
+const logTrace = debug('direct-server:trace');
+const logState = debug('direct-server:state');
 
 /**
  * @param {Object} [options]
@@ -127,38 +128,82 @@ async function startDirectServer(stateManager, options = {}) {
     // Event handlers for state updates
     const onTideUpdate = (data) => {
       if (isAlive && ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({
+        const payload = {
           type: 'tide:update',
           data
-        }));
+        };
+        log(`[DIRECT] Client ${clientId}: Sending tide:update with data keys: ${Object.keys(data).join(', ')}`);
+        log(`[DIRECT] Client ${clientId}: Tide data structure: ${JSON.stringify(data, null, 2).substring(0, 500)}...`);
+        ws.send(JSON.stringify(payload));
+        log(`[DIRECT] Client ${clientId}: Successfully sent tide:update event`);
+      } else {
+        log(`[DIRECT] Client ${clientId}: Not sending tide:update - client not alive or connection not open`);
       }
     };
     
     const onWeatherUpdate = (data) => {
       if (isAlive && ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({
+        const payload = {
           type: 'weather:update',
           data
-        }));
+        };
+        log(`[DIRECT] Client ${clientId}: Sending weather:update with data keys: ${Object.keys(data).join(', ')}`);
+        log(`[DIRECT] Client ${clientId}: Weather data structure: ${JSON.stringify(data, null, 2).substring(0, 500)}...`);
+        ws.send(JSON.stringify(payload));
+        log(`[DIRECT] Client ${clientId}: Successfully sent weather:update event`);
+      } else {
+        log(`[DIRECT] Client ${clientId}: Not sending weather:update - client not alive or connection not open`);
       }
     };
 
     const onStateUpdate = (payload) => {
-      console.log("----------------------------------------------------------");
-      console.log(`[DEBUG] onStateUpdate called for client ${clientId}`);
-      console.log(`[DEBUG] Payload type: ${payload?.type}`);
-      console.log(`[DEBUG] Sending state update to client ${clientId}:`, payload);
-      console.log(`[DEBUG] Client ${clientId} is alive:`, isAlive);
-      console.log(`[DEBUG] Client ${clientId} is open:`, ws.readyState === ws.OPEN);
-      console.log(`[DEBUG] Client readyState value: ${ws.readyState}`);
-      console.log("----------------------------------------------------------");
-
-      if (isAlive && ws.readyState === ws.OPEN) {
-         ws.send(JSON.stringify(payload));
-         console.log(`[DEBUG] Message sent to client ${clientId}`);
-      } else {
-         console.log(`[DEBUG] Message NOT sent to client ${clientId} - client not alive or not open`);
+      logState("==== STATE UPDATE EVENT RECEIVED ====");
+      logState(`Client ${clientId}: Received state update event type: ${payload?.type}`);
+      logState(`Client ${clientId}: Client status - alive: ${isAlive}, readyState: ${ws.readyState}`);
+      
+      // Log detailed payload info without overwhelming the console
+      if (payload?.data) {
+        if (Array.isArray(payload.data)) {
+          logState(`Client ${clientId}: State patch operations: ${payload.data.length}`);
+          payload.data.forEach((op, i) => {
+            logState(`Client ${clientId}: Operation ${i+1}: ${op.op} at path ${op.path}`);
+          });
+        } else if (typeof payload.data === 'object') {
+          logState(`Client ${clientId}: State update keys: ${Object.keys(payload.data).join(', ')}`);
+          
+          // Check specifically for tide and weather data
+          if (payload.data.tide) {
+            logState(`Client ${clientId}: State includes tide data with keys: ${Object.keys(payload.data.tide).join(', ')}`);
+          } else {
+            logState(`Client ${clientId}: State does NOT include tide data`);
+          }
+          
+          if (payload.data.tides) {
+            logState(`Client ${clientId}: State includes tides data with keys: ${Object.keys(payload.data.tides).join(', ')}`);
+          } else {
+            logState(`Client ${clientId}: State does NOT include tides data`);
+          }
+          
+          if (payload.data.forecast) {
+            logState(`Client ${clientId}: State includes forecast data with keys: ${Object.keys(payload.data.forecast).join(', ')}`);
+          } else {
+            logState(`Client ${clientId}: State does NOT include forecast data`);
+          }
+        }
       }
+      
+      if (isAlive && ws.readyState === ws.OPEN) {
+        try {
+          const jsonString = JSON.stringify(payload);
+          ws.send(jsonString);
+          logState(`Client ${clientId}: Successfully sent state update (${jsonString.length} bytes)`);
+        } catch (error) {
+          logError(`Client ${clientId}: Failed to send state update:`, error);
+        }
+      } else {
+        logState(`Client ${clientId}: State update NOT sent - client not alive or connection not open`);
+      }
+      logState("==== END STATE UPDATE EVENT ====");
     };
 
     // Register event listeners
@@ -166,18 +211,20 @@ async function startDirectServer(stateManager, options = {}) {
     stateManager.on('weather:update', onWeatherUpdate);
     stateManager.on('state:patch', onStateUpdate);
     stateManager.on('state:full-update', onStateUpdate);
-    log(`[DIRECT] Client ${clientId}: Added state listeners. Total 'state:patch' listeners now: ${stateManager.listenerCount('state:patch')}`);
     
-    // Test: Emit a state:patch event after client connects
+    // Log detailed listener information
+    log(`[DIRECT] Client ${clientId}: Added state listeners.`);
+    logState(`Client ${clientId}: Total 'state:patch' listeners: ${stateManager.listenerCount('state:patch')}`);
+    logState(`Client ${clientId}: Total 'state:full-update' listeners: ${stateManager.listenerCount('state:full-update')}`);
+    logState(`Client ${clientId}: Total 'tide:update' listeners: ${stateManager.listenerCount('tide:update')}`);
+    logState(`Client ${clientId}: Total 'weather:update' listeners: ${stateManager.listenerCount('weather:update')}`);
+    
+    // Send initial state to the client
     setTimeout(() => {
-      console.log('[TEST] Emitting test state:patch event for client', clientId);
-      stateManager.emit('state:patch', {
-        type: 'state:patch',
-        data: [{ op: 'replace', path: '/test', value: 'test-value-' + Date.now() }],
-        boatId: 'test-boat',
-        timestamp: Date.now()
-      });
-    }, 2000);
+      logState(`Sending initial full state to client ${clientId}`);
+      stateManager.emitFullState();
+      logState(`Initial full state sent to client ${clientId}`);
+    }, 1000);
 
     // Function to send initial state
     const sendInitialState = () => {
@@ -553,19 +600,61 @@ async function startDirectServer(stateManager, options = {}) {
 
   // Broadcast to all connected clients
   function broadcast(message) {
-    if (!wss) return;
+    if (!wss) {
+      logError('Cannot broadcast: WebSocket server not initialized');
+      return;
+    }
     
     const clients = wss.clients;
-    if (!clients || clients.size === 0) return;
+    if (!clients || clients.size === 0) {
+      logState(`No clients connected to broadcast ${typeof message === 'string' ? message.substring(0, 50) : JSON.stringify(message).substring(0, 50)}...`);
+      return;
+    }
     
-    const messageString = JSON.stringify(message);
-    console.log(`Broadcasting to ${clients.size} clients: ${messageString}`);
+    let messageString;
+    if (typeof message === 'string') {
+      messageString = message;
+    } else {
+      try {
+        messageString = JSON.stringify(message);
+      } catch (error) {
+        logError('Failed to stringify message for broadcast:', error);
+        return;
+      }
+    }
     
-    clients.forEach((client) => {
+    const messageType = typeof message === 'string' 
+      ? 'unknown' 
+      : (message.type || (message.payload && message.payload.type) || 'unknown');
+    
+    logState(`==== BROADCASTING TO CLIENTS ====`);
+    logState(`Message type: ${messageType}`);
+    logState(`Total clients: ${clients.size}`);
+    logState(`Message size: ${messageString.length} bytes`);
+    
+    let sentCount = 0;
+    let closedCount = 0;
+    
+    clients.forEach((/** @type {WebSocket & ExtendedWebSocket} */ client) => {
+      // Check if client is an ExtendedWebSocket with clientId
+      const clientId = client.clientId || 'unknown';
+      
       if (client.readyState === 1) { // 1 = OPEN
-        client.send(messageString);
+        try {
+          client.send(messageString);
+          sentCount++;
+          logState(`Sent to client ${clientId}`);
+        } catch (error) {
+          logError(`Failed to send to client ${clientId}:`, error);
+        }
+      } else {
+        closedCount++;
+        logState(`Skipped client ${clientId} - not in OPEN state (state: ${client.readyState})`);
       }
     });
+    
+    logState(`Successfully sent to ${sentCount}/${clients.size} clients (${closedCount} closed)`);
+    logState(`==== BROADCAST COMPLETE ====`);
   }
 
 

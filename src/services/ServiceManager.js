@@ -17,8 +17,8 @@ export class ServiceManager {
     this.isShuttingDown = false;
 
     // Set up debug logging
-    this.log = debug('cn2:service-manager');
-    this.logError = debug('cn2:service-manager:error');
+    this.log = debug('service-manager');
+    this.logError = debug('service-manager:error');
   }
 
   registerService(name, service) {
