@@ -763,7 +763,7 @@ class StorageService extends EventEmitter {
     const now = Date.now();
     const expired = [];
     
-    // Find expired cache entries
+    // Find position:update
     for (const [cacheKey, entry] of this.deviceCache.entries()) {
       // Skip the special 'all_devices' cache key
       if (cacheKey === 'all_devices') continue;
@@ -779,7 +779,7 @@ class StorageService extends EventEmitter {
     }
     
     if (expired.length > 0) {
-      console.log(`Cleaned up ${expired.length} expired cache entries`);
+      console.log(`Cleaned up ${expired.length} position:update`);
     }
   }
 

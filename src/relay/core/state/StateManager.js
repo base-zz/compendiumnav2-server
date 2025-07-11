@@ -413,14 +413,6 @@ export class StateManager extends EventEmitter {
     // Always emit full state updates regardless of client count
     const timestamp = new Date().toISOString();
 
-    // Check specifically for forecast and tide data
-    // console.log('[STATE_MANAGER] EMITTING FULL STATE - Has forecast data:', !!this.appState.forecast);
-    // console.log('[STATE_MANAGER] EMITTING FULL STATE - Has tides data:', !!this.appState.tides);
-    console.log(
-      "[STATE_MANAGER] EMITTING FULL STATE - Has position data:",
-      this.appState.position
-    );
-
     const payload = {
       type: "state:full-update",
       data: this.appState,
