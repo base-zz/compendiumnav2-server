@@ -40,8 +40,10 @@ export class TidalService extends ScheduledService {
 
     // Listen for position updates from PositionService
     if (positionService && typeof positionService.on === "function") {
+      console.log("[TidalService] Attaching to positionService events");
       this.debugLog("TidalService attaching to positionService events");
       positionService.on("position:update", (position) => {
+        // console.log("[TidalService] Received position:update:", position);
         if (
           typeof position.latitude === "number" &&
           typeof position.longitude === "number"
@@ -54,11 +56,14 @@ export class TidalService extends ScheduledService {
           // Start scheduled runs after first valid position
           if (!this._hasScheduled) {
             this._hasScheduled = true;
+            console.log("[TidalService] Starting scheduled runs...");
             this.runNow(); // Run immediately
             this.start(); // Start interval scheduling
+            console.log("[TidalService] Scheduling started.");
             this.log("TidalService scheduling started.");
           }
         } else {
+          console.log("[TidalService] Received invalid position data:", position);
           this.logError(
             "Received invalid position data from PositionService:",
             position
@@ -66,6 +71,7 @@ export class TidalService extends ScheduledService {
         }
       });
     } else {
+      console.log("[TidalService] Could not attach to PositionService");
       this.logError("TidalService could not attach to PositionService");
     }
   }

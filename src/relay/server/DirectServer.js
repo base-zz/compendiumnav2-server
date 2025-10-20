@@ -110,10 +110,59 @@ async function startDirectServer(stateManager, options = {}) {
     const origin = request.headers.origin || 'unknown';
     let isAlive = true;
     
-    console.log(`[DIRECT] *** NEW CONNECTION *** from ${clientIp} (${clientId}), Origin: ${origin}`);
+    console.log('');
+    console.log('🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌');
+    console.log('🔌  DIRECTSERVER: NEW CLIENT CONNECTED!  🔌');
+    console.log('🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌');
+    console.log(`[DIRECT] Client ID: ${clientId}`);
+    console.log(`[DIRECT] Client IP: ${clientIp}`);
+    console.log(`[DIRECT] Origin: ${origin}`);
     console.log(`[DIRECT] Active clients: ${wss.clients.size}`);
     console.log(`[DIRECT] Request URL: ${request.url}`);
     console.log(`[DIRECT] Request headers:`, request.headers);
+    console.log('🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌');
+    console.log('');
+    
+    console.log(`[DIRECT] Step 1: Starting setup for client ${clientId}`);
+    
+    // Wrap everything in try-catch to see if there's an error
+    try {
+    
+    // Log WebSocket state changes
+    console.log(`[DIRECT] Client ${clientId}: Setting up connection handlers...`);
+    
+    // Log WebSocket state changes
+    ws.on('open', () => {
+      console.log(`[DIRECT] Client ${clientId}: WebSocket OPENED`);
+    });
+    
+    ws.on('close', (code, reason) => {
+      console.log(`[DIRECT] Client ${clientId}: WebSocket CLOSED (code: ${code}, reason: ${reason})`);
+    });
+    
+    ws.on('error', (error) => {
+      console.log(`[DIRECT] Client ${clientId}: WebSocket ERROR:`, error);
+    });
+    
+    // Send a test ping every 5 seconds to verify connection
+    const testPingInterval = setInterval(() => {
+      if (ws.readyState === ws.OPEN) {
+        // console.log(`[DIRECT] Client ${clientId}: Sending test ping...`);
+        try {
+          ws.send(JSON.stringify({ type: 'server:ping', timestamp: Date.now(), clientId }));
+          // console.log(`[DIRECT] Client ${clientId}: Test ping sent successfully`);
+        } catch (error) {
+          console.log(`[DIRECT] Client ${clientId}: Failed to send test ping:`, error);
+        }
+      } else {
+        console.log(`[DIRECT] Client ${clientId}: Cannot send test ping - connection not open (state: ${ws.readyState})`);
+      }
+    }, 5000);
+    
+    // Clean up interval on disconnect
+    ws.on('close', () => {
+      clearInterval(testPingInterval);
+    });
     
     // Function to get a safe copy of the state
     const getSafeStateCopy = (state) => {
@@ -142,16 +191,20 @@ async function startDirectServer(stateManager, options = {}) {
     };
     
     const onWeatherUpdate = (data) => {
+      console.log(`[DIRECT] Client ${clientId}: onWeatherUpdate called with data:`, data ? Object.keys(data) : 'null');
       if (isAlive && ws.readyState === ws.OPEN) {
         const payload = {
           type: 'weather:update',
           data
         };
+        console.log(`[DIRECT] Client ${clientId}: Sending weather:update to client`);
         log(`[DIRECT] Client ${clientId}: Sending weather:update with data keys: ${Object.keys(data).join(', ')}`);
         log(`[DIRECT] Client ${clientId}: Weather data structure: ${JSON.stringify(data, null, 2).substring(0, 500)}...`);
         ws.send(JSON.stringify(payload));
+        console.log(`[DIRECT] Client ${clientId}: Successfully sent weather:update event`);
         log(`[DIRECT] Client ${clientId}: Successfully sent weather:update event`);
       } else {
+        console.log(`[DIRECT] Client ${clientId}: Not sending weather:update - client not alive (${isAlive}) or connection not open (${ws.readyState})`);
         log(`[DIRECT] Client ${clientId}: Not sending weather:update - client not alive or connection not open`);
       }
     };
@@ -231,11 +284,17 @@ async function startDirectServer(stateManager, options = {}) {
       if (!isAlive || ws.readyState !== ws.OPEN) return;
       
       try {
-        const state = {
-          ...getSafeStateCopy(stateManager.getState()),
-          ...(stateManager.tideData && { tides: stateManager.tideData }),
-          ...(stateManager.weatherData && { forecast: stateManager.weatherData })
-        };
+        const state = getSafeStateCopy(stateManager.getState());
+        
+        // Log bluetooth state for debugging
+        console.log('[DIRECT] Sending initial state to client');
+        console.log('[DIRECT] Bluetooth state:', {
+          hasBluetoothState: !!state.bluetooth,
+          hasSelectedDevices: !!(state.bluetooth && state.bluetooth.selectedDevices),
+          selectedDevicesType: state.bluetooth && state.bluetooth.selectedDevices ? typeof state.bluetooth.selectedDevices : 'undefined',
+          selectedDevicesKeys: state.bluetooth && state.bluetooth.selectedDevices ? Object.keys(state.bluetooth.selectedDevices) : [],
+          selectedDevicesCount: state.bluetooth && state.bluetooth.selectedDevices ? Object.keys(state.bluetooth.selectedDevices).length : 0
+        });
 
         ws.send(JSON.stringify({
           type: 'state:full-update',
@@ -254,9 +313,14 @@ async function startDirectServer(stateManager, options = {}) {
       }
     };
     
+    console.log(`[DIRECT] Registering message handler for client ${clientId}`);
+    
     // Handle incoming messages
     ws.on('message', (message) => {
-      if (!isAlive) return;
+      if (!isAlive) {
+        console.log('[DIRECTSERVER] ❌ Connection not alive, ignoring message');
+        return;
+      }
       
       try {
         let messageStr;
@@ -272,7 +336,50 @@ async function startDirectServer(stateManager, options = {}) {
         let data;
         try {
           data = JSON.parse(messageStr);
-          log(`Parsed message type: ${data.type || 'unknown'}`);
+          
+          // Only log bluetooth messages in detail
+          if (data.type && (data.type.includes('bluetooth') || data.type === 'bluetooth:select-device' || data.type === 'bluetooth:deselect-device')) {
+            console.log('========================================');
+            console.log(`[DIRECTSERVER] 🔵 BLUETOOTH MESSAGE RECEIVED FROM CLIENT ${clientId} 🔵`);
+            console.log('========================================');
+            console.log('[DIRECTSERVER] Message keys:', Object.keys(data));
+            console.log('[DIRECTSERVER] data.type:', data.type);
+            console.log('[DIRECTSERVER] data.serviceName:', data.serviceName);
+            console.log('[DIRECTSERVER] data.action:', data.action);
+            console.log('[DIRECTSERVER] Full message:', JSON.stringify(data, null, 2));
+          }
+          
+          log(`Parsed message type: ${data.type || data.serviceName || 'unknown'}`, JSON.stringify(data, null, 2));
+          
+          // Test handler - respond to ANY message
+          if (data.type === 'test' || data.action === 'test') {
+            console.log('[DIRECTSERVER] 🧪 TEST MESSAGE RECEIVED!');
+            ws.send(JSON.stringify({ type: 'test:response', success: true, message: 'Server received your test message!' }));
+            return;
+          }
+          
+          // Handle messages with serviceName format (e.g., { serviceName: "state", action: "bluetooth:select-device", data: {...} })
+          if (data.serviceName === 'state' && data.action && data.data) {
+            log('[STATE-MESSAGE] Received state service message:', JSON.stringify(data, null, 2));
+            
+            // Check if this is a bluetooth device selection message
+            if (data.action === 'bluetooth:select-device' && data.data.deviceId) {
+              log('[BLUETOOTH-SELECT] Detected bluetooth:select-device action in state message');
+              // Convert to bluetooth:select-device format
+              data.type = 'bluetooth:select-device';
+              data.deviceId = data.data.deviceId;
+              data.boatId = data.data.boatId;
+              data.timestamp = data.data.timestamp;
+              log('[BLUETOOTH-SELECT] Converted message to:', JSON.stringify(data, null, 2));
+              // Continue processing below
+            } else if (data.action === 'bluetooth:deselect-device' && data.data.deviceId) {
+              log('[BLUETOOTH-DESELECT] Detected bluetooth:deselect-device action in state message');
+              data.type = 'bluetooth:deselect-device';
+              data.deviceId = data.data.deviceId;
+              data.boatId = data.data.boatId;
+              data.timestamp = data.data.timestamp;
+            }
+          }
           
           // Handle Bluetooth toggle (direct format)
           if (data.type === 'bluetooth:toggle') {
@@ -313,7 +420,13 @@ async function startDirectServer(stateManager, options = {}) {
           }
           
           // Handle Bluetooth commands
-          if ((data.type === 'command' && data.service === 'bluetooth') || data.type === 'bluetooth:toggle') {
+          if ((data.type === 'command' && data.service === 'bluetooth') || 
+              data.type === 'bluetooth:toggle' ||
+              data.type === 'bluetooth:select-device' ||
+              data.type === 'bluetooth:deselect-device' ||
+              data.type === 'bluetooth:rename-device' ||
+              data.type === 'bluetooth:scan') {
+            console.log('[DIRECTSERVER] ✅ Processing Bluetooth command');
             log('Processing Bluetooth command:', JSON.stringify(data, null, 2));
             
             // Extract action and command data based on message format
@@ -323,6 +436,33 @@ async function startDirectServer(stateManager, options = {}) {
               // Handle bluetooth:toggle format
               action = 'toggle';
               commandData = { enabled: data.enabled };
+            } else if (data.type === 'bluetooth:select-device') {
+              log('[BLUETOOTH-SELECT] Received bluetooth:select-device message:', JSON.stringify(data, null, 2));
+              action = 'select-device';
+              commandData = { 
+                deviceId: data.deviceId,
+                boatId: data.boatId,
+                timestamp: data.timestamp
+              };
+              log('[BLUETOOTH-SELECT] Extracted action:', action, 'commandData:', JSON.stringify(commandData, null, 2));
+            } else if (data.type === 'bluetooth:deselect-device') {
+              action = 'deselect-device';
+              commandData = { 
+                deviceId: data.deviceId,
+                boatId: data.boatId,
+                timestamp: data.timestamp
+              };
+            } else if (data.type === 'bluetooth:rename-device') {
+              action = 'rename-device';
+              commandData = { 
+                deviceId: data.deviceId, 
+                name: data.name,
+                boatId: data.boatId,
+                timestamp: data.timestamp
+              };
+            } else if (data.type === 'bluetooth:scan') {
+              action = 'scan';
+              commandData = { scanning: data.scanning };
             } else {
               // Handle standard command format
               action = data.action;
@@ -360,20 +500,25 @@ async function startDirectServer(stateManager, options = {}) {
                   
                 case 'select-device':
                   // Select a Bluetooth device
+                  log('[BLUETOOTH-SELECT] Entering select-device case handler');
+                  log('[BLUETOOTH-SELECT] commandData:', JSON.stringify(commandData, null, 2));
                   if (commandData?.deviceId) {
+                    log('[BLUETOOTH-SELECT] Calling stateManager.setBluetoothDeviceSelected with deviceId:', commandData.deviceId);
                     // Handle async method
                     stateManager.setBluetoothDeviceSelected(commandData.deviceId, true)
                       .then(result => {
+                        log('[BLUETOOTH-SELECT] setBluetoothDeviceSelected result:', result);
                         response.success = result;
                         response.message = `Device ${commandData.deviceId} selected`;
                         response.deviceId = commandData.deviceId;
                         
                         if (ws.readyState === ws.OPEN) {
+                          log('[BLUETOOTH-SELECT] Sending success response to client');
                           ws.send(JSON.stringify(response));
                         }
                       })
                       .catch(error => {
-                        logError(`Error selecting device:`, error);
+                        logError(`[BLUETOOTH-SELECT] Error selecting device:`, error);
                         response.error = `Error selecting device: ${error.message}`;
                         response.success = false;
                         
@@ -385,6 +530,7 @@ async function startDirectServer(stateManager, options = {}) {
                     // Return early since we're handling the response asynchronously
                     return;
                   } else {
+                    log('[BLUETOOTH-SELECT] ERROR: No deviceId in commandData');
                     response.error = 'Invalid parameter: deviceId is required';
                   }
                   break;
@@ -490,6 +636,7 @@ async function startDirectServer(stateManager, options = {}) {
 
           // Handle ping messages
           if (data.type === 'ping') {
+            // console.log(`[DIRECTSERVER] 💓 Received PING from client ${clientId}`);
             // Respond with a pong message
             if (ws.readyState === ws.OPEN) {
               ws.send(JSON.stringify({
@@ -498,6 +645,7 @@ async function startDirectServer(stateManager, options = {}) {
                 serverTime: new Date().toISOString(),
                 echo: data.timestamp // Echo back the client timestamp for latency calculation
               }));
+              // console.log(`[DIRECTSERVER] 💓 Sent PONG to client ${clientId}`);
             }
             return;
           }
@@ -574,6 +722,11 @@ async function startDirectServer(stateManager, options = {}) {
     ws.once('pong', () => {
       clearTimeout(connectionTimeout);
     });
+    
+    } catch (setupError) {
+      console.error(`[DIRECT] ERROR during client ${clientId} setup:`, setupError);
+      console.error(`[DIRECT] Error stack:`, setupError.stack);
+    }
   });
   
   // Handle CORS headers for WebSocket upgrade

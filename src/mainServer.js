@@ -10,6 +10,10 @@ import { startRelayServer, startDirectServer } from "./relay/server/index.js";
 import { stateManager } from "./relay/core/state/StateManager.js";
 import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
 import { registerVpsRoutes } from "./server/vps/registration.js";
+import { TidalService } from "./services/TidalService.js";
+import { WeatherService } from "./services/WeatherService.js";
+import { PositionService } from "./services/PositionService.js";
+import { BluetoothService } from "./services/BluetoothService.js";
 import debug from 'debug';
 
 const log = debug('server:main');
@@ -70,24 +74,159 @@ async function bridgeStateToRelay() {
   }
 }
 
+// --- Initialize secondary services (Weather, Tidal, Position, Bluetooth) ---
+async function initializeSecondaryServices() {
+  console.log("[SERVER] Initializing secondary services (Weather, Tidal, Position, Bluetooth)...");
+  
+  try {
+    // Initialize Position Service
+    const positionSources = {
+      gps: { priority: 1, timeout: 10000 },
+      ais: { priority: 2, timeout: 15000 },
+      state: { priority: 3, timeout: 20000 }
+    };
+    const positionService = new PositionService({ sources: positionSources });
+    
+    // Connect PositionService to StateService so it can receive position:update events
+    console.log("[SERVER] Connecting PositionService to StateService...");
+    positionService.dependencies.state = stateService;
+    
+    // Initialize Tidal and Weather services with position service
+    console.log("[SERVER] Initializing TidalService and WeatherService...");
+    const tidalService = new TidalService(stateService, positionService);
+    const weatherService = new WeatherService(stateService, positionService);
+    
+    // Initialize Bluetooth service
+    console.log("[SERVER] Initializing BluetoothService...");
+    const bluetoothService = new BluetoothService({ stateManager });
+    
+    // Wire services to StateManager
+    console.log("[SERVER] Wiring services to StateManager...");
+    stateManager.listenToService(positionService);
+    stateManager.listenToService(tidalService);
+    stateManager.listenToService(weatherService);
+    stateManager.listenToService(bluetoothService);
+    
+    // Start position service
+    console.log("[SERVER] Starting PositionService...");
+    await positionService.start();
+    console.log("[SERVER] PositionService started successfully");
+    
+    // Start Bluetooth service
+    console.log("[SERVER] Starting BluetoothService...");
+    console.log("[SERVER] bluetoothService type:", typeof bluetoothService);
+    console.log("[SERVER] bluetoothService.start type:", typeof bluetoothService.start);
+    console.log("[SERVER] bluetoothService.isRunning:", bluetoothService.isRunning);
+    try {
+      console.log("[SERVER] About to call bluetoothService.start()...");
+      await bluetoothService.start();
+      console.log("[SERVER] bluetoothService.start() returned");
+      console.log("[SERVER] BluetoothService started successfully");
+      
+      // Start periodic Bluetooth data logger (every 10 seconds for testing)
+      console.log('[SERVER] Starting Bluetooth data logger (every 10 seconds)');
+      
+      setInterval(() => {
+        console.log('[BT-LOGGER] Running periodic check...');
+        const selectedDevices = stateManager.getSelectedBluetoothDevices();
+        const allDevices = stateManager.getAllBluetoothDevices();
+        const selectedCount = Object.keys(selectedDevices).length;
+        const allCount = Object.keys(allDevices).length;
+        
+        console.log(`[BT-LOGGER] Total devices: ${allCount}, Selected: ${selectedCount}`);
+        console.log(`[BT-LOGGER] selectedDevices keys:`, Object.keys(selectedDevices));
+        
+        // Check if our specific device is in allDevices
+        const targetId = 'c4d5653318b41ad4dce6b335160e7999';
+        if (allDevices[targetId]) {
+          const device = allDevices[targetId];
+          console.log(`[BT-LOGGER] Target device ${targetId.slice(-8)} found in allDevices, isSelected=${device.isSelected}`);
+          console.log(`[BT-LOGGER] Device name: "${device.name}", has sensorData: ${!!device.sensorData}`);
+          if (device.sensorData) {
+            console.log(`[BT-LOGGER] Sensor data keys:`, Object.keys(device.sensorData));
+          }
+        }
+        
+        if (selectedCount > 0) {
+          console.log('\n========== BLUETOOTH DATA UPDATE ==========');
+          console.log(`Selected Devices: ${selectedCount}`);
+          
+          Object.values(selectedDevices).forEach(device => {
+            const label = device.userLabel || device.name || device.id;
+            console.log(`\n📱 ${label} (${device.id.slice(-8)})`);
+            
+            if (device.sensorData) {
+              console.log('  Sensor Data:');
+              if (device.sensorData.temperature) {
+                console.log(`    🌡️  Temperature: ${device.sensorData.temperature.value}${device.sensorData.temperature.unit}`);
+              }
+              if (device.sensorData.humidity) {
+                console.log(`    💧 Humidity: ${device.sensorData.humidity.value}${device.sensorData.humidity.unit}`);
+              }
+              if (device.sensorData.pressure) {
+                console.log(`    🔽 Pressure: ${device.sensorData.pressure.value}${device.sensorData.pressure.unit}`);
+              }
+              if (device.sensorData.battery) {
+                console.log(`    🔋 Battery: ${device.sensorData.battery.voltage?.value}V`);
+              }
+              console.log(`    ⏰ Last Update: ${device.lastSensorUpdate || device.lastSeen}`);
+            } else {
+              console.log('  ⚠️  No sensor data yet');
+            }
+            console.log(`  📡 RSSI: ${device.rssi} dBm`);
+          });
+          
+          console.log('==========================================\n');
+        } else if (allCount > 0) {
+          console.log(`[BT-LOGGER] ${allCount} devices discovered but none selected yet`);
+        } else {
+          console.log('[BT-LOGGER] No devices discovered yet');
+        }
+      }, 10000); // Log every 10 seconds for testing
+      
+    } catch (error) {
+      console.error("❌ [SERVER] BluetoothService failed to start:", error.message);
+      console.error("Stack trace:", error.stack);
+    }
+    
+    // Verify the connection by checking event listeners
+    const listenerCount = stateService.listenerCount('position:update');
+    console.log(`[SERVER] StateService has ${listenerCount} listeners for 'position:update' event`);
+    
+    // Test if PositionService can receive events
+    // positionService.on('position:update', (pos) => {
+    //   console.log('[SERVER] PositionService emitted position:update:', pos);
+    // });
+    
+    // Check how many listeners are on PositionService
+    const posListenerCount = positionService.listenerCount('position:update');
+    console.log(`[SERVER] PositionService has ${posListenerCount} listeners for 'position:update' event (should be 3: server test, weather, tidal)`);
+    
+    console.log("[SERVER] Secondary services initialized successfully");
+  } catch (error) {
+    console.error("[SERVER] Failed to initialize secondary services:", error);
+    throw error;
+  }
+}
+
 async function startServer() {
   try {
     // 0. Start StateService (SignalK, data ingestion)
     await stateService.initialize();
 
-    // Pass initial state into StateManager2
-    stateManager.initialState = stateService.getState();
-
     // 1. Bridge canonical state into relay state manager
     await bridgeStateToRelay();
 
-    // 2. Build relay config
+    // 2. Initialize secondary services (Weather, Tidal, Position)
+    await initializeSecondaryServices();
+
+    // 3. Build relay config
     const relayConfig = {
       port: parseInt(
         process.env.RELAY_PORT ||
           process.env.RELAY_SERVER_PORT ||
-          process.env.PORT ||
-          "8081",
+          process.env.INTERNAL_PORT ||
+          "8080",
         10
       ),
       signalKRefreshRate: parseInt(
@@ -107,10 +246,10 @@ async function startServer() {
     if (!relayConfig.vpsUrl)
       throw new Error("RelayServer: vpsUrl must be set via env");
 
-    // 3. Start relay server
-    await startRelayServer(relayConfig);
+    // 4. Start relay server
+    await startRelayServer(stateManager, relayConfig);
 
-    // 4. Create and configure Express app for API endpoints
+    // 5. Create and configure Express app for API endpoints
     const app = express();
     app.use(express.json());
     
@@ -135,7 +274,7 @@ async function startServer() {
       });
     }
     
-    // 5. Start HTTP server
+    // 6. Start HTTP server
     const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000; // Default to 3000 for HTTP
     const httpServer = http.createServer(app);
     
@@ -177,14 +316,14 @@ async function startServer() {
       console.log(`  - ${host}/health - Server health check`);
     });
 
-    // 5. Relay state updates to VPS (optional, placeholder for future logic)
+    // 7. Relay state updates to VPS (optional, placeholder for future logic)
     stateService.on("state-updated", (data) => {
       // VPS relay logic can be added here if needed in the future
     });
 
-    // 6. Start Direct WebSocket server (optional)
+    // 8. Start Direct WebSocket server (optional)
     if (process.env.DIRECT_WS_PORT) {
-      const directServer = await startDirectServer({
+      const directServer = await startDirectServer(stateManager, {
         port: parseInt(process.env.DIRECT_WS_PORT, 10),
       });
       console.log(
@@ -203,6 +342,23 @@ async function startServer() {
         }
       });
     }
+
+    // 9. Start periodic Bluetooth state logger (every 10 seconds)
+    console.log("[SERVER] Starting Bluetooth state logger (every 10 seconds)");
+    setInterval(() => {
+      const bluetoothState = stateManager.appState.bluetooth;
+      
+      if (!bluetoothState) {
+        console.log("\n========== BLUETOOTH STATE ==========");
+        console.log("No bluetooth state available");
+        console.log("=====================================\n");
+        return;
+      }
+
+      console.log("\n========== BLUETOOTH STATE ==========");
+      console.log(JSON.stringify(bluetoothState, null, 2));
+      console.log("=====================================\n");
+    }, 10000); // Every 10 seconds
   } catch (err) {
     console.error("[SERVER] Failed to start:", err);
     process.exit(1);

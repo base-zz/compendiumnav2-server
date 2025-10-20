@@ -143,6 +143,10 @@ export class RelayWebSocketServer {
       
       // Handle client messages
       ws.on('message', (message) => {
+        console.log('========================================');
+        console.log(`[RELAYSERVER/WS] ⚡ MESSAGE RECEIVED FROM CLIENT ${clientId} ⚡`);
+        console.log('========================================');
+        
         let parsedMessage;
         let rawMessage;
         
@@ -225,7 +229,7 @@ export class RelayWebSocketServer {
   /**
    * Handle messages from clients
    */
-  _handleClientMessage(clientId, message) {
+  async _handleClientMessage(clientId, message) {
     const { type, action, data } = message;
     
     // Always log message details in debug mode or for certain message types
@@ -236,6 +240,22 @@ export class RelayWebSocketServer {
         messageId: message.id || 'none',
         timestamp: new Date().toISOString()
       });
+    }
+    
+    // Handle messages with serviceName format (e.g., { serviceName: "state", action: "bluetooth:select-device", data: {...} })
+    if (message.serviceName === 'state' && message.action && message.data) {
+      console.log('[STATE-MESSAGE] WebSocketServer: Received state service message:', JSON.stringify(message, null, 2));
+      
+      // Check if this is a bluetooth device selection message
+      if (message.action === 'bluetooth:select-device' && message.data.deviceId) {
+        console.log('[BLUETOOTH-SELECT] WebSocketServer: Detected bluetooth:select-device action');
+        await this._handleBluetoothCommand(clientId, 'select-device', message.data);
+        return;
+      } else if (message.action === 'bluetooth:deselect-device' && message.data.deviceId) {
+        console.log('[BLUETOOTH-DESELECT] WebSocketServer: Detected bluetooth:deselect-device action');
+        await this._handleBluetoothCommand(clientId, 'deselect-device', message.data);
+        return;
+      }
     }
     
     switch (type) {
@@ -269,6 +289,31 @@ export class RelayWebSocketServer {
             timestamp: Date.now()
           });
         }
+        break;
+        
+      case 'bluetooth:select-device':
+        // Handle Bluetooth device selection (direct format)
+        console.log('[BLUETOOTH-SELECT] WebSocketServer: Received bluetooth:select-device message');
+        console.log('[BLUETOOTH-SELECT] WebSocketServer: Full message:', JSON.stringify(message, null, 2));
+        await this._handleBluetoothCommand(clientId, 'select-device', message);
+        break;
+        
+      case 'bluetooth:deselect-device':
+        // Handle Bluetooth device deselection (direct format)
+        console.log('[BLUETOOTH-DESELECT] WebSocketServer: Received bluetooth:deselect-device message');
+        await this._handleBluetoothCommand(clientId, 'deselect-device', message);
+        break;
+        
+      case 'bluetooth:rename-device':
+        // Handle Bluetooth device rename (direct format)
+        console.log('[BLUETOOTH-RENAME] WebSocketServer: Received bluetooth:rename-device message');
+        await this._handleBluetoothCommand(clientId, 'rename-device', message);
+        break;
+        
+      case 'bluetooth:scan':
+        // Handle Bluetooth scan (direct format)
+        console.log('[BLUETOOTH-SCAN] WebSocketServer: Received bluetooth:scan message');
+        await this._handleBluetoothCommand(clientId, 'scan', message);
         break;
         
       case 'command':
@@ -385,19 +430,26 @@ export class RelayWebSocketServer {
           
         case 'select-device':
           // Select a Bluetooth device
+          console.log('[BLUETOOTH-SELECT] WebSocketServer: Entering select-device case');
+          console.log('[BLUETOOTH-SELECT] WebSocketServer: data:', JSON.stringify(data, null, 2));
           if (data?.deviceId) {
-            success = this.relayServer.stateManager.setBluetoothDeviceSelected(data.deviceId, true);
+            console.log('[BLUETOOTH-SELECT] WebSocketServer: Calling setBluetoothDeviceSelected with deviceId:', data.deviceId);
+            success = await this.relayServer.stateManager.setBluetoothDeviceSelected(data.deviceId, true);
+            console.log('[BLUETOOTH-SELECT] WebSocketServer: Result:', success);
             response.message = `Device ${data.deviceId} selected`;
             response.deviceId = data.deviceId;
           } else {
+            console.log('[BLUETOOTH-SELECT] WebSocketServer: ERROR - No deviceId in data');
             response.error = 'Invalid parameter: deviceId is required';
           }
           break;
           
         case 'deselect-device':
           // Deselect a Bluetooth device
+          console.log('[BLUETOOTH-DESELECT] WebSocketServer: Entering deselect-device case');
           if (data?.deviceId) {
-            success = this.relayServer.stateManager.setBluetoothDeviceSelected(data.deviceId, false);
+            console.log('[BLUETOOTH-DESELECT] WebSocketServer: Calling setBluetoothDeviceSelected with deviceId:', data.deviceId);
+            success = await this.relayServer.stateManager.setBluetoothDeviceSelected(data.deviceId, false);
             response.message = `Device ${data.deviceId} deselected`;
             response.deviceId = data.deviceId;
           } else {

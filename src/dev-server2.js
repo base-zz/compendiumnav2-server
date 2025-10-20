@@ -149,16 +149,18 @@ async function initializeSecondaryServices(stateManager, serviceManager) {
   log("Starting secondary services...");
 
   const stateService = serviceManager.getService("state");
-  const tidalService = new TidalService(stateService);
-  const weatherService = new WeatherService();
-
-  // --- Initialize Position Service ---
+  
+  // --- Initialize Position Service first ---
   const positionSources = {
     gps: { priority: 1, timeout: 10000 },
     ais: { priority: 2, timeout: 15000 },
     state: { priority: 3, timeout: 20000 }
   };
   const positionService = new PositionService({ sources: positionSources });
+  
+  // Initialize Tidal and Weather services with position service
+  const tidalService = new TidalService(stateService, positionService);
+  const weatherService = new WeatherService(stateService, positionService);
   const bluetoothService = new BluetoothService({
     scanDuration: 10000,
     scanInterval: 30000,

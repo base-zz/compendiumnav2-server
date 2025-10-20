@@ -8,6 +8,7 @@ import { EventEmitter } from "events";
 import { ParserRegistry } from "../bluetooth/parsers/ParserRegistry.js";
 import { DeviceManager } from "../bluetooth/services/DeviceManager.js";
 import RuuviParser from "../bluetooth/parsers/RuuviParser.js";
+import ParserFactory from "../bluetooth/parsers/ParserFactory.js";
 import ContinuousService from "./ContinuousService.js";
 
 /**
@@ -323,40 +324,28 @@ export class BluetoothService extends ContinuousService {
    * @returns {Promise<void>}
    */
   async start() {
+    this.log(`BluetoothService.start() called, isRunning=${this.isRunning}`);
+    
     if (this.isRunning) {
-      this.log("Bluetooth service is already running");
+      this.log("⚠️  Bluetooth service is already running, returning early");
       return;
     }
 
     try {
       this.log("Starting Bluetooth service...");
       
-      // Debug RuuviParser import
-      this.log("RuuviParser import check:", {
-        exists: !!RuuviParser,
-        type: typeof RuuviParser,
-        isClass: typeof RuuviParser === 'function',
-        manufacturerId: RuuviParser ? RuuviParser.manufacturerId : undefined,
-        staticParse: RuuviParser ? (typeof RuuviParser.parse === 'function') : undefined,
-        prototype: RuuviParser ? Object.getOwnPropertyNames(RuuviParser.prototype || {}) : undefined
-      });
-      
       // Initialize DeviceManager with error handling
       try {
         // Check if there's a lock file and remove it if it exists
-
         const lockFilePath = path.join(process.cwd(), 'data', 'devices.db', 'LOCK');
         
         try {
           // Check for stale lock file and remove it asynchronously.
-          // fs.stat will throw an error if the file doesn't exist (e.g., code 'ENOENT').
           await fs.stat(lockFilePath);
-          this.log(`Found stale lock file at ${lockFilePath}, attempting to remove...`);
           await fs.unlink(lockFilePath);
-          this.log(`Successfully removed stale lock file`);
+          this.log(`Removed stale lock file`);
         } catch (error) {
           if (error.code !== 'ENOENT') {
-            // Log errors other than 'file not found', as that is an expected case.
             this.logError(`Error handling stale lock file: ${error.message}`);
           }
         }
@@ -386,35 +375,39 @@ export class BluetoothService extends ContinuousService {
       
       // Update Bluetooth status in state if state manager is available
       if (this.stateManager) {
-        this.stateManager.updateBluetoothStatus({
-          state: 'enabled',
-          error: null
-        });
-        this.log('Updated Bluetooth status in state manager');
+        try {
+          this.stateManager.updateBluetoothStatus({
+            state: 'enabled',
+            error: null
+          });
+          this.log('Updated Bluetooth status in state manager');
+        } catch (statusError) {
+          this.logError(`Error updating Bluetooth status: ${statusError.message}`);
+        }
       }
 
-      // Initialize the parser registry if not already done
+      // Ensure ParserRegistry exists
       if (!this.parserRegistry) {
         this.parserRegistry = new ParserRegistry();
         this.log("Created new ParserRegistry instance");
-        
-        // Use the RuuviParser instance directly - it now has the expected interface
-        this.log(`Using RuuviParser instance with manufacturerId: 0x${RuuviParser.manufacturerId.toString(16).toUpperCase()}`);
-        this.log(`RuuviParser instance:`, {
-          name: RuuviParser.name,
-          hasParse: typeof RuuviParser.parse === 'function',
-          hasMatches: typeof RuuviParser.matches === 'function'
-        });
-        
-        // Register the RuuviParser with the correct manufacturer ID
-        const registrationResult = this.registerParser(RuuviParser.manufacturerId, RuuviParser);
-        this.log(`RuuviParser registration result: ${registrationResult}`);
-        
-        // Verify registration
-        const allParsers = this.parserRegistry.getAllParsers ? this.parserRegistry.getAllParsers() : new Map();
-        this.log(`Total parsers after registration: ${allParsers.size || 'unknown'}`);
-        
-        this.log(`Registered RuuviParser for manufacturer ID: 0x${RuuviParser.manufacturerId.toString(16).toUpperCase()}`);
+      }
+      
+      // Load parsers from configuration files
+      this.log("Loading parsers from configuration files...");
+      const parserFactory = new ParserFactory();
+      await parserFactory.loadAllParsers();
+      
+      // Register all loaded parsers
+      const configParsers = parserFactory.getAllParsers();
+      for (const [manufacturerId, parser] of configParsers) {
+        this.registerParser(manufacturerId, parser);
+        this.log(`Registered ${parser.name} for manufacturer ID: 0x${manufacturerId.toString(16).toUpperCase()}`);
+      }
+      
+      // Also register the original RuuviParser as fallback (if not already loaded from config)
+      if (!configParsers.has(RuuviParser.manufacturerId)) {
+        this.registerParser(RuuviParser.manufacturerId, RuuviParser);
+        this.log(`Registered RuuviParser (fallback) for manufacturer ID: 0x${RuuviParser.manufacturerId.toString(16).toUpperCase()}`);
       }
 
       // Initialize the device manager if not already done
@@ -427,18 +420,21 @@ export class BluetoothService extends ContinuousService {
 
       // Load company identifiers
       await this._loadCompanyMap();
+      this.log("Company map loaded");
 
       // Initialize the BLE stack
       await this._initNoble();
+      this.log("Noble initialized");
 
       // Start the scan cycle
       await this._startScanCycle();
+      this.log("Scan cycle started");
 
       this.isRunning = true;
-      this.emit("started");
       this.log("Bluetooth service started successfully");
     } catch (error) {
-      this.logError(`Failed to start Bluetooth service: ${error.message}`);
+      this.logError(`❌ Failed to start Bluetooth service: ${error.message}`);
+      this.logError(`Stack: ${error.stack}`);
       this.emit("error", error);
       throw error;
     }
@@ -757,7 +753,7 @@ export class BluetoothService extends ContinuousService {
    * @private
    */
   _handleScanStart() {
-    this.log("Bluetooth scan started");
+    this.log("✅ Bluetooth scan started - actively scanning for devices");
     this.scanning = true;
     this.isStarting = false;
     // No need to clear deviceUpdates as it's a Map that prevents duplicates by key
@@ -842,22 +838,24 @@ export class BluetoothService extends ContinuousService {
    */
   async _startScanCycle() {
     if (this.scanCycleActive) {
-      this.log("Scan cycle already active");
+      this.log("⚠️  Scan cycle already active");
       return;
     }
 
     this.scanCycleActive = true;
-    this.log("Starting BLE scan cycle");
+    this.log("🔄 Starting BLE scan cycle");
 
     const scanTime = this.scanTime || 10000; // 10 seconds
     const restTime = this.restTime || 5000; // 5 seconds
 
     const scanCycle = async () => {
       if (!this.scanCycleActive) {
+        this.log("⚠️  Scan cycle stopped");
         return;
       }
 
       try {
+        this.log(`🔍 Starting scan (${scanTime}ms scan, ${restTime}ms rest)...`);
         // Start scanning - _startScan will handle the scanning state and events
         await this._startScan();
 
@@ -999,26 +997,29 @@ export class BluetoothService extends ContinuousService {
     try {
       // Skip if we're not scanning
       if (!this.scanning) {
-        this.log("Skipping device discovery - not currently scanning", "debug");
+        this.log("⚠️  Skipping device discovery - not currently scanning", "debug");
         return;
       }
       
-      // this.log(`[DEBUG] Device discovery event received for peripheral: ${peripheral.id}`);
-
       // Extract device information
       const { id, address, addressType, rssi, advertisement } = peripheral;
       const { localName, txPowerLevel, manufacturerData } = advertisement;
 
-      // Create device info object. On macOS, address is not available for privacy reasons,
-      // so we use a slice of the ID as a fallback for the name.
+      // Use MAC address if available (Linux/Windows), otherwise use system UUID (macOS/iOS)
+      // This ensures consistent IDs across platforms where possible
+      const deviceId = address || id;
+
+      // Create device info object
       const deviceInfo = {
-        id,
-        address,
+        id: deviceId,
+        systemId: id,  // Keep original system ID for reference
+        address,       // MAC address (if available)
         addressType,
         rssi,
         name:
           localName ||
           (address ? `Unknown (${address})` : `Unknown (${id.slice(-6)})`),
+        userLabel: null,  // User-defined label (set via updateBluetoothDeviceMetadata)
         txPower: txPowerLevel,
         lastSeen: new Date().toISOString(),
         state: peripheral.state,
@@ -1032,6 +1033,24 @@ export class BluetoothService extends ContinuousService {
         // Extract manufacturer ID from the first 2 bytes (little endian)
         const manufacturerId = manufacturerData.readUInt16LE(0);
         deviceInfo.manufacturerId = manufacturerId;
+        
+        // Debug logging for Ruuvi devices
+        if (manufacturerId === 0x0499) {
+          this.log(`[RUUVI] Device ${deviceId} manufacturer data: ${manufacturerData.toString('hex')}`);
+          this.log(`[RUUVI] Manufacturer data length: ${manufacturerData.length}`);
+        }
+        
+        // Parse sensor data using registered parsers
+        const parsedData = this._parseManufacturerData(manufacturerData);
+        if (parsedData) {
+          deviceInfo.sensorData = parsedData;
+          this.log(`Parsed sensor data for device ${deviceId}:`, JSON.stringify(parsedData, null, 2));
+          
+          // Always emit sensor data event - StateManager will handle it for selected devices
+          this.emit("device:data", { id: deviceId, data: parsedData });
+        } else if (manufacturerId === 0x0499) {
+          this.log(`[RUUVI] Failed to parse data for device ${deviceId}`);
+        }
       }
 
       // Update device in device manager
@@ -1055,20 +1074,24 @@ export class BluetoothService extends ContinuousService {
    * @private
    */
   _parseManufacturerData(manufacturerData) {
-    if (!manufacturerData || !manufacturerData.length) return null;
+    if (!manufacturerData || !manufacturerData.length) {
+      return null;
+    }
 
     try {
       // Use the findParserFor method to get the appropriate parser
       const parser = this.parserRegistry
         ? this.parserRegistry.findParserFor(manufacturerData)
         : null;
+      
       if (!parser) {
         // No parser found for this manufacturer
         return null;
       }
 
       // Parse the data using the parser's parse method
-      return parser.parse(manufacturerData);
+      const result = parser.parse(manufacturerData);
+      return result;
     } catch (error) {
       this.log(`Error parsing manufacturer data: ${error.message}`, "error");
       return null;

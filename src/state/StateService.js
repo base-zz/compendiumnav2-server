@@ -109,6 +109,10 @@ class StateService extends EventEmitter {
     };
   }
 
+  getState() {
+    return stateData.state;
+  }
+
   async initialize(config = {}) {
     console.log("[StateService] Initializing with config:", config);
     const isNodeEnv = typeof process !== "undefined" && process.env;
@@ -767,14 +771,14 @@ class StateService extends EventEmitter {
       // Convert to user's preferred units
       const originalValue = transformedValue;
       transformedValue = this._convertToUserUnits(path, transformedValue, sourceUnit);
-      if (path.includes('depth')) {
-        console.log('[StateService] Depth conversion:', {
-          original: originalValue,
-          sourceUnit,
-          targetUnit: this.userUnitPreferences?.length,
-          converted: transformedValue
-        });
-      }
+      // if (path.includes('depth')) {
+      //   console.log('[StateService] Depth conversion:', {
+      //     original: originalValue,
+      //     sourceUnit,
+      //     targetUnit: this.userUnitPreferences?.length,
+      //     converted: transformedValue
+      //   });
+      // }
       
       // Queue the update with the converted value
       this._queueUpdate(mapping.path, transformedValue, source);
@@ -929,7 +933,7 @@ class StateService extends EventEmitter {
       "environment.depth.belowTransducer": {
         path: "navigation.depth.belowTransducer.value",
         transform: function(value) {
-          console.log('[StateService] Raw depth value received:', value);
+          // console.log('[StateService] Raw depth value received:', value);
           return value;
         }
       },
@@ -1139,6 +1143,21 @@ class StateService extends EventEmitter {
             timestamp: Date.now(),
           });
           this._lastFullEmit = Date.now();
+        }
+
+        // Emit position:update event if position data is available
+        if (stateData.navigation?.position?.latitude?.value != null && 
+            stateData.navigation?.position?.longitude?.value != null) {
+          // console.log('[StateService] Emitting position:update event:', {
+          //   latitude: stateData.navigation.position.latitude.value,
+          //   longitude: stateData.navigation.position.longitude.value,
+          //   timestamp: stateData.navigation.position.timestamp || Date.now()
+          // });
+          this.emit('position:update', {
+            latitude: stateData.navigation.position.latitude.value,
+            longitude: stateData.navigation.position.longitude.value,
+            timestamp: stateData.navigation.position.timestamp || Date.now()
+          });
         }
 
       } catch (error) {

@@ -117,7 +117,7 @@ export class PositionService extends ContinuousService {
 
     // Use the source from the position data if available, otherwise use a default name
     const sourceName = positionData.source || 'state';
-    this.log(`Received position:update from ${sourceName}: ${positionData.latitude}, ${positionData.longitude}`);
+    // this.log(`Received position:update from ${sourceName}: ${positionData.latitude}, ${positionData.longitude}`);
     
     // This allows us to have the data available if needed later
     const timestamp = positionData.timestamp || new Date().toISOString();
@@ -130,26 +130,17 @@ export class PositionService extends ContinuousService {
     };
     
     // Create JSON Patch format (RFC 6902) expected by StateManager
+    // Store position data by source in the top-level position object
     const patch = [
       {
         op: 'add',
-        path: `/position/${sourceName}/latitude`,
-        value: positionData.latitude
-      },
-      {
-        op: 'add',
-        path: `/position/${sourceName}/longitude`,
-        value: positionData.longitude
-      },
-      {
-        op: 'add',
-        path: `/position/${sourceName}/timestamp`,
-        value: timestamp
-      },
-      {
-        op: 'add',
-        path: `/position/${sourceName}/source`,
-        value: sourceName
+        path: `/position/${sourceName}`,
+        value: {
+          latitude: positionData.latitude,
+          longitude: positionData.longitude,
+          timestamp: timestamp,
+          source: sourceName
+        }
       }
     ];
 

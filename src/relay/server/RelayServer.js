@@ -359,12 +359,7 @@ export class RelayServer extends EventEmitter {
     );
 
     // Get the full state from the state manager
-    const fullState = {
-      ...this.stateManager.getState(),
-      // Include tide and weather data if available
-      ...(this.stateManager.tideData && { tide: this.stateManager.tideData }),
-      ...(this.stateManager.weatherData && { weather: this.stateManager.weatherData })
-    };
+    const fullState = this.stateManager.getState();
 
     // Log details about the state being sent
     const stateKeys = fullState ? Object.keys(fullState) : [];

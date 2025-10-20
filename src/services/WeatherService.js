@@ -21,8 +21,10 @@ export class WeatherService extends ScheduledService {
 
     // Listen for position updates from PositionService
     if (positionService && typeof positionService.on === "function") {
+      console.log("[WeatherService] Attaching to positionService events");
       this.debugLog("WeatherService attaching to positionService events");
       positionService.on("position:update", (position) => {
+        // console.log("[WeatherService] Received position:update:", position);
         if (
           typeof position.latitude === "number" &&
           typeof position.longitude === "number"
@@ -35,15 +37,19 @@ export class WeatherService extends ScheduledService {
           // Start scheduled runs after first valid position
           if (!this._hasScheduled) {
             this._hasScheduled = true;
+            console.log("[WeatherService] Starting scheduled runs...");
             this.runNow(); // Run immediately
             this.start();  // Start interval scheduling
+            console.log("[WeatherService] Scheduling started.");
             this.log("WeatherService scheduling started.");
           }
         } else {
+          console.log("[WeatherService] Received invalid position data:", position);
           this.logError("Received invalid position data from PositionService:", position);
         }
       });
     } else {
+      console.log("[WeatherService] Could not attach to PositionService - missing or invalid");
       this.debugLog("WeatherService could not attach to PositionService - missing or invalid");
       this.logError(
         "WeatherService could not attach to PositionService (missing or invalid)"
@@ -60,15 +66,18 @@ export class WeatherService extends ScheduledService {
   }
 
   async runNow() {
+    console.log("[WeatherService] runNow() called");
     this.debugLog("WeatherService.runNow() called");
     const { latitude, longitude } = this.position;
     if (
       typeof latitude !== "number" ||
       typeof longitude !== "number"
     ) {
+      console.log("[WeatherService] No valid position available for weather fetch.");
       this.logError("No valid position available for weather fetch.");
       return;
     }
+    console.log(`[WeatherService] Fetching weather for position: ${latitude}, ${longitude}`);
     this.debugLog(`Fetching weather for position: ${latitude}, ${longitude}`);
 
     // Check for user unit preferences
@@ -144,6 +153,7 @@ export class WeatherService extends ScheduledService {
     });
 
     const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
+    console.log("[WeatherService] Fetching weather from:", url);
     this.log("Fetching weather from:", url);
 
     try {
@@ -152,6 +162,7 @@ export class WeatherService extends ScheduledService {
         throw new Error(`Open-Meteo API error: ${response.statusText}`);
       }
       const weatherApiResponse = await response.json();
+      console.log("[WeatherService] Received weather data from API");
       
       // Format the data in the expected structure for clients
       const formattedWeatherData = {
@@ -183,9 +194,12 @@ export class WeatherService extends ScheduledService {
         this.logError("Weather data is missing expected sections");
       }
       
+      console.log("[WeatherService] Emitting weather:update event");
       this.emit("weather:update", formattedWeatherData);
+      console.log("[WeatherService] Weather:update event emitted successfully");
       this.debugLog("Weather:update event emitted successfully");
     } catch (err) {
+      console.log("[WeatherService] Weather fetch failed:", err);
       this.logError("Weather fetch failed:", err);
     }
   }
