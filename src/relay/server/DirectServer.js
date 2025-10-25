@@ -39,8 +39,6 @@ const __dirname = dirname(__filename);
 async function startDirectServer(stateManager, options = {}) {
   if (!stateManager) throw new Error('StateManager instance must be provided');
 
-  
-
   const PORT = options.port || parseInt(process.env.DIRECT_WS_PORT, 10);
   if (!PORT) throw new Error("DIRECT_WS_PORT must be specified");
   
@@ -425,6 +423,7 @@ async function startDirectServer(stateManager, options = {}) {
               data.type === 'bluetooth:select-device' ||
               data.type === 'bluetooth:deselect-device' ||
               data.type === 'bluetooth:rename-device' ||
+              data.type === 'bluetooth:update-metadata' ||
               data.type === 'bluetooth:scan') {
             console.log('[DIRECTSERVER] ✅ Processing Bluetooth command');
             log('Processing Bluetooth command:', JSON.stringify(data, null, 2));
@@ -457,6 +456,14 @@ async function startDirectServer(stateManager, options = {}) {
               commandData = { 
                 deviceId: data.deviceId, 
                 name: data.name,
+                boatId: data.boatId,
+                timestamp: data.timestamp
+              };
+            } else if (data.type === 'bluetooth:update-metadata') {
+              action = 'update-metadata';
+              commandData = { 
+                deviceId: data.deviceId, 
+                metadata: data.metadata,
                 boatId: data.boatId,
                 timestamp: data.timestamp
               };
@@ -596,6 +603,48 @@ async function startDirectServer(stateManager, options = {}) {
                     return;
                   } else {
                     response.error = 'Invalid parameters: deviceId and name are required';
+                  }
+                  break;
+                  
+                case 'update-metadata':
+                  // Update device metadata (e.g., encryption key)
+                  log('[BLUETOOTH-METADATA] Updating device metadata');
+                  if (commandData?.deviceId && commandData?.metadata) {
+                    log('[BLUETOOTH-METADATA] DeviceId:', commandData.deviceId);
+                    log('[BLUETOOTH-METADATA] Metadata:', JSON.stringify(commandData.metadata, null, 2));
+                    
+                    // Let StateManager handle the update
+                    // StateManager will emit bluetooth:metadata-updated event
+                    // BluetoothService listens for that event and updates itself
+                    stateManager.updateBluetoothDeviceMetadata(commandData.deviceId, commandData.metadata)
+                      .then(result => {
+                        response.success = result;
+                        response.message = result ? 
+                          `Device ${commandData.deviceId} metadata updated` : 
+                          `Failed to update metadata for device ${commandData.deviceId}`;
+                        response.deviceId = commandData.deviceId;
+                        
+                        log('[BLUETOOTH-METADATA] Update result:', result);
+                        
+                        if (ws.readyState === ws.OPEN) {
+                          ws.send(JSON.stringify(response));
+                        }
+                      })
+                      .catch(error => {
+                        logError(`[BLUETOOTH-METADATA] Error updating metadata:`, error);
+                        response.error = `Error updating metadata: ${error.message}`;
+                        response.success = false;
+                        
+                        if (ws.readyState === ws.OPEN) {
+                          ws.send(JSON.stringify(response));
+                        }
+                      });
+                    
+                    // Return early since we're handling the response asynchronously
+                    return;
+                  } else {
+                    log('[BLUETOOTH-METADATA] ERROR: Missing deviceId or metadata');
+                    response.error = 'Invalid parameters: deviceId and metadata are required';
                   }
                   break;
                   

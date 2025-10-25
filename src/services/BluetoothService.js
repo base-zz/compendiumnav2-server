@@ -7,7 +7,6 @@ import { fileURLToPath, URL } from "url";
 import { EventEmitter } from "events";
 import { ParserRegistry } from "../bluetooth/parsers/ParserRegistry.js";
 import { DeviceManager } from "../bluetooth/services/DeviceManager.js";
-import RuuviParser from "../bluetooth/parsers/RuuviParser.js";
 import ParserFactory from "../bluetooth/parsers/ParserFactory.js";
 import ContinuousService from "./ContinuousService.js";
 
@@ -402,12 +401,6 @@ export class BluetoothService extends ContinuousService {
       for (const [manufacturerId, parser] of configParsers) {
         this.registerParser(manufacturerId, parser);
         this.log(`Registered ${parser.name} for manufacturer ID: 0x${manufacturerId.toString(16).toUpperCase()}`);
-      }
-      
-      // Also register the original RuuviParser as fallback (if not already loaded from config)
-      if (!configParsers.has(RuuviParser.manufacturerId)) {
-        this.registerParser(RuuviParser.manufacturerId, RuuviParser);
-        this.log(`Registered RuuviParser (fallback) for manufacturer ID: 0x${RuuviParser.manufacturerId.toString(16).toUpperCase()}`);
       }
 
       // Initialize the device manager if not already done
@@ -1041,7 +1034,7 @@ export class BluetoothService extends ContinuousService {
         }
         
         // Parse sensor data using registered parsers
-        const parsedData = this._parseManufacturerData(manufacturerData);
+        const parsedData = this._parseManufacturerData(manufacturerData, deviceId);
         if (parsedData) {
           deviceInfo.sensorData = parsedData;
           this.log(`Parsed sensor data for device ${deviceId}:`, JSON.stringify(parsedData, null, 2));
@@ -1070,27 +1063,40 @@ export class BluetoothService extends ContinuousService {
   /**
    * Parse manufacturer data using registered parsers
    * @param {Buffer} manufacturerData - Raw manufacturer data buffer
+   * @param {string} deviceId - Device ID to retrieve encryption key from metadata
    * @returns {Object|null} - Parsed data or null if no parser found
    * @private
    */
-  _parseManufacturerData(manufacturerData) {
+  _parseManufacturerData(manufacturerData, deviceId) {
     if (!manufacturerData || !manufacturerData.length) {
       return null;
     }
 
     try {
+      // Debug: Check manufacturer ID first
+      const manufacturerId = manufacturerData.readUInt16LE(0);
+      
       // Use the findParserFor method to get the appropriate parser
       const parser = this.parserRegistry
         ? this.parserRegistry.findParserFor(manufacturerData)
         : null;
       
       if (!parser) {
-        // No parser found for this manufacturer
         return null;
+      }
+
+      // Get device metadata to check for encryption key
+      const device = this.deviceManager.getDevice(deviceId);
+      const encryptionKey = device?.metadata?.encryptionKey;
+
+      // Set encryption key on parser instance if available
+      if (encryptionKey && parser.encryptionKey !== encryptionKey) {
+        parser.encryptionKey = encryptionKey;
       }
 
       // Parse the data using the parser's parse method
       const result = parser.parse(manufacturerData);
+      
       return result;
     } catch (error) {
       this.log(`Error parsing manufacturer data: ${error.message}`, "error");

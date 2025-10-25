@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 /**
  * ConfigurableParser - A generic parser that uses JSON configuration
  * to parse Bluetooth manufacturer data
@@ -7,23 +9,36 @@ class ConfigurableParser {
     this.config = config;
     this.manufacturerId = config.manufacturerId;
     this.name = config.name || `Parser_${config.manufacturerId.toString(16)}`;
+    this.encryptionKey = config.encryptionKey; // Optional encryption key for devices like Victron
+  }
+
+  /**
+   * Set encryption key at runtime (for devices that require user-provided keys)
+   * @param {string} key - Hex string encryption key
+   */
+  setEncryptionKey(key) {
+    this.encryptionKey = key;
   }
 
   /**
    * Parse manufacturer data using the configuration
    * @param {Buffer} data - Raw manufacturer data (including manufacturer ID)
+   * @param {Object} options - Optional parsing options
+   * @param {string} options.encryptionKey - Runtime encryption key (overrides config key)
    * @returns {Object|null} Parsed data or null if invalid
    */
-  parse(data) {
+  parse(data, options = {}) {
     if (!data || data.length < 2) return null;
 
     // Skip manufacturer ID (first 2 bytes)
-    const payload = data.slice(2);
+    let payload = data.slice(2);
     if (payload.length < 1) return null;
 
-    // Check if we need to determine format version
+    // Use runtime encryption key if provided, otherwise use config key
+    const encryptionKey = options.encryptionKey || this.encryptionKey;
+
+    // Determine format version BEFORE decryption (for Victron, record type is unencrypted)
     let formatConfig = null;
-    
     if (this.config.formats && this.config.formats.length > 0) {
       // If there's a formatField specified, use it to determine which format to use
       if (this.config.formatField) {
@@ -35,6 +50,24 @@ class ConfigurableParser {
       }
     }
 
+    // Decrypt if encryption is configured
+    if (this.config.encryption && encryptionKey) {
+      try {
+        // Temporarily set the key for decryption
+        const originalKey = this.encryptionKey;
+        this.encryptionKey = encryptionKey;
+        payload = this._decrypt(payload);
+        this.encryptionKey = originalKey;
+      } catch (error) {
+        console.error(`[${this.name}] Decryption failed:`, error.message);
+        return null;
+      }
+    } else if (this.config.encryption && !encryptionKey) {
+      // Encryption required but no key provided
+      console.warn(`[${this.name}] Encryption key required but not provided`);
+      return null;
+    }
+
     if (!formatConfig) {
       console.warn(`No format configuration found for ${this.name}`);
       return null;
@@ -44,6 +77,13 @@ class ConfigurableParser {
     if (payload.length < (formatConfig.minLength || 0)) {
       console.warn(`Payload too short for ${this.name} format ${formatConfig.version}`);
       return null;
+    }
+
+    // Debug: Log decrypted payload for BMV-712
+    if (this.name === 'Victron SmartBMV' && formatConfig.version === 16) {
+      console.log(`[${this.name}] DECRYPTED PAYLOAD (format ${formatConfig.version}):`, payload.toString('hex'));
+      console.log(`[${this.name}] Payload length: ${payload.length} bytes`);
+      console.log(`[${this.name}] First 10 bytes: ${payload.slice(0, Math.min(10, payload.length)).toString('hex')}`);
     }
 
     // Parse all fields
@@ -260,6 +300,44 @@ class ConfigurableParser {
     }
     
     return baseValue;
+  }
+
+  /**
+   * Decrypt encrypted payload (e.g., for Victron devices)
+   * @private
+   */
+  _decrypt(payload) {
+    const encryption = this.config.encryption;
+    
+    if (encryption.algorithm === 'aes-128-ctr') {
+      // AES-CTR decryption (used by Victron)
+      // Victron format: [record_type, nonce, encrypted_data...]
+      const nonce = payload[encryption.nonceOffset || 1];
+      const encryptedData = payload.slice(encryption.dataOffset || 2);
+      
+      // Convert encryption key from hex string to buffer
+      const keyBuffer = Buffer.from(this.encryptionKey, 'hex');
+      
+      // Create counter buffer (16 bytes)
+      // Victron format: [nonce, key[0], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      const counter = Buffer.alloc(16);
+      counter[0] = nonce;
+      counter[1] = keyBuffer[0];
+      
+      // Create decipher
+      const decipher = crypto.createDecipheriv('aes-128-ctr', keyBuffer, counter);
+      decipher.setAutoPadding(false);
+      
+      // Decrypt
+      const decrypted = Buffer.concat([
+        decipher.update(encryptedData),
+        decipher.final()
+      ]);
+      
+      return decrypted;
+    }
+    
+    throw new Error(`Unsupported encryption algorithm: ${encryption.algorithm}`);
   }
 
   /**

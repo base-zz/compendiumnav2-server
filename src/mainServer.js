@@ -10,10 +10,12 @@ import { startRelayServer, startDirectServer } from "./relay/server/index.js";
 import { stateManager } from "./relay/core/state/StateManager.js";
 import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
 import { registerVpsRoutes } from "./server/vps/registration.js";
+import { registerVictronRoutes } from "./server/api/victron.js";
 import { TidalService } from "./services/TidalService.js";
 import { WeatherService } from "./services/WeatherService.js";
 import { PositionService } from "./services/PositionService.js";
 import { BluetoothService } from "./services/BluetoothService.js";
+import { VictronModbusService } from "./services/VictronModbusService.js";
 import debug from 'debug';
 
 const log = debug('server:main');
@@ -100,12 +102,36 @@ async function initializeSecondaryServices() {
     console.log("[SERVER] Initializing BluetoothService...");
     const bluetoothService = new BluetoothService({ stateManager });
     
+    // Initialize Victron Modbus service
+    console.log("[SERVER] Initializing VictronModbusService...");
+    const victronModbusService = new VictronModbusService({
+      host: '192.168.50.158',
+      port: 502,
+      pollInterval: 5000
+    });
+    
+    // Store for API access
+    global.victronModbusService = victronModbusService;
+    
     // Wire services to StateManager
     console.log("[SERVER] Wiring services to StateManager...");
     stateManager.listenToService(positionService);
     stateManager.listenToService(tidalService);
     stateManager.listenToService(weatherService);
     stateManager.listenToService(bluetoothService);
+    stateManager.listenToService(victronModbusService);
+    
+    // Wire StateManager events to BluetoothService
+    // This allows BluetoothService to react to state changes
+    stateManager.on("bluetooth:metadata-updated", async ({ deviceId, metadata }) => {
+      console.log(`[SERVER] Updating BluetoothService DeviceManager for device ${deviceId}`);
+      try {
+        await bluetoothService.updateDeviceMetadata(deviceId, metadata);
+        console.log(`[SERVER] Successfully updated BluetoothService DeviceManager`);
+      } catch (error) {
+        console.error(`[SERVER] Failed to update BluetoothService DeviceManager:`, error);
+      }
+    });
     
     // Start position service
     console.log("[SERVER] Starting PositionService...");
@@ -122,6 +148,11 @@ async function initializeSecondaryServices() {
       await bluetoothService.start();
       console.log("[SERVER] bluetoothService.start() returned");
       console.log("[SERVER] BluetoothService started successfully");
+      
+      // Start Victron Modbus service
+      console.log("[SERVER] Starting VictronModbusService...");
+      await victronModbusService.start();
+      console.log("[SERVER] VictronModbusService started successfully");
       
       // Start periodic Bluetooth data logger (every 10 seconds for testing)
       console.log('[SERVER] Starting Bluetooth data logger (every 10 seconds)');
@@ -257,6 +288,11 @@ async function startServer() {
     registerBoatInfoRoutes(app);
     registerVpsRoutes(app, { vpsUrl: relayConfig.vpsUrl });
     
+    // Register Victron routes (victronModbusService will be set after initialization)
+    if (global.victronModbusService) {
+      registerVictronRoutes(app, global.victronModbusService);
+    }
+    
     // Simple health check endpoint
     app.get('/health', (req, res) => {
       res.json({ 
@@ -343,22 +379,7 @@ async function startServer() {
       });
     }
 
-    // 9. Start periodic Bluetooth state logger (every 10 seconds)
-    console.log("[SERVER] Starting Bluetooth state logger (every 10 seconds)");
-    setInterval(() => {
-      const bluetoothState = stateManager.appState.bluetooth;
-      
-      if (!bluetoothState) {
-        console.log("\n========== BLUETOOTH STATE ==========");
-        console.log("No bluetooth state available");
-        console.log("=====================================\n");
-        return;
-      }
-
-      console.log("\n========== BLUETOOTH STATE ==========");
-      console.log(JSON.stringify(bluetoothState, null, 2));
-      console.log("=====================================\n");
-    }, 10000); // Every 10 seconds
+    // Bluetooth state logger removed - state is available via WebSocket updates
   } catch (err) {
     console.error("[SERVER] Failed to start:", err);
     process.exit(1);

@@ -29,9 +29,26 @@ export class DeviceManager {
       // Initialize storage service
       await storageService.initialize();
       
-      // Load selected devices from storage
-      const selected = await storageService.getSetting('selectedDevices', []);
+      // Load selected devices from storage (use same key as StateManager)
+      const selected = await storageService.getSetting('bluetooth:selectedDevices', []);
       this.selectedDevices = new Set(selected);
+      
+      // Load device data for selected devices from storage
+      for (const deviceId of selected) {
+        try {
+          const deviceData = await storageService.getDevice(deviceId);
+          if (deviceData) {
+            // Store in memory with isSelected flag
+            this.devices.set(deviceId, {
+              ...deviceData,
+              isSelected: true
+            });
+            // Device loaded from storage
+          }
+        } catch (error) {
+          console.error(`[DeviceManager] Failed to load device ${deviceId} from storage:`, error.message);
+        }
+      }
       
       this.initialized = true;
     } catch (error) {
@@ -50,9 +67,7 @@ export class DeviceManager {
     // console.log(`[DeviceManager] Registering device ${id} (${data.name || 'unnamed'})`);
     
     if (!this.initialized) {
-      console.log(`[DeviceManager] DeviceManager not initialized, initializing now...`);
       await this.initialize();
-      console.log(`[DeviceManager] Initialization complete, selectedDevices size: ${this.selectedDevices.size}`);
     }
     
     const now = new Date().toISOString();
@@ -79,9 +94,17 @@ export class DeviceManager {
     }
     
     // Update device properties
+    // Preserve existing metadata and merge with new data
+    // Preserve isSelected flag - it should only be changed via selectDevice/unselectDevice
+    const existingIsSelected = device.isSelected;
     device = {
       ...device,
       ...data,
+      isSelected: existingIsSelected, // Preserve the existing isSelected state
+      metadata: {
+        ...(device.metadata || {}),
+        ...(data.metadata || {})
+      },
       lastSeen: now,
       lastUpdated: now
     };
@@ -115,6 +138,8 @@ export class DeviceManager {
     
     // Update in memory
     this.devices.set(id, device);
+    
+    // Selected device discovered/updated
     // console.log(`[DeviceManager] Device ${id} updated in memory, total devices: ${this.devices.size}`);
     // console.log(`[DeviceManager] Device isSelected: ${device.isSelected}, in selectedDevices set: ${this.selectedDevices.has(id)}`);
     
@@ -203,52 +228,36 @@ export class DeviceManager {
    * @returns {Promise<boolean>} True if device was selected, false if already selected
    */
   async selectDevice(deviceId) {
-    console.log(`[DeviceManager] Selecting device ${deviceId}`);
-    
     if (!this.initialized) {
-      console.log(`[DeviceManager] DeviceManager not initialized, initializing now...`);
       await this.initialize();
-      console.log(`[DeviceManager] Initialization complete, selectedDevices size: ${this.selectedDevices.size}`);
     }
     
     if (this.selectedDevices.has(deviceId)) {
-      console.log(`[DeviceManager] Device ${deviceId} is already selected, skipping`);
       return false;
     }
     
     this.selectedDevices.add(deviceId);
-    console.log(`[DeviceManager] Added device ${deviceId} to selectedDevices Set, new size: ${this.selectedDevices.size}`);
     
     // Update device in storage
     const device = this.getDevice(deviceId);
     if (device) {
-      console.log(`[DeviceManager] Found device in memory: ${device.name || 'unnamed'}`);
       device.isSelected = true;
-      console.log(`[DeviceManager] Set device.isSelected = true`);
       
       // Check if device already exists in storage before storing
       try {
         const existingDevice = await storageService.getDevice(deviceId);
         if (!existingDevice) {
-          // Only store if not already in database
-          console.log(`[DeviceManager] Device not found in storage, storing it`);
           await storageService.upsertDevice(device);
         } else {
-          console.log(`[DeviceManager] Device found in storage, updating it`);
           await storageService.upsertDevice(device);
         }
       } catch (error) {
-        // If error occurs (likely device not found), store the device
-        console.log(`[DeviceManager] Error checking device in storage: ${error.message}, storing it anyway`);
         await storageService.upsertDevice(device);
       }
-    } else {
-      console.log(`[DeviceManager] WARNING: Device ${deviceId} not found in memory`);
     }
     
     // Update selected devices list in storage
     const selectedDevicesArray = Array.from(this.selectedDevices);
-    console.log(`[DeviceManager] Persisting selectedDevices setting: ${JSON.stringify(selectedDevicesArray)}`);
     await storageService.setSetting('selectedDevices', selectedDevicesArray);
     
     return true;
@@ -260,37 +269,25 @@ export class DeviceManager {
    * @returns {Promise<boolean>} True if device was unselected, false if not found
    */
   async unselectDevice(deviceId) {
-    console.log(`[DeviceManager] Unselecting device ${deviceId}`);
-    
     if (!this.initialized) {
-      console.log(`[DeviceManager] DeviceManager not initialized, initializing now...`);
       await this.initialize();
-      console.log(`[DeviceManager] Initialization complete, selectedDevices size: ${this.selectedDevices.size}`);
     }
     
     if (!this.selectedDevices.has(deviceId)) {
-      console.log(`[DeviceManager] Device ${deviceId} is not selected, nothing to do`);
       return false;
     }
     
     this.selectedDevices.delete(deviceId);
-    console.log(`[DeviceManager] Removed device ${deviceId} from selectedDevices Set, new size: ${this.selectedDevices.size}`);
     
     // Update device in storage
     const device = this.getDevice(deviceId);
     if (device) {
-      console.log(`[DeviceManager] Found device in memory: ${device.name || 'unnamed'}`);
       device.isSelected = false;
-      console.log(`[DeviceManager] Set device.isSelected = false`);
       await storageService.upsertDevice(device);
-      console.log(`[DeviceManager] Updated device in storage`);
-    } else {
-      console.log(`[DeviceManager] WARNING: Device ${deviceId} not found in memory`);
     }
     
     // Update selected devices list in storage
     const selectedDevicesArray = Array.from(this.selectedDevices);
-    console.log(`[DeviceManager] Persisting selectedDevices setting: ${JSON.stringify(selectedDevicesArray)}`);
     await storageService.setSetting('selectedDevices', selectedDevicesArray);
     
     return true;

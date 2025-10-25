@@ -1148,11 +1148,6 @@ class StateService extends EventEmitter {
         // Emit position:update event if position data is available
         if (stateData.navigation?.position?.latitude?.value != null && 
             stateData.navigation?.position?.longitude?.value != null) {
-          // console.log('[StateService] Emitting position:update event:', {
-          //   latitude: stateData.navigation.position.latitude.value,
-          //   longitude: stateData.navigation.position.longitude.value,
-          //   timestamp: stateData.navigation.position.timestamp || Date.now()
-          // });
           this.emit('position:update', {
             latitude: stateData.navigation.position.latitude.value,
             longitude: stateData.navigation.position.longitude.value,

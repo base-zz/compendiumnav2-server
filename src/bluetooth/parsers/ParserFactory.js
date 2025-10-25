@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import ConfigurableParser from './ConfigurableParser.js';
+import VictronParser from './VictronParser.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -66,7 +67,7 @@ class ParserFactory {
   /**
    * Create a parser from a configuration object
    * @param {Object} config - Parser configuration
-   * @returns {ConfigurableParser} The created parser
+   * @returns {ConfigurableParser|VictronParser} The created parser
    */
   createParserFromConfig(config) {
     // Validate required fields
@@ -78,13 +79,18 @@ class ParserFactory {
       throw new Error('Parser config must have at least one format');
     }
 
-    // Create the parser
-    const parser = new ConfigurableParser(config);
+    // Use VictronParser for Victron devices (manufacturer ID 0x2E1 = 737)
+    // VictronParser handles bit-packed data correctly
+    let parser;
+    if (config.manufacturerId === 737) {
+      parser = new VictronParser(config);
+    } else {
+      // Use ConfigurableParser for other devices
+      parser = new ConfigurableParser(config);
+    }
     
     // Store it in the map
     this.parsers.set(config.manufacturerId, parser);
-    
-    console.log(`[ParserFactory] Created parser for ${config.name} (0x${config.manufacturerId.toString(16).toUpperCase()})`);
     
     return parser;
   }

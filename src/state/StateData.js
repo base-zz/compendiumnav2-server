@@ -326,7 +326,10 @@ export const stateData = {
   },
 
   get state() {
-    return structuredClone({
+    // Return direct references - no cloning
+    // The properties exist on this object from the spread of baseState
+    return {
+      position: this.position,
       navigation: this.navigation,
       environment: this.environment,
       vessel: this.vessel,
@@ -335,8 +338,8 @@ export const stateData = {
       alerts: this.alerts,
       tides: this.tides,
       forecast: this.forecast,
-      bluetooth: this.bluetooth,
-    });
+      bluetooth: this.bluetooth
+    };
   },
 
   /**

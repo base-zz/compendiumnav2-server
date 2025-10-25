@@ -257,12 +257,19 @@ export class StateManager extends EventEmitter {
       this.log(`Setting up tide:update listener for service '${serviceName}'`);
       service.on("tide:update", (data) => {
         this.log(`Received tide:update from '${serviceName}', forwarding.`);
+        this.setTideData(data);
+      });
+
+      // Set up victron:update listener
+      this.log(`Setting up victron:update listener for service '${serviceName}'`);
+      service.on("victron:update", (data) => {
+        this.log(`Received victron:update from '${serviceName}', forwarding.`);
         this.log(
-          `Tide data details: type=${typeof data}, hasData=${!!data}, keys=${
+          `Victron data details: type=${typeof data}, hasData=${!!data}, keys=${
             data ? Object.keys(data).join(", ") : "none"
           }`
         );
-        this.setTideData(data);
+        this.setVictronData(data);
       });
 
       service.on("state:full-update", ({ data }) => {
@@ -307,7 +314,12 @@ export class StateManager extends EventEmitter {
    * @param {Array} patch - JSON patch array
    */
   applyPatchAndForward(patch) {
-    if (!Array.isArray(patch) || patch.length === 0) return;
+    if (!Array.isArray(patch) || patch.length === 0) {
+      console.log('[StateManager] applyPatchAndForward called with empty/invalid patch');
+      return;
+    }
+
+    console.log(`[StateManager] applyPatchAndForward received ${patch.length} operations`);
 
     try {
       // Get fresh state with all structures
@@ -326,7 +338,12 @@ export class StateManager extends EventEmitter {
         return true;
       });
 
-      if (validPatch.length === 0) return;
+      if (validPatch.length === 0) {
+        console.log('[StateManager] No valid patches after filtering');
+        return;
+      }
+
+      console.log(`[StateManager] Applying ${validPatch.length} valid patches:`, validPatch.map(p => p.path).join(', '));
 
       // Ensure parent paths exist before applying the patch
       this._ensureParentPaths(validPatch);
@@ -335,8 +352,14 @@ export class StateManager extends EventEmitter {
 
       // Apply to both our local state and the canonical state
       // Use mutateDocument=true so patch persists in this.appState
-      applyPatch(this.appState, validPatch, true, true);
-      applyPatch(currentState, validPatch, true, true);
+      try {
+        applyPatch(this.appState, validPatch, true, true);
+        applyPatch(currentState, validPatch, true, true);
+        console.log(`[StateManager] Successfully applied patches`);
+      } catch (patchError) {
+        console.error(`[StateManager] Error applying patches:`, patchError.message);
+        throw patchError;
+      }
 
       // Convert patch to a change object and notify the rule engine
       const changes = this._convertPatchToStateChanges(
@@ -353,6 +376,7 @@ export class StateManager extends EventEmitter {
         timestamp: Date.now(),
       };
 
+      console.log(`[StateManager] Emitting state:patch event with ${validPatch.length} operations, listener count: ${this.listenerCount('state:patch')}`);
       this.emit("state:patch", patchPayload);
 
       if (RECORD_DATA) {
@@ -381,7 +405,8 @@ export class StateManager extends EventEmitter {
     const ensuredPaths = new Set();
 
     patches.forEach((operation) => {
-      if (operation.op === "add") {
+      // Ensure parent paths for both 'add' and 'replace' operations
+      if (operation.op === "add" || operation.op === "replace") {
         const pathParts = operation.path.substring(1).split("/");
         pathParts.pop(); // We only care about the parent path.
 
@@ -398,6 +423,7 @@ export class StateManager extends EventEmitter {
         for (const part of pathParts) {
           if (!current[part]) {
             current[part] = {};
+            console.log(`[StateManager] Created missing parent path: ${part}`);
           }
           current = current[part];
         }
@@ -520,7 +546,6 @@ export class StateManager extends EventEmitter {
       `[StateManager][setTideData] Broadcasting full state update with tide data`
     );
     this.emitFullState(); // Broadcast the change to all clients
-    this.log("Full state update with tide data completed");
   }
 
   setFullState(data) {
@@ -571,6 +596,34 @@ export class StateManager extends EventEmitter {
     this.log("Full state update with weather data completed");
   }
 
+  setVictronData(victronData) {
+    if (!victronData) {
+      this.logError("setVictronData called with null or undefined data");
+      return;
+    }
+
+    console.log("[StateManager] Setting Victron data via patches");
+    
+    // Convert the victron data structure to patches
+    const patches = [];
+    if (victronData.vessel && victronData.vessel.systems && victronData.vessel.systems.electrical) {
+      Object.keys(victronData.vessel.systems.electrical).forEach(key => {
+        patches.push({
+          op: 'add',
+          path: `/vessel/systems/electrical/${key}`,
+          value: victronData.vessel.systems.electrical[key]
+        });
+      });
+    }
+
+    if (patches.length > 0) {
+      console.log(`[StateManager] Applying ${patches.length} Victron patches`);
+      this.applyPatchAndForward(patches);
+    } else {
+      console.log("[StateManager] No Victron patches to apply");
+    }
+  }
+
   /**
    * Receive external state update (e.g. from StateService) while preserving anchor state
    * @param {Object} newStateData - The new state data from an external source
@@ -582,55 +635,33 @@ export class StateManager extends EventEmitter {
       return;
     }
 
-    // Preserve current anchor, tides, forecast, and bluetooth state before replacing
+    const incomingKeys = Object.keys(newStateData);
+    
+    // Preserve current anchor, tides, forecast, and bluetooth state
     const currentAnchorState = this.appState.anchor;
     const currentTidesState = this.appState.tides;
     const currentForecastState = this.appState.forecast;
     const currentBluetoothState = this.appState.bluetooth;
-    this.log(
-      "[receiveExternalStateUpdate] anchor before:",
-      JSON.stringify(currentAnchorState, null, 2)
-    );
 
-    // Update the state with the new state
+    // Replace the state with the new state
     this.appState = this._safeClone(newStateData);
 
-    // Restore the anchor state if it exists
+    // Restore preserved states
     if (currentAnchorState) {
       this.appState.anchor = currentAnchorState;
-      this.log(
-        "[receiveExternalStateUpdate] anchor restored:",
-        JSON.stringify(this.appState.anchor, null, 2)
-      );
-    } else {
-      this.log("[receiveExternalStateUpdate] no anchor to restore.");
     }
-
-    // Restore tides and forecast if they exist
     if (currentTidesState) {
       this.appState.tides = currentTidesState;
-      this.log("[receiveExternalStateUpdate] tides restored");
     }
     if (currentForecastState) {
       this.appState.forecast = currentForecastState;
-      this.log("[receiveExternalStateUpdate] forecast restored");
     }
-    
-    // Restore bluetooth state if it exists (preserves selected devices and discovered devices)
     if (currentBluetoothState) {
       this.appState.bluetooth = currentBluetoothState;
-      this.log("[receiveExternalStateUpdate] bluetooth restored");
     }
 
     // Emit the updated state to clients. The emitFullState method itself will decide if it should run.
     this.emitFullState();
-  }
-
-  setTideData(tideData) {
-    if (!tideData) {
-      this.logError("setTideData called with null or undefined data");
-      return;
-    }
   }
 
   /**
@@ -1169,8 +1200,8 @@ export class StateManager extends EventEmitter {
       // For storage, we only store the array of IDs (for backward compatibility)
       const selectedIdsForStorage = Object.keys(newSelectedDevices);
       
-      console.log('[StateManager] setBluetoothDeviceSelected: Saving to storage');
-      console.log('[StateManager] setBluetoothDeviceSelected: selectedIdsForStorage:', selectedIdsForStorage);
+      // console.log('[StateManager] setBluetoothDeviceSelected: Saving to storage');
+      // console.log('[StateManager] setBluetoothDeviceSelected: selectedIdsForStorage:', selectedIdsForStorage);
 
       // Update storage
       try {
@@ -1179,7 +1210,7 @@ export class StateManager extends EventEmitter {
           selectedIdsForStorage
         );
         
-        console.log('[StateManager] setBluetoothDeviceSelected: Successfully saved to storage');
+        // console.log('[StateManager] setBluetoothDeviceSelected: Successfully saved to storage');
 
         // Update device in storage
         if (
@@ -1259,11 +1290,6 @@ export class StateManager extends EventEmitter {
     // Check if device is in selectedDevices
     const isSelected = !!(this.appState.bluetooth.selectedDevices && 
                           this.appState.bluetooth.selectedDevices[device.id]);
-    
-    // Debug logging for the specific device
-    if (device.id === 'c4d5653318b41ad4dce6b335160e7999' || isSelected) {
-      console.log(`[StateManager] Device update for ${device.id.slice(-8)}: isSelected=${isSelected}`);
-    }
     
     // Update the device, preserving user customizations
     const updatedDevice = {
@@ -1362,9 +1388,10 @@ export class StateManager extends EventEmitter {
 
       // Also update in selectedDevices if this device is selected
       if (device.isSelected && this.appState.bluetooth.selectedDevices) {
+        const previousSelectedDevice = this.appState.bluetooth.selectedDevices[device.id];
         this.appState.bluetooth.selectedDevices[device.id] = device;
         patches.push({
-          op: "replace",
+          op: previousSelectedDevice ? "replace" : "add",
           path: `/bluetooth/selectedDevices/${device.id}`,
           value: device,
         });
@@ -1468,8 +1495,8 @@ export class StateManager extends EventEmitter {
     }
 
     // Get the current device or create a new one
-    const existingDevice = this.appState.bluetooth.devices[deviceId] || {};
-    const isNewDevice = Object.keys(existingDevice).length === 0;
+    const existingDevice = this.appState.bluetooth.devices[deviceId];
+    const isNewDevice = !existingDevice;
     this.log(
       `[StateManager] ${
         isNewDevice ? "Creating new" : "Updating existing"
@@ -1492,7 +1519,7 @@ export class StateManager extends EventEmitter {
 
     // Update the device with new sensor data
     const updatedDevice = {
-      ...existingDevice,
+      ...(existingDevice || {}),
       id: deviceId,
       lastSeen: new Date().toISOString(),
       sensorData: sensorData, // Store the sensor data separately
@@ -1512,7 +1539,7 @@ export class StateManager extends EventEmitter {
     // Create a patch for this specific update
     const patch = [
       {
-        op: "replace",
+        op: isNewDevice ? "add" : "replace",
         path: `/bluetooth/devices/${deviceId}`,
         value: updatedDevice,
       },
@@ -1586,13 +1613,19 @@ export class StateManager extends EventEmitter {
         this.appState.bluetooth.devices = {};
       }
 
-      const existingDevice = this.appState.bluetooth.devices[deviceId] || {};
+      const existingDevice = this.appState.bluetooth.devices[deviceId];
+      const isNewDevice = !existingDevice;
 
       // Update the device with new metadata
+      // Store metadata in a metadata property, not spread directly
       const updatedDevice = {
-        ...existingDevice,
+        ...(existingDevice || {}),
         id: deviceId,
-        ...metadata,
+        metadata: {
+          ...((existingDevice && existingDevice.metadata) || {}),
+          ...metadata,
+          lastUpdated: new Date().toISOString()
+        },
         lastUpdated: new Date().toISOString(),
       };
 
@@ -1603,7 +1636,7 @@ export class StateManager extends EventEmitter {
       // Create a patch for this specific update
       const patch = [
         {
-          op: "replace",
+          op: isNewDevice ? "add" : "replace",
           path: `/bluetooth/devices/${deviceId}`,
           value: updatedDevice,
         },
@@ -1628,7 +1661,15 @@ export class StateManager extends EventEmitter {
         if (this._storageInitialized) {
           const device = await storageService.getDevice(deviceId);
           if (device) {
-            await storageService.upsertDevice({ ...device, ...metadata });
+            // Store metadata in nested structure, matching the state structure
+            const updatedStorageDevice = {
+              ...device,
+              metadata: {
+                ...(device.metadata || {}),
+                ...metadata
+              }
+            };
+            await storageService.upsertDevice(updatedStorageDevice);
             this.log(`Updated device ${deviceId} metadata in storage`);
           }
         }
@@ -1637,6 +1678,13 @@ export class StateManager extends EventEmitter {
           `Failed to update device metadata in storage: ${storageError.message}`
         );
       }
+
+      // Emit event for BluetoothService to listen to
+      // This allows BluetoothService to update its DeviceManager
+      this.emit("bluetooth:metadata-updated", {
+        deviceId: deviceId,
+        metadata: metadata
+      });
 
       this.log(`Successfully updated metadata for device ${deviceId}`);
       return true;

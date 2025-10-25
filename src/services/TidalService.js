@@ -57,7 +57,10 @@ export class TidalService extends ScheduledService {
           if (!this._hasScheduled) {
             this._hasScheduled = true;
             console.log("[TidalService] Starting scheduled runs...");
-            this.runNow(); // Run immediately
+            this.runNow().catch(err => {
+              console.error("[TidalService] Error in initial runNow():", err);
+              this.logError("Error in initial runNow():", err);
+            }); // Run immediately with error handling
             this.start(); // Start interval scheduling
             console.log("[TidalService] Scheduling started.");
             this.log("TidalService scheduling started.");
@@ -332,27 +335,9 @@ export class TidalService extends ScheduledService {
             },
           };
 
-          // Log the raw data for debugging
-          this.log("Processed marine data:");
-
-          this.log("EMITTING tide:update EVENT with data structure:", {
-            dataType: typeof marineData,
-            hasCurrentData: !!marineData.current,
-            hasHourlyData: !!marineData.hourly,
-            hasDailyData: !!marineData.daily,
-            timestamp: marineData.timestamp,
-          });
-
-          // Check if we have listeners for the tide:update event
-          const hasListeners = this.listenerCount("tide:update") > 0;
-          this.log(
-            `Has tide:update listeners: ${hasListeners}, count: ${this.listenerCount(
-              "tide:update"
-            )}`
-          );
-
           // Emit the event
           this.emit("tide:update", marineData);
+          
           // Return the data that was stored in the state
           return marineData;
         } finally {

@@ -334,6 +334,33 @@ export class RelayServer extends EventEmitter {
             }
             break;
 
+          case "bluetooth:update-metadata":
+            log(`Processing bluetooth:update-metadata from VPS:`, JSON.stringify(message.data, null, 2));
+            try {
+              const { deviceId, metadata } = message.data || message;
+              if (!deviceId || !metadata) {
+                logError('Invalid bluetooth:update-metadata message: missing deviceId or metadata');
+                break;
+              }
+
+              // Let StateManager handle the update
+              // StateManager will emit bluetooth:metadata-updated event
+              // BluetoothService listens for that event and updates itself
+              this.stateManager.updateBluetoothDeviceMetadata(deviceId, metadata)
+                .then(result => {
+                  log(`Bluetooth metadata update ${result ? 'succeeded' : 'failed'} for device ${deviceId}`);
+                  this.emit("bluetooth:metadata-updated", { success: result, deviceId, metadata });
+                })
+                .catch(error => {
+                  logError('Error updating bluetooth metadata:', error);
+                  this.emit("error:bluetooth-metadata", { error, deviceId, metadata });
+                });
+            } catch (error) {
+              logError('Error processing bluetooth:update-metadata:', error);
+              this.emit("error:bluetooth-metadata", { error, data: message.data });
+            }
+            break;
+
           default:
             log(
               `Forwarding message type ${message.type} to clients`

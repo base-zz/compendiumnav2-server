@@ -1283,8 +1283,10 @@ class NewStateService extends ContinuousService {
         
         const currentValue = this._getValueByPath(currentState, path);
         if (!this._deepEqual(currentValue, value)) {
+          // Use 'add' operation which creates the path if it doesn't exist
+          // This is safer than 'replace' which requires the path to already exist
           patches.push({
-            op: 'replace',
+            op: 'add',
             path: `/${path.replace(/\./g, '/')}`,
             value: value
           });
