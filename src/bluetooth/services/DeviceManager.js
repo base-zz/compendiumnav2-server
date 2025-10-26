@@ -258,7 +258,7 @@ export class DeviceManager {
     
     // Update selected devices list in storage
     const selectedDevicesArray = Array.from(this.selectedDevices);
-    await storageService.setSetting('selectedDevices', selectedDevicesArray);
+    await storageService.setSetting('bluetooth:selectedDevices', selectedDevicesArray);
     
     return true;
   }
@@ -288,7 +288,7 @@ export class DeviceManager {
     
     // Update selected devices list in storage
     const selectedDevicesArray = Array.from(this.selectedDevices);
-    await storageService.setSetting('selectedDevices', selectedDevicesArray);
+    await storageService.setSetting('bluetooth:selectedDevices', selectedDevicesArray);
     
     return true;
   }

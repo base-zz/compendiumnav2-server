@@ -30,7 +30,7 @@ export function registerBluetoothRoutes(app, serviceManager) {
       
       log(`Updating metadata for device ${id}:`, metadata);
       
-      const success = await bluetoothService.updateDeviceMetadata(id, metadata);
+      const success = await bluetoothService.updateBluetoothDeviceMetadata(id, metadata);
       
       if (success) {
         res.status(200).json({ 

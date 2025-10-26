@@ -546,6 +546,90 @@ export class VictronModbusService extends ContinuousService {
     return null;
   }
 
+  _mergeDiscoveredUnitId(unitId) {
+    if (!Array.isArray(this.discoveredDevices)) {
+      this.discoveredDevices = [];
+    }
+    const alreadyTracked = this.discoveredDevices.some(device => {
+      if (typeof device === 'number') {
+        return device === unitId;
+      }
+      if (device && typeof device.unitId === 'number') {
+        return device.unitId === unitId;
+      }
+      return false;
+    });
+    if (!alreadyTracked) {
+      this.discoveredDevices.push({ unitId });
+    }
+    this._saveSavedUnitIds(this.discoveredDevices).catch(error => {
+      console.log(`[VictronModbus] Failed to persist Unit ID ${unitId}: ${error.message}`);
+    });
+  }
+
+  _handleBMVFailure() {
+    this._bmvFailureCount += 1;
+    if (this._bmvFailureCount >= this._maxBMVFailuresBeforeRescan) {
+      this._scheduleBMVRescan();
+    }
+  }
+
+  _scheduleBMVRescan() {
+    if (this._bmvRescanInProgress) {
+      return;
+    }
+    const now = Date.now();
+    if (now - this._lastBMVRescan < this._bmvRescanCooldownMs) {
+      return;
+    }
+    this._bmvRescanInProgress = true;
+    this._lastBMVRescan = now;
+    (async () => {
+      try {
+        const unitId = await this._scanAllBMVUnitIds();
+        if (typeof unitId === 'number') {
+          console.log(`[VictronModbus] Background rescan found BMV at Unit ID ${unitId}`);
+          this.bmvUnitId = unitId;
+          this._mergeDiscoveredUnitId(unitId);
+          this._bmvFailureCount = 0;
+        } else {
+          console.log('[VictronModbus] Background rescan did not find BMV');
+        }
+      } catch (error) {
+        console.log(`[VictronModbus] Background rescan error: ${error.message}`);
+      } finally {
+        this._bmvRescanInProgress = false;
+      }
+    })();
+  }
+
+  async _scanAllBMVUnitIds() {
+    const scanRange = Array.from({ length: 248 }, (_, i) => i);
+    for (const unitId of scanRange) {
+      try {
+        this.client.setID(unitId);
+        const voltageResult = await this.client.readInputRegisters(259, 1);
+        if (voltageResult?.data?.length) {
+          const voltage = voltageResult.data[0] / 100;
+          if (voltage > 5 && voltage < 100) {
+            const socResult = await this.client.readInputRegisters(266, 1);
+            if (socResult?.data?.length) {
+              console.log(`[VictronModbus] Rescan candidate Unit ID ${unitId}: ${voltage}V, SOC ${socResult.data[0] / 10}%`);
+              this.client.setID(this.unitId);
+              return unitId;
+            }
+          }
+        }
+      } catch (error) {
+        if (!error.message.includes('timeout') && !error.message.includes('not available')) {
+          console.log(`[VictronModbus] Rescan Unit ID ${unitId} error: ${error.message}`);
+        }
+      }
+    }
+    this.client.setID(this.unitId);
+    return null;
+  }
+
   _parseModbusData(rawData) {
     // Parse Victron Modbus registers into meaningful data
     // Victron uses scaling factors: voltage=0.01V, current=0.1A, power=1W
