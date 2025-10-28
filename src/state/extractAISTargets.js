@@ -44,13 +44,6 @@ function convertValue(value, sourceUnit, unitType) {
 
   try {
     const convertedValue = UnitConversion.convert(value, sourceUnit, targetUnit);
-    console.debug('[AIS] Converted value', {
-      unitType,
-      value,
-      sourceUnit,
-      targetUnit,
-      convertedValue
-    });
     return { value, sourceUnit, targetUnit, convertedValue };
   } catch (err) {
     console.error("[AIS] Failed to convert value", {
