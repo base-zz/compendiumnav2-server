@@ -79,7 +79,7 @@ class NewStateService extends ContinuousService {
     
     // Load user unit preferences - default to imperial if not set
     this.userUnitPreferences = null;
-    this.loadUserUnitPreferences();
+    this.preferencesPromise = this.loadUserUnitPreferences();
     
     this.hasLoggedFirstData = false;
     this.sources = new Map();
@@ -132,6 +132,9 @@ class NewStateService extends ContinuousService {
   
       // Initialize with current config or empty object if not set
       const config = this.config || {};
+      if (this.preferencesPromise) {
+        await this.preferencesPromise;
+      }
       await this.initialize(config);
   
       // Set up batch processing if not already set up
@@ -861,7 +864,11 @@ class NewStateService extends ContinuousService {
     try {
       // Use our server-specific implementation that doesn't rely on browser APIs
       this.userUnitPreferences = await getServerUnitPreferences();
+      if (stateData) {
+        stateData.userUnitPreferences = this.userUnitPreferences;
+      }
       console.log('[StateService] Loaded user unit preferences:', this.userUnitPreferences);
+      return this.userUnitPreferences;
     } catch (err) {
       console.error('[StateService] Error in loadUserUnitPreferences:', err);
       // Default to imperial units if there's any error
@@ -869,6 +876,10 @@ class NewStateService extends ContinuousService {
         ...UNIT_PRESETS.IMPERIAL,
         preset: 'IMPERIAL'
       };
+      if (stateData) {
+        stateData.userUnitPreferences = this.userUnitPreferences;
+      }
+      return this.userUnitPreferences;
     }
   }
 

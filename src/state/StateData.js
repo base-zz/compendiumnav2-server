@@ -1,5 +1,6 @@
 import { createStateDataModel } from '../shared/stateDataModel.js';
 import { UNIT_PRESETS } from '../shared/unitPreferences.js';
+import { UnitConversion } from '../shared/unitConversion.js';
 
 function setDeep(obj, path, value) {
   const keys = path.replace(/\[(\d+)\]/g, ".$1").split(".");
@@ -255,33 +256,152 @@ export const stateData = {
       const wind = stateData.navigation?.wind;
       if (!wind) return;
 
-      // Apparent wind
-      if (wind.apparent?.angle?.value !== undefined) {
-        wind.apparent.angle.degrees = stateData.convert.radToDeg(
-          wind.apparent.angle.value
-        );
-        wind.apparent.angle.side =
-          wind.apparent.angle.value >= 0 ? "starboard" : "port";
+      const unitPrefs = stateData.userUnitPreferences || UNIT_PRESETS.IMPERIAL;
+      const defaultSpeedUnit = unitPrefs.speed || UNIT_PRESETS.IMPERIAL.speed;
+      const defaultAngleUnit = unitPrefs.angle || UNIT_PRESETS.IMPERIAL.angle;
 
-        if (wind.apparent?.speed?.value !== undefined) {
-          wind.apparent.speed.knots = stateData.convert.mpsToKnots(
-            wind.apparent.speed.value
-          );
+      const ensureUnits = (node, fallbackUnit) => {
+        if (!node) return fallbackUnit;
+        if (!node.units) {
+          node.units = fallbackUnit;
         }
+        return node.units;
+      };
+
+      const convertToBase = (value, units) => {
+        if (value === null || value === undefined || !units) return null;
+        return UnitConversion.convertToBaseUnit(value, units);
+      };
+
+      const convertFromBase = (value, units) => {
+        if (value === null || value === undefined || !units) return null;
+        return UnitConversion.convertFromBaseUnit(value, units);
+      };
+
+      const apparentSpeedUnits = ensureUnits(wind.apparent?.speed, defaultSpeedUnit);
+      const apparentAngleUnits = ensureUnits(wind.apparent?.angle, defaultAngleUnit);
+      const trueSpeedUnits = ensureUnits(wind.true?.speed, defaultSpeedUnit);
+      const trueAngleUnits = ensureUnits(wind.true?.angle, defaultAngleUnit);
+      const trueDirectionUnits = ensureUnits(wind.true?.direction, defaultAngleUnit);
+
+      // Apparent wind derived values
+      if (wind.apparent?.angle?.value !== undefined && wind.apparent.angle.value !== null) {
+        const apparentAngleBase = convertToBase(wind.apparent.angle.value, apparentAngleUnits);
+        if (apparentAngleBase !== null) {
+          wind.apparent.angle.degrees = convertFromBase(apparentAngleBase, 'deg');
+          wind.apparent.angle.side = apparentAngleBase >= 0 ? "starboard" : "port";
+        } else {
+          wind.apparent.angle.degrees = null;
+          wind.apparent.angle.side = null;
+        }
+      } else if (wind.apparent?.angle) {
+        wind.apparent.angle.degrees = null;
+        wind.apparent.angle.side = null;
       }
 
-      // True wind
-      if (wind.true?.angle?.value !== undefined) {
-        wind.true.angle.degrees = stateData.convert.radToDeg(
-          wind.true.angle.value
+      if (wind.apparent?.speed?.value !== undefined && wind.apparent.speed.value !== null) {
+        const apparentKnots = UnitConversion.convert(
+          wind.apparent.speed.value,
+          apparentSpeedUnits,
+          'kts'
         );
-        wind.true.angle.side =
-          wind.true.angle.value >= 0 ? "starboard" : "port";
+        wind.apparent.speed.knots = apparentKnots;
+      } else if (wind.apparent?.speed) {
+        wind.apparent.speed.knots = null;
+      }
 
-        if (wind.true?.speed?.value !== undefined) {
-          wind.true.speed.knots = stateData.convert.mpsToKnots(
-            wind.true.speed.value
-          );
+      // True wind calculation
+      const headingNode = stateData.navigation?.course?.heading?.true;
+      const headingUnits = ensureUnits(headingNode, defaultAngleUnit);
+      const stwNode = stateData.navigation?.speed?.stw;
+      const sogNode = stateData.navigation?.speed?.sog;
+      const stwUnits = ensureUnits(stwNode, defaultSpeedUnit);
+      const sogUnits = ensureUnits(sogNode, defaultSpeedUnit);
+
+      const apparentSpeedBase = convertToBase(wind.apparent?.speed?.value, apparentSpeedUnits);
+      const apparentAngleBase = convertToBase(wind.apparent?.angle?.value, apparentAngleUnits);
+      const headingBase = convertToBase(headingNode?.value, headingUnits);
+      const stwBase = convertToBase(stwNode?.value, stwUnits);
+      const sogBase = convertToBase(sogNode?.value, sogUnits);
+
+      if (apparentSpeedBase !== null || apparentAngleBase !== null || headingBase !== null) {
+        console.debug('[StateData] True wind inputs', {
+          apparentSpeedRaw: wind.apparent?.speed?.value ?? null,
+          apparentSpeedUnits,
+          apparentSpeedBase,
+          apparentAngleRaw: wind.apparent?.angle?.value ?? null,
+          apparentAngleUnits,
+          apparentAngleBase,
+          headingRaw: headingNode?.value ?? null,
+          headingUnits,
+          headingBase,
+          stwRaw: stwNode?.value ?? null,
+          stwUnits,
+          stwBase,
+          sogRaw: sogNode?.value ?? null,
+          sogUnits,
+          sogBase
+        });
+      }
+
+      if (
+        apparentSpeedBase !== null &&
+        apparentAngleBase !== null &&
+        headingBase !== null
+      ) {
+        const boatSpeedBase = stwBase !== null ? stwBase : (sogBase !== null ? sogBase : 0);
+
+        const ax = apparentSpeedBase * Math.cos(apparentAngleBase);
+        const ay = apparentSpeedBase * Math.sin(apparentAngleBase);
+        const tx = ax - boatSpeedBase;
+        const ty = ay;
+
+        const trueWindSpeedBase = Math.sqrt(tx * tx + ty * ty);
+        const trueWindAngleBase = Math.atan2(ty, tx);
+        const trueWindDirectionBase = UnitConversion.normalizeRadians(headingBase + trueWindAngleBase);
+
+        console.debug('[StateData] True wind results', {
+          boatSpeedBase,
+          ax,
+          ay,
+          tx,
+          ty,
+          trueWindSpeedBase,
+          trueWindAngleBase,
+          trueWindDirectionBase
+        });
+
+        if (wind.true?.speed) {
+          const trueWindSpeedValue = convertFromBase(trueWindSpeedBase, trueSpeedUnits);
+          wind.true.speed.value = trueWindSpeedValue;
+          wind.true.speed.knots = trueWindSpeedValue !== null
+            ? UnitConversion.convert(trueWindSpeedValue, trueSpeedUnits, 'kts')
+            : null;
+        }
+
+        if (wind.true?.angle) {
+          wind.true.angle.value = convertFromBase(trueWindAngleBase, trueAngleUnits);
+          wind.true.angle.degrees = convertFromBase(trueWindAngleBase, 'deg');
+          wind.true.angle.side = trueWindAngleBase >= 0 ? "starboard" : "port";
+        }
+
+        if (wind.true?.direction) {
+          wind.true.direction.value = convertFromBase(trueWindDirectionBase, trueDirectionUnits);
+          wind.true.direction.degrees = convertFromBase(trueWindDirectionBase, 'deg');
+        }
+      } else {
+        if (wind.true?.speed) {
+          wind.true.speed.value = null;
+          wind.true.speed.knots = null;
+        }
+        if (wind.true?.angle) {
+          wind.true.angle.value = null;
+          wind.true.angle.degrees = null;
+          wind.true.angle.side = null;
+        }
+        if (wind.true?.direction) {
+          wind.true.direction.value = null;
+          wind.true.direction.degrees = null;
         }
       }
     },

@@ -78,7 +78,7 @@ class StateService extends EventEmitter {
     
     // Load user unit preferences - default to imperial if not set
     this.userUnitPreferences = null;
-    this.loadUserUnitPreferences();
+    this.preferencesPromise = this.loadUserUnitPreferences();
     
     this.hasLoggedFirstData = false;
     this.sources = new Map();
@@ -115,6 +115,13 @@ class StateService extends EventEmitter {
 
   async initialize(config = {}) {
     console.log("[StateService] Initializing with config:", config);
+    if (this.preferencesPromise) {
+      try {
+        await this.preferencesPromise;
+      } catch (prefErr) {
+        console.error('[StateService] Failed to load unit preferences before initialization:', prefErr);
+      }
+    }
     const isNodeEnv = typeof process !== "undefined" && process.env;
 
     const signalKBaseUrl =
@@ -670,6 +677,10 @@ class StateService extends EventEmitter {
     try {
       // Use our server-specific implementation that doesn't rely on browser APIs
       this.userUnitPreferences = await getServerUnitPreferences();
+      if (stateData) {
+        stateData.userUnitPreferences = this.userUnitPreferences;
+        console.log('[StateService] stateData.userUnitPreferences set to:', stateData.userUnitPreferences);
+      }
       console.log('[StateService] Loaded user unit preferences:', this.userUnitPreferences);
     } catch (err) {
       console.error('[StateService] Error in loadUserUnitPreferences:', err);
@@ -678,6 +689,10 @@ class StateService extends EventEmitter {
         ...UNIT_PRESETS.IMPERIAL,
         preset: 'IMPERIAL'
       };
+      if (stateData) {
+        stateData.userUnitPreferences = this.userUnitPreferences;
+        console.log('[StateService] stateData.userUnitPreferences defaulted to:', stateData.userUnitPreferences);
+      }
     }
   }
 

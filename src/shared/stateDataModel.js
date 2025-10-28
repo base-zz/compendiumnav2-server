@@ -195,6 +195,13 @@ export function createStateDataModel(unitPreferences = UNIT_PRESETS.IMPERIAL) {
             displayLabel: "True Wind Speed",
             description: "True Wind Speed",
           },
+          angle: {
+            value: null,
+            units: unitPreferences.angle,
+            label: "TWA",
+            displayLabel: "True Wind Angle",
+            description: "True Wind Angle",
+          },
           direction: {
             value: null,
             units: unitPreferences.angle,
