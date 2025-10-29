@@ -1,8 +1,7 @@
 import EventEmitter from "events";
 import debug from 'debug';
-import { StateManager } from "../core/state/StateManager.js";
-import { syncOrchestrator } from "./core/sync/SyncOrchestrator.js";
 import { VPSConnector } from "./services/VPSConnector.js";
+import { getClientSyncCoordinator } from './coordinatorSingleton.js';
 
 const log = debug('relay-server');
 const logWarn = debug('relay-server:warn');
@@ -33,8 +32,8 @@ export class RelayServer extends EventEmitter {
     this._stateVersion = 0;
     this._messageBuffer = [];
     this._maxBufferSize = 100;
-    if (!config.stateManager) throw new Error('RelayServer requires a stateManager instance.');
-    this.stateManager = config.stateManager;
+    const coordinator = config.coordinator || getClientSyncCoordinator();
+    if (!coordinator) throw new Error('RelayServer requires a ClientSyncCoordinator instance.');
 
     // Client management
     this.clients = new Map();
@@ -50,10 +49,13 @@ export class RelayServer extends EventEmitter {
       host: this.config.host
     });
 
-    this.syncOrchestrator = syncOrchestrator;
+    this._coordinator = coordinator;
+    this._unregisterTransport = this._coordinator.registerTransport('relay', {
+      send: (payload) => this._sendToVPS(payload),
+      shouldSend: () => this.vpsConnector?.connected === true,
+    });
 
     // Setup listeners
-    this._setupStateListeners();
     this._setupConnectionListeners();
 
     // Setup maintenance intervals
@@ -113,16 +115,9 @@ export class RelayServer extends EventEmitter {
       this.vpsConnector.disconnect();
     }
 
-    // Remove all event listeners from the state manager that this instance created
-    if (this._stateEventHandler) {
-      this.stateManager.removeListener('state:full-update', this._stateEventHandler);
-      this.stateManager.removeListener('state:patch', this._stateEventHandler);
-    }
-    if (this._tideUpdateHandler) {
-      this.stateManager.removeListener('tide:update', this._tideUpdateHandler);
-    }
-    if (this._weatherUpdateHandler) {
-      this.stateManager.removeListener('weather:update', this._weatherUpdateHandler);
+    if (this._unregisterTransport) {
+      this._unregisterTransport();
+      this._unregisterTransport = null;
     }
     
     // Remove all listeners on this emitter
@@ -133,40 +128,34 @@ export class RelayServer extends EventEmitter {
 
   // ========== PRIVATE METHODS ========== //
 
-  _setupStateListeners() {
-    // Throttle profile updates
-    this.stateManager.on("state-changed", (newState) => {
-      if (newState.throttleProfile) {
-        this.syncOrchestrator.updateThrottleProfile(newState.throttleProfile);
+  _handleVpsTransportMessage(message) {
+    switch (message.type) {
+      case "client-connected": {
+        const boatId = message.boatId || this._coordinator.getBoatId?.() || "unknown";
+        log(
+          `New client connected via VPS: ${
+            message.clientId || "unknown"
+          } for boat ${boatId}`
+        );
+        this._coordinator.handleClientConnection({
+          clientId: message.clientId,
+        });
+        break;
       }
-    });
 
-    // Forward StateManager payloads directly (flat structure)
-    this._stateEventHandler = (payload) => this._sendToVPS(payload);
-    this.stateManager.on("state:full-update", this._stateEventHandler);
-    this.stateManager.on("state:patch", this._stateEventHandler);
+      case "client-disconnected": {
+        log(`Client disconnected from VPS: ${message.clientId || "unknown"}`);
+        this._coordinator.handleClientDisconnection({
+          clientId: message.clientId,
+        });
+        break;
+      }
 
-    // Add these new handlers for tide and weather updates
-    this._tideUpdateHandler = (data) => {
-      this._sendToVPS({
-        type: "tide:update",
-        data,
-        boatId: this.stateManager.boatId,
-        timestamp: Date.now(),
-      });
-    };
-
-    this._weatherUpdateHandler = (data) => {
-      this._sendToVPS({
-        type: "weather:update",
-        data,
-        boatId: this.stateManager.boatId,
-        timestamp: Date.now(),
-      });
-    };
-
-    this.stateManager.on("tide:update", this._tideUpdateHandler);
-    this.stateManager.on("weather:update", this._weatherUpdateHandler);
+      default:
+        log(`Forwarding message type ${message.type} to clients`);
+        this._forwardToLocalClients(message);
+        break;
+    }
   }
 
   _setupConnectionListeners() {
@@ -189,16 +178,29 @@ export class RelayServer extends EventEmitter {
         this.emit("vps-connection-lost");
       })
       .on("connectionStatus", ({ boatId, clientCount }) => {
+        const resolvedBoatId = boatId || this._coordinator.getBoatId?.() || 'unknown';
         log(
-          `Client connection status update: ${clientCount} clients for boat ${boatId}`
+          `Client connection status update: ${clientCount} clients for boat ${resolvedBoatId}`
         );
 
-        // Update the stateManager's client count
-        if (boatId === this.stateManager.boatId) {
-          this.stateManager.updateClientCount(clientCount);
-          this.emit("client-count-updated", { boatId, clientCount });
-        }
+        this._coordinator.handleClientCountUpdate({ boatId: resolvedBoatId, clientCount });
+        this.emit("client-count-updated", { boatId: resolvedBoatId, clientCount });
       });
+  }
+
+  _forwardToLocalClients(payload) {
+    if (!payload) {
+      return;
+    }
+
+    const type = payload.type || 'vps-message';
+    const data = payload.data ?? payload;
+
+    this.emit(type, data);
+
+    if (type !== 'vps-message') {
+      this.emit('vps-message', payload);
+    }
   }
 
   _setupServer() {
@@ -228,145 +230,14 @@ export class RelayServer extends EventEmitter {
           )}`
         );
 
-        switch (message.type) {
-          case "client-connected":
-            // Handle client connection notification from VPS
-            log(
-              `New client connected via VPS: ${
-                message.clientId || "unknown"
-              } for boat ${message.boatId || "unknown"}`
-            );
-            // Update the state manager's client count
-            if (this.stateManager) {
-              const newCount = (this.stateManager.clientCount || 0) + 1;
-              this.stateManager.updateClientCount(newCount);
-              log(
-                `Updated client count: ${newCount}`
-              );
+        const handled = this._coordinator.handleClientMessage({
+          message,
+          respond: (payload) => this._sendToVPS(payload),
+          broadcast: (payload) => this._forwardToLocalClients(payload),
+        });
 
-              // Send a full state update to the new client
-              log(
-                `Sending full state update to new client ${
-                  message.clientId || "unknown"
-                }`
-              );
-              const fullStateResponse = {
-                type: "state:full-update",
-                data: this.stateManager.getState(),
-                boatId: this.stateManager.boatId,
-                timestamp: Date.now(),
-                clientId: message.clientId || "unknown",
-              };
-              this.vpsConnector.send(fullStateResponse);
-            } else {
-              logWarn(
-                `Cannot update client count: stateManager is not initialized`
-              );
-            }
-            break;
-
-          case "client-disconnected":
-            // Handle client disconnection notification from VPS
-            log(
-              `Client disconnected from VPS: ${
-                message.clientId || "unknown"
-              }`
-            );
-            // Update the state manager's client count
-            if (this.stateManager) {
-              const newCount = Math.max(0, (this.stateManager.clientCount || 1) - 1);
-              this.stateManager.updateClientCount(newCount);
-              log(
-                `Updated client count: ${newCount}`
-              );
-            }
-            break;
-
-          case "get-full-state":
-          case "request-full-state": // Handle both types of full state requests
-            log(
-              `Handling full state request from VPS, requestId: ${
-                message.requestId || "unknown"
-              }, clientId: ${message.clientId || "unknown"}`
-            );
-            this._handleFullStateRequest(message);
-            break;
-
-          case "state:full-update": // Network message type
-            log(
-              `Broadcasting full state update to all clients, data size: ${
-                JSON.stringify(message.data).length
-              } bytes`
-            );
-            this.emit("state:full-update", message.data); // Standardized event
-            break;
-
-          case "state:patch": // Network message type
-            const patchSize = message.data?.operations
-              ? message.data.operations.length
-              : 0;
-            log(
-              `Broadcasting state patch to all clients, operations: ${patchSize}`
-            );
-            this.emit("state:patch", message.data); // Already standardized
-            break;
-
-          case "tide:update":
-            log(`Forwarding tide update to clients`);
-            this.emit("tide:update", message.data);
-            break;
-
-          case "weather:update":
-            log(`Forwarding weather update to clients`);
-            this.emit("weather:update", message.data);
-            break;
-
-          case "anchor:update":
-            log(`Processing anchor:update message:`, JSON.stringify(message.data, null, 2));
-            try {
-              const success = this.stateManager.updateAnchorState(message.data);
-              log(`Anchor update ${success ? 'succeeded' : 'failed'}`);
-              // Optionally emit an event for listeners
-              this.emit("anchor:update", { success, data: message.data });
-            } catch (error) {
-              logError('Error processing anchor update:', error);
-              this.emit("error:anchor-update", { error, data: message.data });
-            }
-            break;
-
-          case "bluetooth:update-metadata":
-            log(`Processing bluetooth:update-metadata from VPS:`, JSON.stringify(message.data, null, 2));
-            try {
-              const { deviceId, metadata } = message.data || message;
-              if (!deviceId || !metadata) {
-                logError('Invalid bluetooth:update-metadata message: missing deviceId or metadata');
-                break;
-              }
-
-              // Let StateManager handle the update
-              // StateManager will emit bluetooth:metadata-updated event
-              // BluetoothService listens for that event and updates itself
-              this.stateManager.updateBluetoothDeviceMetadata(deviceId, metadata)
-                .then(result => {
-                  log(`Bluetooth metadata update ${result ? 'succeeded' : 'failed'} for device ${deviceId}`);
-                  this.emit("bluetooth:metadata-updated", { success: result, deviceId, metadata });
-                })
-                .catch(error => {
-                  logError('Error updating bluetooth metadata:', error);
-                  this.emit("error:bluetooth-metadata", { error, deviceId, metadata });
-                });
-            } catch (error) {
-              logError('Error processing bluetooth:update-metadata:', error);
-              this.emit("error:bluetooth-metadata", { error, data: message.data });
-            }
-            break;
-
-          default:
-            log(
-              `Forwarding message type ${message.type} to clients`
-            );
-            this.emit("vps-message", message);
-            break;
+        if (!handled) {
+          this._handleVpsTransportMessage(message);
         }
       } catch (error) {
         logError("Error processing VPS message:", error);
@@ -378,51 +249,9 @@ export class RelayServer extends EventEmitter {
     });
   }
 
-  _handleFullStateRequest(request) {
-    log(
-      `Handling full state request from ${
-        request.clientId || "unknown client"
-      }, requestId: ${request.requestId || "unknown"}`
-    );
-
-    // Get the full state from the state manager
-    const fullState = this.stateManager.getState();
-
-    // Log details about the state being sent
-    const stateKeys = fullState ? Object.keys(fullState) : [];
-    log(
-      `Full state contains ${
-        stateKeys.length
-      } top-level keys: ${stateKeys.join(", ")}`
-    );
-    log(
-      `Full state size: ${
-        JSON.stringify(fullState).length
-      } bytes`
-    );
-
-    const response = {
-      type: "state:full-update",
-      data: fullState,
-      boatId: this.stateManager.boatId,
-      timestamp: Date.now(),
-      requestId: request.requestId || "unknown",
-    };
-
-    log(
-      `Sending full state response to VPS for boatId: ${this.stateManager.boatId}`
-    );
-    this.vpsConnector.send(response);
-    log(
-      `Full state response sent to VPS, requestId: ${
-        request.requestId || "unknown"
-      }`
-    );
-  }
-
   _sendToVPS(message) {
     // Only send messages if there are relay clients connected to the VPS
-    if (this.stateManager.clientCount === 0) {
+    if (!this._coordinator || !this._coordinator.hasConnectedClients()) {
       logTrace('No clients connected, skipping message send to VPS');
       // No remote clients connected to VPS, don't buffer or send messages
       return;
@@ -520,12 +349,8 @@ export class RelayServer extends EventEmitter {
     // Add client to our local tracking
     this.clients.set(clientId, { connected: true, lastActivity: Date.now() });
 
-    // Update the client count in the StateManager
-    const currentCount = this.stateManager.clientCount;
-    this.stateManager.updateClientCount(currentCount + 1);
-    log(
-      `Client ${clientId} connected via RELAY (total: ${this.stateManager.clientCount})`
-    );
+    this._coordinator.handleClientConnection({ clientId });
+    log(`Client ${clientId} connected via RELAY`);
 
     // Log all active clients
     log(
@@ -540,43 +365,27 @@ export class RelayServer extends EventEmitter {
     // Remove client from our local tracking
     this.clients.delete(clientId);
 
-    if (this.stateManager.clientCount > 0) {
-      // Update the client count in the StateManager
-      const currentCount = this.stateManager.clientCount;
-      this.stateManager.updateClientCount(currentCount - 1);
-      log(
-        `Client ${clientId} disconnected (remaining: ${this.stateManager.clientCount})`
-      );
-      return true;
-    }
-    return false;
+    this._coordinator.handleClientDisconnection({ clientId });
+    log(`Client ${clientId} disconnected`);
+    return true;
   }
 
   updateClientActivity() {
     // We no longer track individual client activity
     // Just return true if we have any clients
-    return this.stateManager.clientCount > 0;
+    return this._coordinator ? this._coordinator.hasConnectedClients() : false;
   }
 
   getClientCount() {
-    return this.stateManager.clientCount;
+    return this._coordinator ? this._coordinator.getClientCount() : 0;
   }
 
   shutdown() {
     log("Starting shutdown sequence");
 
-    // Remove StateManager event listeners
-    if (this._stateEventHandler) {
-      this.stateManager.off("state:full-update", this._stateEventHandler);
-      this.stateManager.off("state:patch", this._stateEventHandler);
-    }
-
-    // Remove tide and weather update handlers
-    if (this._tideUpdateHandler) {
-      this.stateManager.off("tide:update", this._tideUpdateHandler);
-    }
-    if (this._weatherUpdateHandler) {
-      this.stateManager.off("weather:update", this._weatherUpdateHandler);
+    if (this._unregisterTransport) {
+      this._unregisterTransport();
+      this._unregisterTransport = null;
     }
 
     // Clear intervals

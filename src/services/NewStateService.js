@@ -1279,33 +1279,22 @@ class NewStateService extends ContinuousService {
     // console.log('[StateService] Processing batch updates'); // DEBUG
 
     const updates = [];
-    const patches = [];
-    const currentState = stateData.state;
-  
+    const previousState = JSON.parse(JSON.stringify(stateData.state));
+
     this.updateQueue.forEach(({value, source}, path) => {
       // Skip external paths that aren't mapped to our canonical state
       if (path.startsWith('external.')) {
         console.debug(`[StateService] Skipping unmapped external path: ${path}`);
         return;
       }
-  
+
       try {
         updates.push({ path, value });
-        
-        const currentValue = this._getValueByPath(currentState, path);
-        if (!this._deepEqual(currentValue, value)) {
-          // Use 'add' operation which creates the path if it doesn't exist
-          // This is safer than 'replace' which requires the path to already exist
-          patches.push({
-            op: 'add',
-            path: `/${path.replace(/\./g, '/')}`,
-            value: value
-          });
-        }
       } catch (error) {
         console.warn(`[StateService] Failed to process update for ${path}:`, error);
       }
     });
+
   
     this.updateQueue.clear();
     // console.log('[StateService] After updateQueue clear'); // DEBUG
@@ -1315,14 +1304,17 @@ class NewStateService extends ContinuousService {
         // Apply updates to stateData
         stateData.batchUpdate(updates);
         
+        // Update derived values before generating patches
+        stateData.convert.updateAllDerivedValues();
+
+        const nextState = JSON.parse(JSON.stringify(stateData.state));
+        const patches = jsonPatchCompare(previousState, nextState);
+
         // Apply patches to stateManager
-        if (patches.length > 0) {
+        if (patches.length > 0 && stateManager) {
           stateManager.applyPatchAndForward(patches);
         }
-        
-        // Update derived values
-        stateData.convert.updateAllDerivedValues();
-  
+
         // console.log("[StateService] After stateData.convert.updateAllDefivedValues", JSON.stringify(stateData, null, 2));
       
         // const payload = {
@@ -1332,12 +1324,14 @@ class NewStateService extends ContinuousService {
         // };
         // console.log("[StateService] Emitting STATE_UPDATED event: ", payload);
 
-        this.emit(this.EVENTS.STATE_PATCH, {
-          type: "state:patch",
-          data: patches,
-          source: "signalK",
-          timestamp: Date.now(),
-        });
+        if (patches.length > 0) {
+          this.emit(this.EVENTS.STATE_PATCH, {
+            type: "state:patch",
+            data: patches,
+            source: "signalK",
+            timestamp: Date.now(),
+          });
+        }
 
         if (!this._lastFullEmit || Date.now() - this._lastFullEmit > 30000) {
           this.emit(this.EVENTS.STATE_FULL_UPDATE, {

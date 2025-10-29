@@ -5,6 +5,7 @@ dotenv.config({ path: ".env" });
 
 import { RelayServer } from './RelayServer.js';
 import { startDirectServer } from './DirectServer.js';
+import { getClientSyncCoordinator } from './coordinatorSingleton.js';
 import crypto from 'crypto';
 
 let relayServerInstance = null;
@@ -27,7 +28,8 @@ function verifySignature(message, signature, publicKey) {
 }
 
 export async function startRelayServer(stateManager, options = {}) {
-  relayServerInstance = new RelayServer({ ...options, stateManager });
+  const coordinator = getClientSyncCoordinator({ stateManager });
+  relayServerInstance = new RelayServer({ ...options, coordinator });
   // Initialize the relay server (this will connect to the VPS)
   try {
     await relayServerInstance.initialize();
@@ -39,7 +41,8 @@ export async function startRelayServer(stateManager, options = {}) {
 }
 
 export async function startDirectServerWrapper(stateManager, options = {}) {
-  directServerInstance = await startDirectServer(stateManager, options);
+  const coordinator = getClientSyncCoordinator({ stateManager });
+  directServerInstance = await startDirectServer({ coordinator }, options);
   console.log('[DIRECT] Direct server started');
   return directServerInstance;
 }

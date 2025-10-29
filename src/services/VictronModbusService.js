@@ -275,8 +275,8 @@ export class VictronModbusService extends ContinuousService {
             power: batteryPower.data,
             soc: batterySOC.data
           };
-          console.log(`[VictronModbus] Found BMV-712 at Unit ID ${unitId}`);
-          console.log('[VictronModbus] Raw BMV-712 values:', {
+          this.log(`Found BMV-712 at Unit ID ${unitId}`);
+          this.log('Raw BMV-712 values:', {
             voltage: batteryVoltage.data[0],
             current: batteryCurrent.data[0],
             power: batteryPower.data[0],
@@ -636,7 +636,7 @@ export class VictronModbusService extends ContinuousService {
     
     // Log raw AC input power to debug scaling
     if (rawData.multiplus?.acInput?.power) {
-      console.log('[VictronModbus] Raw AC Input Power register value:', rawData.multiplus.acInput.power[0]);
+      this.log('Raw AC Input Power register value:', rawData.multiplus.acInput.power[0]);
     }
     
     const parsed = {
@@ -657,7 +657,7 @@ export class VictronModbusService extends ContinuousService {
       // Register 266: SOC (uint16, scale 10) - divide by 10
       const soc = rawData.battery.soc[0] / 10;
       
-      console.log('[VictronModbus] Decoded BMV-712 data:', {
+      this.log('Decoded BMV-712 data:', {
         voltage,
         current,
         power,

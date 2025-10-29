@@ -6,7 +6,7 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { stateService, setStateManager } from "./state/StateService.js";
-import { startRelayServer, startDirectServer } from "./relay/server/index.js";
+import { startRelayServer, startDirectServerWrapper } from "./relay/server/index.js";
 import { stateManager } from "./relay/core/state/StateManager.js";
 import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
 import { registerVpsRoutes } from "./server/vps/registration.js";
@@ -51,7 +51,7 @@ async function bridgeStateToRelay() {
     console.error("[SERVER] State manager not initialized");
     return;
   }
-  console.log("[SERVER] Starting state bridge to relay");
+  log('Starting state bridge to relay');
   try {
     const { stateData } = await import("./state/StateData.js");
     const { stateManager } = await import(
@@ -63,14 +63,13 @@ async function bridgeStateToRelay() {
       // console.log("[SERVER] Received full state update from StateService:", JSON.stringify(msg) );
       stateManager.receiveExternalStateUpdate(msg.data);
     });
-    console.log("     [SERVER] Initiated StateService full update listener");
 
     stateService.on("state:patch", (msg) => {
       // console.log("[SERVER] Received patch update from StateService:", msg);
       stateManager.applyPatchAndForward(msg.data);
     });
-    console.log(".    [SERVER] Initiated StateService patch listener");
-    console.log("     [SERVER] All Server bridges activated.");
+    log('StateService patch listener registered');
+    log('State bridge activated');
   } catch (err) {
     console.error("[SERVER] !!!!!! Failed to set up state bridge:", err);
   }
@@ -78,7 +77,7 @@ async function bridgeStateToRelay() {
 
 // --- Initialize secondary services (Weather, Tidal, Position, Bluetooth) ---
 async function initializeSecondaryServices() {
-  console.log("[SERVER] Initializing secondary services (Weather, Tidal, Position, Bluetooth)...");
+  log('Initializing secondary services');
   
   try {
     // Initialize Position Service
@@ -90,20 +89,16 @@ async function initializeSecondaryServices() {
     const positionService = new PositionService({ sources: positionSources });
     
     // Connect PositionService to StateService so it can receive position:update events
-    console.log("[SERVER] Connecting PositionService to StateService...");
     positionService.dependencies.state = stateService;
-    
+
     // Initialize Tidal and Weather services with position service
-    console.log("[SERVER] Initializing TidalService and WeatherService...");
     const tidalService = new TidalService(stateService, positionService);
     const weatherService = new WeatherService(stateService, positionService);
-    
+
     // Initialize Bluetooth service
-    console.log("[SERVER] Initializing BluetoothService...");
     const bluetoothService = new BluetoothService({ stateManager });
-    
+
     // Initialize Victron Modbus service
-    console.log("[SERVER] Initializing VictronModbusService...");
     const victronModbusService = new VictronModbusService({
       host: '192.168.50.158',
       port: 502,
@@ -114,7 +109,6 @@ async function initializeSecondaryServices() {
     global.victronModbusService = victronModbusService;
     
     // Wire services to StateManager
-    console.log("[SERVER] Wiring services to StateManager...");
     stateManager.listenToService(positionService);
     stateManager.listenToService(tidalService);
     stateManager.listenToService(weatherService);
@@ -124,105 +118,34 @@ async function initializeSecondaryServices() {
     // Wire StateManager events to BluetoothService
     // This allows BluetoothService to react to state changes
     stateManager.on("bluetooth:metadata-updated", async ({ deviceId, metadata }) => {
-      console.log(`[SERVER] Updating BluetoothService DeviceManager for device ${deviceId}`);
       try {
         await bluetoothService.updateDeviceMetadata(deviceId, metadata);
-        console.log(`[SERVER] Successfully updated BluetoothService DeviceManager`);
       } catch (error) {
         console.error(`[SERVER] Failed to update BluetoothService DeviceManager:`, error);
       }
     });
-    
+
     // Start position service
-    console.log("[SERVER] Starting PositionService...");
     await positionService.start();
-    console.log("[SERVER] PositionService started successfully");
-    
+    log('PositionService started');
+
     // Start Bluetooth service
-    console.log("[SERVER] Starting BluetoothService...");
-    console.log("[SERVER] bluetoothService type:", typeof bluetoothService);
-    console.log("[SERVER] bluetoothService.start type:", typeof bluetoothService.start);
-    console.log("[SERVER] bluetoothService.isRunning:", bluetoothService.isRunning);
     try {
-      console.log("[SERVER] About to call bluetoothService.start()...");
       await bluetoothService.start();
-      console.log("[SERVER] bluetoothService.start() returned");
-      console.log("[SERVER] BluetoothService started successfully");
-      
+      log('BluetoothService started');
+
       // Start Victron Modbus service
-      console.log("[SERVER] Starting VictronModbusService...");
       await victronModbusService.start();
-      console.log("[SERVER] VictronModbusService started successfully");
-      
-      // Start periodic Bluetooth data logger (every 10 seconds for testing)
-      console.log('[SERVER] Starting Bluetooth data logger (every 10 seconds)');
-      
-      setInterval(() => {
-        console.log('[BT-LOGGER] Running periodic check...');
-        const selectedDevices = stateManager.getSelectedBluetoothDevices();
-        const allDevices = stateManager.getAllBluetoothDevices();
-        const selectedCount = Object.keys(selectedDevices).length;
-        const allCount = Object.keys(allDevices).length;
-        
-        console.log(`[BT-LOGGER] Total devices: ${allCount}, Selected: ${selectedCount}`);
-        console.log(`[BT-LOGGER] selectedDevices keys:`, Object.keys(selectedDevices));
-        
-        // Check if our specific device is in allDevices
-        const targetId = 'c4d5653318b41ad4dce6b335160e7999';
-        if (allDevices[targetId]) {
-          const device = allDevices[targetId];
-          console.log(`[BT-LOGGER] Target device ${targetId.slice(-8)} found in allDevices, isSelected=${device.isSelected}`);
-          console.log(`[BT-LOGGER] Device name: "${device.name}", has sensorData: ${!!device.sensorData}`);
-          if (device.sensorData) {
-            console.log(`[BT-LOGGER] Sensor data keys:`, Object.keys(device.sensorData));
-          }
-        }
-        
-        if (selectedCount > 0) {
-          console.log('\n========== BLUETOOTH DATA UPDATE ==========');
-          console.log(`Selected Devices: ${selectedCount}`);
-          
-          Object.values(selectedDevices).forEach(device => {
-            const label = device.userLabel || device.name || device.id;
-            console.log(`\n📱 ${label} (${device.id.slice(-8)})`);
-            
-            if (device.sensorData) {
-              console.log('  Sensor Data:');
-              if (device.sensorData.temperature) {
-                console.log(`    🌡️  Temperature: ${device.sensorData.temperature.value}${device.sensorData.temperature.unit}`);
-              }
-              if (device.sensorData.humidity) {
-                console.log(`    💧 Humidity: ${device.sensorData.humidity.value}${device.sensorData.humidity.unit}`);
-              }
-              if (device.sensorData.pressure) {
-                console.log(`    🔽 Pressure: ${device.sensorData.pressure.value}${device.sensorData.pressure.unit}`);
-              }
-              if (device.sensorData.battery) {
-                console.log(`    🔋 Battery: ${device.sensorData.battery.voltage?.value}V`);
-              }
-              console.log(`    ⏰ Last Update: ${device.lastSensorUpdate || device.lastSeen}`);
-            } else {
-              console.log('  ⚠️  No sensor data yet');
-            }
-            console.log(`  📡 RSSI: ${device.rssi} dBm`);
-          });
-          
-          console.log('==========================================\n');
-        } else if (allCount > 0) {
-          console.log(`[BT-LOGGER] ${allCount} devices discovered but none selected yet`);
-        } else {
-          console.log('[BT-LOGGER] No devices discovered yet');
-        }
-      }, 10000); // Log every 10 seconds for testing
-      
+      log('VictronModbusService started');
     } catch (error) {
       console.error("❌ [SERVER] BluetoothService failed to start:", error.message);
       console.error("Stack trace:", error.stack);
     }
+
     
     // Verify the connection by checking event listeners
     const listenerCount = stateService.listenerCount('position:update');
-    console.log(`[SERVER] StateService has ${listenerCount} listeners for 'position:update' event`);
+    log(`StateService has ${listenerCount} listeners for 'position:update'`);
     
     // Test if PositionService can receive events
     // positionService.on('position:update', (pos) => {
@@ -231,9 +154,9 @@ async function initializeSecondaryServices() {
     
     // Check how many listeners are on PositionService
     const posListenerCount = positionService.listenerCount('position:update');
-    console.log(`[SERVER] PositionService has ${posListenerCount} listeners for 'position:update' event (should be 3: server test, weather, tidal)`);
-    
-    console.log("[SERVER] Secondary services initialized successfully");
+    log(`PositionService listener count: ${posListenerCount}`);
+
+    log('Secondary services initialized');
   } catch (error) {
     console.error("[SERVER] Failed to initialize secondary services:", error);
     throw error;
@@ -359,7 +282,7 @@ async function startServer() {
 
     // 8. Start Direct WebSocket server (optional)
     if (process.env.DIRECT_WS_PORT) {
-      const directServer = await startDirectServer(stateManager, {
+      const directServer = await startDirectServerWrapper(stateManager, {
         port: parseInt(process.env.DIRECT_WS_PORT, 10),
       });
       console.log(

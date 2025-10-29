@@ -315,11 +315,11 @@ export class StateManager extends EventEmitter {
    */
   applyPatchAndForward(patch) {
     if (!Array.isArray(patch) || patch.length === 0) {
-      console.log('[StateManager] applyPatchAndForward called with empty/invalid patch');
+      log('applyPatchAndForward called with empty/invalid patch');
       return;
     }
 
-    console.log(`[StateManager] applyPatchAndForward received ${patch.length} operations`);
+    log(`applyPatchAndForward received ${patch.length} operations`);
 
     try {
       // Get fresh state with all structures
@@ -339,11 +339,11 @@ export class StateManager extends EventEmitter {
       });
 
       if (validPatch.length === 0) {
-        console.log('[StateManager] No valid patches after filtering');
+        log('No valid patches after filtering');
         return;
       }
 
-      console.log(`[StateManager] Applying ${validPatch.length} valid patches:`, validPatch.map(p => p.path).join(', '));
+      logState(`Applying ${validPatch.length} valid patches: ${validPatch.map(p => p.path).join(', ')}`);
 
       // Ensure parent paths exist before applying the patch
       this._ensureParentPaths(validPatch);
@@ -355,7 +355,7 @@ export class StateManager extends EventEmitter {
       try {
         applyPatch(this.appState, validPatch, true, true);
         applyPatch(currentState, validPatch, true, true);
-        console.log(`[StateManager] Successfully applied patches`);
+        log('Successfully applied patches');
       } catch (patchError) {
         console.error(`[StateManager] Error applying patches:`, patchError.message);
         throw patchError;
@@ -376,7 +376,7 @@ export class StateManager extends EventEmitter {
         timestamp: Date.now(),
       };
 
-      console.log(`[StateManager] Emitting state:patch event with ${validPatch.length} operations, listener count: ${this.listenerCount('state:patch')}`);
+      logState(`Emitting state:patch event with ${validPatch.length} operations, listener count: ${this.listenerCount('state:patch')}`);
       this.emit("state:patch", patchPayload);
 
       if (RECORD_DATA) {
@@ -423,7 +423,7 @@ export class StateManager extends EventEmitter {
         for (const part of pathParts) {
           if (!current[part]) {
             current[part] = {};
-            console.log(`[StateManager] Created missing parent path: ${part}`);
+            logState(`Created missing parent path: ${part}`);
           }
           current = current[part];
         }
@@ -568,17 +568,17 @@ export class StateManager extends EventEmitter {
       return;
     }
 
-    console.log("[StateManager] Setting weather data in appState");
+    log('Setting weather data in appState');
     this.weatherData = weatherData;
     this.appState.forecast = weatherData;
 
     this.ruleEngine.updateState({ forecast: weatherData });
-    console.log("[StateManager] Rule engine updated with weather data");
+    log('Rule engine updated with weather data');
     this.log(
       `[StateManager][setWeatherData] Rule engine updated with weather data`
     );
 
-    console.log("[StateManager] Emitting weather:update event to clients");
+    log('Emitting weather:update event to clients');
     this.log(`[StateManager][setWeatherData] Emitting weather:update event`);
     // Wrap the weather data in the format the client expects
     const weatherUpdatePayload = {
@@ -590,9 +590,9 @@ export class StateManager extends EventEmitter {
     };
     this.emit("weather:update", weatherUpdatePayload);
 
-    console.log("[StateManager] Broadcasting full state update with weather data");
+    log('Broadcasting full state update with weather data');
     this.emitFullState(); // Broadcast the change to all clients
-    console.log("[StateManager] Full state update with weather data completed");
+    log('Full state update with weather data completed');
     this.log("Full state update with weather data completed");
   }
 
@@ -602,7 +602,7 @@ export class StateManager extends EventEmitter {
       return;
     }
 
-    console.log("[StateManager] Setting Victron data via patches");
+    this.log("[StateManager] Setting Victron data via patches");
     
     // Convert the victron data structure to patches
     const patches = [];
@@ -617,10 +617,10 @@ export class StateManager extends EventEmitter {
     }
 
     if (patches.length > 0) {
-      console.log(`[StateManager] Applying ${patches.length} Victron patches`);
+      log(`Applying ${patches.length} Victron patches`);
       this.applyPatchAndForward(patches);
     } else {
-      console.log("[StateManager] No Victron patches to apply");
+      log('No Victron patches to apply');
     }
   }
 

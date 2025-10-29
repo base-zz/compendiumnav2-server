@@ -3,7 +3,6 @@ import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import debug from 'debug';
-import { stateManager } from "../core/state/StateManager.js";
 
 /**
  * @typedef {import('ws').WebSocket} WebSocket
@@ -36,8 +35,10 @@ const logState = debug('direct-server:state');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-async function startDirectServer(stateManager, options = {}) {
-  if (!stateManager) throw new Error('StateManager instance must be provided');
+async function startDirectServer({ coordinator } = {}, options = {}) {
+  if (!coordinator) {
+    throw new Error('startDirectServer requires a ClientSyncCoordinator instance');
+  }
 
   const PORT = options.port || parseInt(process.env.DIRECT_WS_PORT, 10);
   if (!PORT) throw new Error("DIRECT_WS_PORT must be specified");
@@ -84,7 +85,7 @@ async function startDirectServer(stateManager, options = {}) {
   
   // Store the server instance for later use
   /** @type {WebSocketServer} */
-  const wsServerInstance = wss;
+ 
   
   wss.on('listening', () => {
     const address = wss.address();
@@ -99,6 +100,10 @@ async function startDirectServer(stateManager, options = {}) {
   // Handle connection errors
   wss.on('error', (error) => {
     logError('WebSocket server error:', error);
+  });
+
+  const unregister = coordinator.registerTransport('direct', {
+    send: (payload) => broadcast(payload),
   });
 
   // Single connection handler for WebSocket connections
@@ -162,155 +167,19 @@ async function startDirectServer(stateManager, options = {}) {
       clearInterval(testPingInterval);
     });
     
-    // Function to get a safe copy of the state
-    const getSafeStateCopy = (state) => {
-      try {
-        return JSON.parse(JSON.stringify(state));
-      } catch (error) {
-        logError('Error cloning state:', error);
-        return {};
-      }
-    };
-
-    // Event handlers for state updates
-    const onTideUpdate = (data) => {
-      if (isAlive && ws.readyState === ws.OPEN) {
-        const payload = {
-          type: 'tide:update',
-          data
-        };
-        log(`[DIRECT] Client ${clientId}: Sending tide:update with data keys: ${Object.keys(data).join(', ')}`);
-        log(`[DIRECT] Client ${clientId}: Tide data structure: ${JSON.stringify(data, null, 2).substring(0, 500)}...`);
-        ws.send(JSON.stringify(payload));
-        log(`[DIRECT] Client ${clientId}: Successfully sent tide:update event`);
-      } else {
-        log(`[DIRECT] Client ${clientId}: Not sending tide:update - client not alive or connection not open`);
-      }
-    };
-    
-    const onWeatherUpdate = (data) => {
-      console.log(`[DIRECT] Client ${clientId}: onWeatherUpdate called with data:`, data ? Object.keys(data) : 'null');
-      if (isAlive && ws.readyState === ws.OPEN) {
-        const payload = {
-          type: 'weather:update',
-          data
-        };
-        console.log(`[DIRECT] Client ${clientId}: Sending weather:update to client`);
-        log(`[DIRECT] Client ${clientId}: Sending weather:update with data keys: ${Object.keys(data).join(', ')}`);
-        log(`[DIRECT] Client ${clientId}: Weather data structure: ${JSON.stringify(data, null, 2).substring(0, 500)}...`);
-        ws.send(JSON.stringify(payload));
-        console.log(`[DIRECT] Client ${clientId}: Successfully sent weather:update event`);
-        log(`[DIRECT] Client ${clientId}: Successfully sent weather:update event`);
-      } else {
-        console.log(`[DIRECT] Client ${clientId}: Not sending weather:update - client not alive (${isAlive}) or connection not open (${ws.readyState})`);
-        log(`[DIRECT] Client ${clientId}: Not sending weather:update - client not alive or connection not open`);
-      }
-    };
-
-    const onStateUpdate = (payload) => {
-      logState("==== STATE UPDATE EVENT RECEIVED ====");
-      logState(`Client ${clientId}: Received state update event type: ${payload?.type}`);
-      logState(`Client ${clientId}: Client status - alive: ${isAlive}, readyState: ${ws.readyState}`);
-      
-      // Log detailed payload info without overwhelming the console
-      if (payload?.data) {
-        if (Array.isArray(payload.data)) {
-          logState(`Client ${clientId}: State patch operations: ${payload.data.length}`);
-          payload.data.forEach((op, i) => {
-            logState(`Client ${clientId}: Operation ${i+1}: ${op.op} at path ${op.path}`);
-          });
-        } else if (typeof payload.data === 'object') {
-          logState(`Client ${clientId}: State update keys: ${Object.keys(payload.data).join(', ')}`);
-          
-          // Check specifically for tide and weather data
-          if (payload.data.tide) {
-            logState(`Client ${clientId}: State includes tide data with keys: ${Object.keys(payload.data.tide).join(', ')}`);
-          } else {
-            logState(`Client ${clientId}: State does NOT include tide data`);
-          }
-          
-          if (payload.data.tides) {
-            logState(`Client ${clientId}: State includes tides data with keys: ${Object.keys(payload.data.tides).join(', ')}`);
-          } else {
-            logState(`Client ${clientId}: State does NOT include tides data`);
-          }
-          
-          if (payload.data.forecast) {
-            logState(`Client ${clientId}: State includes forecast data with keys: ${Object.keys(payload.data.forecast).join(', ')}`);
-          } else {
-            logState(`Client ${clientId}: State does NOT include forecast data`);
-          }
-        }
-      }
-      
-      if (isAlive && ws.readyState === ws.OPEN) {
-        try {
-          const jsonString = JSON.stringify(payload);
-          ws.send(jsonString);
-          logState(`Client ${clientId}: Successfully sent state update (${jsonString.length} bytes)`);
-        } catch (error) {
-          logError(`Client ${clientId}: Failed to send state update:`, error);
-        }
-      } else {
-        logState(`Client ${clientId}: State update NOT sent - client not alive or connection not open`);
-      }
-      logState("==== END STATE UPDATE EVENT ====");
-    };
-
-    // Register event listeners
-    stateManager.on('tide:update', onTideUpdate);
-    stateManager.on('weather:update', onWeatherUpdate);
-    stateManager.on('state:patch', onStateUpdate);
-    stateManager.on('state:full-update', onStateUpdate);
-    
-    // Log detailed listener information
-    log(`[DIRECT] Client ${clientId}: Added state listeners.`);
-    logState(`Client ${clientId}: Total 'state:patch' listeners: ${stateManager.listenerCount('state:patch')}`);
-    logState(`Client ${clientId}: Total 'state:full-update' listeners: ${stateManager.listenerCount('state:full-update')}`);
-    logState(`Client ${clientId}: Total 'tide:update' listeners: ${stateManager.listenerCount('tide:update')}`);
-    logState(`Client ${clientId}: Total 'weather:update' listeners: ${stateManager.listenerCount('weather:update')}`);
-    
-    // Send initial state to the client
-    setTimeout(() => {
-      logState(`Sending initial full state to client ${clientId}`);
-      stateManager.emitFullState();
-      logState(`Initial full state sent to client ${clientId}`);
-    }, 1000);
-
-    // Function to send initial state
     const sendInitialState = () => {
       if (!isAlive || ws.readyState !== ws.OPEN) return;
-      
-      try {
-        const state = getSafeStateCopy(stateManager.getState());
-        
-        // Log bluetooth state for debugging
-        console.log('[DIRECT] Sending initial state to client');
-        console.log('[DIRECT] Bluetooth state:', {
-          hasBluetoothState: !!state.bluetooth,
-          hasSelectedDevices: !!(state.bluetooth && state.bluetooth.selectedDevices),
-          selectedDevicesType: state.bluetooth && state.bluetooth.selectedDevices ? typeof state.bluetooth.selectedDevices : 'undefined',
-          selectedDevicesKeys: state.bluetooth && state.bluetooth.selectedDevices ? Object.keys(state.bluetooth.selectedDevices) : [],
-          selectedDevicesCount: state.bluetooth && state.bluetooth.selectedDevices ? Object.keys(state.bluetooth.selectedDevices).length : 0
-        });
 
-        ws.send(JSON.stringify({
-          type: 'state:full-update',
-          data: state,
-          boatId: stateManager.boatId,
-          timestamp: Date.now()
-        }), (error) => {
-          if (error) {
-            logError(`Error sending initial state to ${clientId}:`, error);
-          } else {
-            log(`Sent initial state to ${clientId}`);
-          }
-        });
-      } catch (error) {
-        logError(`Error preparing initial state:`, error);
-      }
+      coordinator.broadcastInitialState((message) => {
+        if (!isAlive || ws.readyState !== ws.OPEN) return;
+        try {
+          ws.send(JSON.stringify(message));
+        } catch (error) {
+          logError(`Error sending initial state to ${clientId}:`, error);
+        }
+      });
     };
-    
+
     console.log(`[DIRECT] Registering message handler for client ${clientId}`);
     
     // Handle incoming messages
@@ -331,391 +200,59 @@ async function startDirectServer(stateManager, options = {}) {
         logTrace(`Received message from ${ws._socket?.remoteAddress || 'unknown'}:`, messageStr);
         
         // Parse the message
-        let data;
-        try {
-          data = JSON.parse(messageStr);
-          
-          // Only log bluetooth messages in detail
-          if (data.type && (data.type.includes('bluetooth') || data.type === 'bluetooth:select-device' || data.type === 'bluetooth:deselect-device')) {
-            console.log('========================================');
-            console.log(`[DIRECTSERVER] 🔵 BLUETOOTH MESSAGE RECEIVED FROM CLIENT ${clientId} 🔵`);
-            console.log('========================================');
-            console.log('[DIRECTSERVER] Message keys:', Object.keys(data));
-            console.log('[DIRECTSERVER] data.type:', data.type);
-            console.log('[DIRECTSERVER] data.serviceName:', data.serviceName);
-            console.log('[DIRECTSERVER] data.action:', data.action);
-            console.log('[DIRECTSERVER] Full message:', JSON.stringify(data, null, 2));
-          }
-          
-          log(`Parsed message type: ${data.type || data.serviceName || 'unknown'}`, JSON.stringify(data, null, 2));
-          
-          // Test handler - respond to ANY message
-          if (data.type === 'test' || data.action === 'test') {
-            console.log('[DIRECTSERVER] 🧪 TEST MESSAGE RECEIVED!');
-            ws.send(JSON.stringify({ type: 'test:response', success: true, message: 'Server received your test message!' }));
-            return;
-          }
-          
-          // Handle messages with serviceName format (e.g., { serviceName: "state", action: "bluetooth:select-device", data: {...} })
-          if (data.serviceName === 'state' && data.action && data.data) {
-            log('[STATE-MESSAGE] Received state service message:', JSON.stringify(data, null, 2));
-            
-            // Check if this is a bluetooth device selection message
-            if (data.action === 'bluetooth:select-device' && data.data.deviceId) {
-              log('[BLUETOOTH-SELECT] Detected bluetooth:select-device action in state message');
-              // Convert to bluetooth:select-device format
-              data.type = 'bluetooth:select-device';
-              data.deviceId = data.data.deviceId;
-              data.boatId = data.data.boatId;
-              data.timestamp = data.data.timestamp;
-              log('[BLUETOOTH-SELECT] Converted message to:', JSON.stringify(data, null, 2));
-              // Continue processing below
-            } else if (data.action === 'bluetooth:deselect-device' && data.data.deviceId) {
-              log('[BLUETOOTH-DESELECT] Detected bluetooth:deselect-device action in state message');
-              data.type = 'bluetooth:deselect-device';
-              data.deviceId = data.data.deviceId;
-              data.boatId = data.data.boatId;
-              data.timestamp = data.data.timestamp;
-            }
-          }
-          
-          // Handle Bluetooth toggle (direct format)
-          if (data.type === 'bluetooth:toggle') {
-            log('Processing bluetooth:toggle message:', JSON.stringify(data, null, 2));
-            
-            // Convert to the standard command format and process it
-            const commandData = { enabled: data.enabled === true };
-            const success = stateManager.toggleBluetooth(commandData.enabled);
-            
-            // Send response
-            if (ws.readyState === ws.OPEN) {
-              ws.send(JSON.stringify({
-                type: 'bluetooth:response',
-                action: 'toggle',
-                success,
-                message: `Bluetooth ${commandData.enabled ? 'enabled' : 'disabled'}`,
-                timestamp: Date.now()
-              }));
-            }
-            return;
-          }
-          
-          // Handle anchor updates
-          if (data.type === 'anchor:update') {
-            log('Processing anchor:update message:', JSON.stringify(data, null, 2));
-            const success = stateManager.updateAnchorState(data);
-            log(`Anchor update ${success ? 'succeeded' : 'failed'}`);
-            
-            if (ws.readyState === ws.OPEN) {
-              ws.send(JSON.stringify({
-                type: 'anchor:update:ack',
-                success,
-                timestamp: Date.now(),
-                receivedData: data.data // Echo back the received data for debugging
-              }));
-            }
-            return;
-          }
-          
-          // Handle Bluetooth commands
-          if ((data.type === 'command' && data.service === 'bluetooth') || 
-              data.type === 'bluetooth:toggle' ||
-              data.type === 'bluetooth:select-device' ||
-              data.type === 'bluetooth:deselect-device' ||
-              data.type === 'bluetooth:rename-device' ||
-              data.type === 'bluetooth:update-metadata' ||
-              data.type === 'bluetooth:scan') {
-            console.log('[DIRECTSERVER] ✅ Processing Bluetooth command');
-            log('Processing Bluetooth command:', JSON.stringify(data, null, 2));
-            
-            // Extract action and command data based on message format
-            let action, commandData;
-            
-            if (data.type === 'bluetooth:toggle') {
-              // Handle bluetooth:toggle format
-              action = 'toggle';
-              commandData = { enabled: data.enabled };
-            } else if (data.type === 'bluetooth:select-device') {
-              log('[BLUETOOTH-SELECT] Received bluetooth:select-device message:', JSON.stringify(data, null, 2));
-              action = 'select-device';
-              commandData = { 
-                deviceId: data.deviceId,
-                boatId: data.boatId,
-                timestamp: data.timestamp
-              };
-              log('[BLUETOOTH-SELECT] Extracted action:', action, 'commandData:', JSON.stringify(commandData, null, 2));
-            } else if (data.type === 'bluetooth:deselect-device') {
-              action = 'deselect-device';
-              commandData = { 
-                deviceId: data.deviceId,
-                boatId: data.boatId,
-                timestamp: data.timestamp
-              };
-            } else if (data.type === 'bluetooth:rename-device') {
-              action = 'rename-device';
-              commandData = { 
-                deviceId: data.deviceId, 
-                name: data.name,
-                boatId: data.boatId,
-                timestamp: data.timestamp
-              };
-            } else if (data.type === 'bluetooth:update-metadata') {
-              action = 'update-metadata';
-              commandData = { 
-                deviceId: data.deviceId, 
-                metadata: data.metadata,
-                boatId: data.boatId,
-                timestamp: data.timestamp
-              };
-            } else if (data.type === 'bluetooth:scan') {
-              action = 'scan';
-              commandData = { scanning: data.scanning };
-            } else {
-              // Handle standard command format
-              action = data.action;
-              commandData = data.data;
-            }
-            let success = false;
-            let response = {
-              type: 'bluetooth:response',
-              action,
-              success: false,
-              timestamp: Date.now()
-            };
-            
+        const parsed = JSON.parse(messageStr);
+        const handled = coordinator.handleClientMessage({
+          message: parsed,
+          respond: (payload) => {
+            if (!isAlive || ws.readyState !== ws.OPEN) return;
             try {
-              switch (action) {
-                case 'toggle':
-                  // Toggle Bluetooth on/off
-                  if (typeof commandData?.enabled === 'boolean') {
-                    success = stateManager.toggleBluetooth(commandData.enabled);
-                    response.message = `Bluetooth ${commandData.enabled ? 'enabled' : 'disabled'}`;
-                  } else {
-                    response.error = 'Invalid toggle parameter: enabled must be a boolean';
-                  }
-                  break;
-                  
-                case 'scan':
-                  // Start/stop Bluetooth scanning
-                  if (typeof commandData?.scanning === 'boolean') {
-                    success = stateManager.updateBluetoothScanningStatus(commandData.scanning);
-                    response.message = `Bluetooth scanning ${commandData.scanning ? 'started' : 'stopped'}`;
-                  } else {
-                    response.error = 'Invalid scan parameter: scanning must be a boolean';
-                  }
-                  break;
-                  
-                case 'select-device':
-                  // Select a Bluetooth device
-                  log('[BLUETOOTH-SELECT] Entering select-device case handler');
-                  log('[BLUETOOTH-SELECT] commandData:', JSON.stringify(commandData, null, 2));
-                  if (commandData?.deviceId) {
-                    log('[BLUETOOTH-SELECT] Calling stateManager.setBluetoothDeviceSelected with deviceId:', commandData.deviceId);
-                    // Handle async method
-                    stateManager.setBluetoothDeviceSelected(commandData.deviceId, true)
-                      .then(result => {
-                        log('[BLUETOOTH-SELECT] setBluetoothDeviceSelected result:', result);
-                        response.success = result;
-                        response.message = `Device ${commandData.deviceId} selected`;
-                        response.deviceId = commandData.deviceId;
-                        
-                        if (ws.readyState === ws.OPEN) {
-                          log('[BLUETOOTH-SELECT] Sending success response to client');
-                          ws.send(JSON.stringify(response));
-                        }
-                      })
-                      .catch(error => {
-                        logError(`[BLUETOOTH-SELECT] Error selecting device:`, error);
-                        response.error = `Error selecting device: ${error.message}`;
-                        response.success = false;
-                        
-                        if (ws.readyState === ws.OPEN) {
-                          ws.send(JSON.stringify(response));
-                        }
-                      });
-                    
-                    // Return early since we're handling the response asynchronously
-                    return;
-                  } else {
-                    log('[BLUETOOTH-SELECT] ERROR: No deviceId in commandData');
-                    response.error = 'Invalid parameter: deviceId is required';
-                  }
-                  break;
-                  
-                case 'deselect-device':
-                  // Deselect a Bluetooth device
-                  if (commandData?.deviceId) {
-                    // Handle async method
-                    stateManager.setBluetoothDeviceSelected(commandData.deviceId, false)
-                      .then(result => {
-                        response.success = result;
-                        response.message = `Device ${commandData.deviceId} deselected`;
-                        response.deviceId = commandData.deviceId;
-                        
-                        if (ws.readyState === ws.OPEN) {
-                          ws.send(JSON.stringify(response));
-                        }
-                      })
-                      .catch(error => {
-                        logError(`Error deselecting device:`, error);
-                        response.error = `Error deselecting device: ${error.message}`;
-                        response.success = false;
-                        
-                        if (ws.readyState === ws.OPEN) {
-                          ws.send(JSON.stringify(response));
-                        }
-                      });
-                    
-                    // Return early since we're handling the response asynchronously
-                    return;
-                  } else {
-                    response.error = 'Invalid parameter: deviceId is required';
-                  }
-                  break;
-                  
-                case 'rename-device':
-                  // Rename a Bluetooth device
-                  if (commandData?.deviceId && commandData?.name) {
-                    // Need to handle this asynchronously
-                    stateManager.updateBluetoothDeviceMetadata(commandData.deviceId, { name: commandData.name })
-                      .then(result => {
-                        response.success = result;
-                        response.message = result ? 
-                          `Device ${commandData.deviceId} renamed to ${commandData.name}` : 
-                          `Failed to rename device ${commandData.deviceId}`;
-                        response.deviceId = commandData.deviceId;
-                        
-                        if (ws.readyState === ws.OPEN) {
-                          ws.send(JSON.stringify(response));
-                        }
-                      })
-                      .catch(error => {
-                        logError(`Error renaming device:`, error);
-                        response.error = `Error renaming device: ${error.message}`;
-                        response.success = false;
-                        
-                        if (ws.readyState === ws.OPEN) {
-                          ws.send(JSON.stringify(response));
-                        }
-                      });
-                    
-                    // Return early since we're handling the response asynchronously
-                    return;
-                  } else {
-                    response.error = 'Invalid parameters: deviceId and name are required';
-                  }
-                  break;
-                  
-                case 'update-metadata':
-                  // Update device metadata (e.g., encryption key)
-                  log('[BLUETOOTH-METADATA] Updating device metadata');
-                  if (commandData?.deviceId && commandData?.metadata) {
-                    log('[BLUETOOTH-METADATA] DeviceId:', commandData.deviceId);
-                    log('[BLUETOOTH-METADATA] Metadata:', JSON.stringify(commandData.metadata, null, 2));
-                    
-                    // Let StateManager handle the update
-                    // StateManager will emit bluetooth:metadata-updated event
-                    // BluetoothService listens for that event and updates itself
-                    stateManager.updateBluetoothDeviceMetadata(commandData.deviceId, commandData.metadata)
-                      .then(result => {
-                        response.success = result;
-                        response.message = result ? 
-                          `Device ${commandData.deviceId} metadata updated` : 
-                          `Failed to update metadata for device ${commandData.deviceId}`;
-                        response.deviceId = commandData.deviceId;
-                        
-                        log('[BLUETOOTH-METADATA] Update result:', result);
-                        
-                        if (ws.readyState === ws.OPEN) {
-                          ws.send(JSON.stringify(response));
-                        }
-                      })
-                      .catch(error => {
-                        logError(`[BLUETOOTH-METADATA] Error updating metadata:`, error);
-                        response.error = `Error updating metadata: ${error.message}`;
-                        response.success = false;
-                        
-                        if (ws.readyState === ws.OPEN) {
-                          ws.send(JSON.stringify(response));
-                        }
-                      });
-                    
-                    // Return early since we're handling the response asynchronously
-                    return;
-                  } else {
-                    log('[BLUETOOTH-METADATA] ERROR: Missing deviceId or metadata');
-                    response.error = 'Invalid parameters: deviceId and metadata are required';
-                  }
-                  break;
-                  
-                default:
-                  response.error = `Unknown Bluetooth action: ${action}`;
-              }
-            } catch (error) {
-              logError(`Error handling Bluetooth command ${action}:`, error);
-              response.error = `Error processing command: ${error.message}`;
+              ws.send(JSON.stringify(payload));
+            } catch (sendError) {
+              logError('Failed to send response:', sendError);
             }
-            
-            // Update the success flag in the response
-            response.success = success;
-            
-            // Send response back to the client
-            if (ws.readyState === ws.OPEN) {
-              ws.send(JSON.stringify(response));
-            }
-            return;
-          }
-          
-          // Handle identity messages
-          if (data.type === 'identity' && data.data) {
-            // Store identity info on the WebSocket connection
-            ws.clientId = data.data.clientId || clientId; // Use provided ID or fallback to generated ID
-            ws.platform = data.data.platform;
-            ws.role = data.data.role;
-            
-            log(`Identity received from ${clientId}:`, {
+          },
+          broadcast: (payload) => broadcast(payload),
+        });
+
+        if (!handled) {
+          if (parsed.type === 'identity' && parsed.data) {
+            ws.clientId = parsed.data.clientId || clientId;
+            ws.platform = parsed.data.platform;
+            ws.role = parsed.data.role;
+
+            log('Identity received from client', {
               clientId: ws.clientId,
               platform: ws.platform,
               role: ws.role,
               timestamp: new Date().toISOString(),
-              clientIp: clientIp
+              clientIp,
             });
             return;
           }
 
-          // Handle ping messages
-          if (data.type === 'ping') {
-            // console.log(`[DIRECTSERVER] 💓 Received PING from client ${clientId}`);
-            // Respond with a pong message
+          if (parsed.type === 'ping') {
             if (ws.readyState === ws.OPEN) {
               ws.send(JSON.stringify({
                 type: 'pong',
                 timestamp: Date.now(),
                 serverTime: new Date().toISOString(),
-                echo: data.timestamp // Echo back the client timestamp for latency calculation
+                echo: parsed.timestamp,
               }));
-              // console.log(`[DIRECTSERVER] 💓 Sent PONG to client ${clientId}`);
             }
             return;
           }
-          
-          // Handle other message types...
-          
-        } catch (parseError) {
-          logError('Error parsing message:', parseError);
-          if (ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'error',
-              error: 'Invalid message format',
-              details: parseError.message
-            }));
-          }
-          return;
+
+          logWarn('Unhandled message payload received from client');
         }
-        
-        logWarn(`Unhandled message type: ${data.type || 'unknown'}`);
-      } catch (error) {
-        logError(`Error processing message from ${clientId}:`, error);
+      } catch (parseError) {
+        logError('Error parsing message:', parseError);
+        if (ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            error: 'Invalid message format',
+            details: parseError.message,
+          }));
+        }
       }
     });
     
@@ -744,13 +281,8 @@ async function startDirectServer(stateManager, options = {}) {
       clearTimeout(initTimer);
       clearInterval(heartbeatInterval);
       
-      // Remove all event listeners
-      stateManager.off('tide:update', onTideUpdate);
-      stateManager.off('weather:update', onWeatherUpdate);
-      stateManager.off('state:full-update', onStateUpdate);
-      stateManager.off('state:patch', onStateUpdate);
-      
       log(`Client ${clientIp} (${clientId}) disconnected`);
+      log(`Active clients: ${wss.clients.size}`);
       log(`Active clients: ${wss.clients.size}`);
     };
     
@@ -859,31 +391,6 @@ async function startDirectServer(stateManager, options = {}) {
     logState(`==== BROADCAST COMPLETE ====`);
   }
 
-
-  
-
-  // Log active client count for debugging
-  function getActiveClientCount() {
-    let count = 0;
-    wss.clients.forEach(client => {
-      if (client.readyState === 1) {  // 1 = OPEN
-        count++;
-      }
-    });
-    return count;
-  }
-  
-
-  // Close all connections
-  function closeAllConnections() {
-    wss.clients.forEach(client => {
-      if (client.readyState === 1) {  // 1 = OPEN
-        client.close(1000, 'Server shutting down');
-      }
-    });
-  }
-
-
   function shutdown() {
     log("[DIRECT] Shutting down...");
 
@@ -894,6 +401,8 @@ async function startDirectServer(stateManager, options = {}) {
     wss.clients.forEach((client) => {
       client.terminate();
     });
+
+    unregister();
 
     return new Promise((resolve) => wss.close(resolve));
   }

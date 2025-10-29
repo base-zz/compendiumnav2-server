@@ -256,6 +256,15 @@ export const stateData = {
       const wind = stateData.navigation?.wind;
       if (!wind) return;
 
+      const toSignedRadians = (angle) => {
+        if (angle === null || angle === undefined) {
+          return null;
+        }
+        const TWO_PI = Math.PI * 2;
+        const normalized = ((angle % TWO_PI) + TWO_PI) % TWO_PI;
+        return normalized > Math.PI ? normalized - TWO_PI : normalized;
+      };
+
       const unitPrefs = stateData.userUnitPreferences || UNIT_PRESETS.IMPERIAL;
       const defaultSpeedUnit = unitPrefs.speed || UNIT_PRESETS.IMPERIAL.speed;
       const defaultAngleUnit = unitPrefs.angle || UNIT_PRESETS.IMPERIAL.angle;
@@ -324,25 +333,25 @@ export const stateData = {
       const stwBase = convertToBase(stwNode?.value, stwUnits);
       const sogBase = convertToBase(sogNode?.value, sogUnits);
 
-      if (apparentSpeedBase !== null || apparentAngleBase !== null || headingBase !== null) {
-        console.debug('[StateData] True wind inputs', {
-          apparentSpeedRaw: wind.apparent?.speed?.value ?? null,
-          apparentSpeedUnits,
-          apparentSpeedBase,
-          apparentAngleRaw: wind.apparent?.angle?.value ?? null,
-          apparentAngleUnits,
-          apparentAngleBase,
-          headingRaw: headingNode?.value ?? null,
-          headingUnits,
-          headingBase,
-          stwRaw: stwNode?.value ?? null,
-          stwUnits,
-          stwBase,
-          sogRaw: sogNode?.value ?? null,
-          sogUnits,
-          sogBase
-        });
-      }
+      // if (apparentSpeedBase !== null || apparentAngleBase !== null || headingBase !== null) {
+      //   console.debug('[StateData] True wind inputs', {
+      //     apparentSpeedRaw: wind.apparent?.speed?.value ?? null,
+      //     apparentSpeedUnits,
+      //     apparentSpeedBase,
+      //     apparentAngleRaw: wind.apparent?.angle?.value ?? null,
+      //     apparentAngleUnits,
+      //     apparentAngleBase,
+      //     headingRaw: headingNode?.value ?? null,
+      //     headingUnits,
+      //     headingBase,
+      //     stwRaw: stwNode?.value ?? null,
+      //     stwUnits,
+      //     stwBase,
+      //     sogRaw: sogNode?.value ?? null,
+      //     sogUnits,
+      //     sogBase
+      //   });
+      // }
 
       if (
         apparentSpeedBase !== null &&
@@ -351,25 +360,27 @@ export const stateData = {
       ) {
         const boatSpeedBase = stwBase !== null ? stwBase : (sogBase !== null ? sogBase : 0);
 
-        const ax = apparentSpeedBase * Math.cos(apparentAngleBase);
-        const ay = apparentSpeedBase * Math.sin(apparentAngleBase);
-        const tx = ax - boatSpeedBase;
-        const ty = ay;
+        const numerator = apparentSpeedBase * Math.sin(apparentAngleBase);
+        const denominator = apparentSpeedBase * Math.cos(apparentAngleBase) - boatSpeedBase;
+        const trueWindAngleBase = toSignedRadians(Math.atan2(numerator, denominator));
 
-        const trueWindSpeedBase = Math.sqrt(tx * tx + ty * ty);
-        const trueWindAngleBase = Math.atan2(ty, tx);
+        const speedSquared =
+          apparentSpeedBase * apparentSpeedBase +
+          boatSpeedBase * boatSpeedBase -
+          2 * apparentSpeedBase * boatSpeedBase * Math.cos(apparentAngleBase);
+        const trueWindSpeedBase = Math.sqrt(Math.max(0, speedSquared));
         const trueWindDirectionBase = UnitConversion.normalizeRadians(headingBase + trueWindAngleBase);
 
-        console.debug('[StateData] True wind results', {
-          boatSpeedBase,
-          ax,
-          ay,
-          tx,
-          ty,
-          trueWindSpeedBase,
-          trueWindAngleBase,
-          trueWindDirectionBase
-        });
+        // console.debug('[StateData] True wind results', {
+        //   boatSpeedBase,
+        //   apparentSpeedBase,
+        //   apparentAngleBase,
+        //   numerator,
+        //   denominator,
+        //   trueWindSpeedBase,
+        //   trueWindAngleBase,
+        //   trueWindDirectionBase
+        // });
 
         if (wind.true?.speed) {
           const trueWindSpeedValue = convertFromBase(trueWindSpeedBase, trueSpeedUnits);
