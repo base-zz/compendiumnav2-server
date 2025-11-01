@@ -682,6 +682,7 @@ class StateService extends EventEmitter {
         console.log('[StateService] stateData.userUnitPreferences set to:', stateData.userUnitPreferences);
       }
       console.log('[StateService] Loaded user unit preferences:', this.userUnitPreferences);
+      this._emitPreferencesUpdate();
     } catch (err) {
       console.error('[StateService] Error in loadUserUnitPreferences:', err);
       // Default to imperial units if there's any error
@@ -691,9 +692,25 @@ class StateService extends EventEmitter {
       };
       if (stateData) {
         stateData.userUnitPreferences = this.userUnitPreferences;
-        console.log('[StateService] stateData.userUnitPreferences defaulted to:', stateData.userUnitPreferences);
       }
+      this._emitPreferencesUpdate();
     }
+  }
+
+  _emitPreferencesUpdate() {
+    if (!this.userUnitPreferences) {
+      return;
+    }
+
+    this.emit('preferences:update', {
+      type: 'preferences:update',
+      preferences: this.userUnitPreferences,
+      timestamp: Date.now()
+    });
+  }
+
+  getPreferences() {
+    return this.userUnitPreferences;
   }
 
   /**

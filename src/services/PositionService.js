@@ -81,6 +81,34 @@ export class PositionService extends ContinuousService {
       }
     }
 
+    // Seed initial position from state service if available
+    const stateDependency = this.dependencies.state;
+    if (stateDependency && typeof stateDependency.getState === 'function') {
+      try {
+        const currentState = stateDependency.getState();
+        const nav = currentState && currentState.navigation;
+        const navPosition = nav && nav.position;
+
+        const latitudeValue = navPosition && navPosition.latitude && navPosition.latitude.value;
+        const longitudeValue = navPosition && navPosition.longitude && navPosition.longitude.value;
+
+        if (typeof latitudeValue === 'number' && typeof longitudeValue === 'number') {
+          const timestampValue = navPosition && navPosition.timestamp;
+          const sourceValue = navPosition && navPosition.source;
+
+          this.log('Seeding initial position from state dependency');
+          this._onPositionUpdate({
+            latitude: latitudeValue,
+            longitude: longitudeValue,
+            timestamp: timestampValue || new Date().toISOString(),
+            source: sourceValue || 'state'
+          });
+        }
+      } catch (error) {
+        this.log(`Error seeding initial position: ${error.message}`);
+      }
+    }
+
     this.log('Position service started successfully.');
   }
   
