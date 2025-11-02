@@ -46,16 +46,11 @@ class ScheduledService extends BaseService {
     }
     
     try {
-      this.emit(`service:${this.name}:starting`);
       this.log('Starting scheduled service');
-      
-      this.isRunning = true;
-      this.lastUpdated = new Date();
-      
+      await super.start();
+
       // Schedule the next run but don't run immediately
       this._scheduleNextRun(false);
-      
-      this.emit(`service:${this.name}:started`, { timestamp: this.lastUpdated });
       this.log('Scheduled service started successfully');
       
       // If immediate is true, run the first task after the service is fully started

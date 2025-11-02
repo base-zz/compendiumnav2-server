@@ -10,6 +10,7 @@ import WebSocket from "ws";
 import ContinuousService from "./ContinuousService.js";
 import debug from "debug";
 import { stateData } from "../state/StateData.js";
+import { getStateManager } from "../relay/core/state/StateManager.js";
 import { signalKAdapterRegistry } from "../relay/server/adapters/SignalKAdapterRegistry.js";
 import fetch from "node-fetch";
 import { extractAISTargetsFromSignalK } from "../state/extractAISTargets.js";
@@ -18,12 +19,13 @@ import { UNIT_PRESETS } from '../shared/unitPreferences.js';
 import { getServerUnitPreferences } from '../state/serverUnitPreferences.js';
 import { UnitConversion } from '../shared/unitConversion.js';
 import pkg from "fast-json-patch";
-// StateManager is imported dynamically to avoid circular dependency
+// StateManager accessor
 let stateManager = null;
-
-// Function to set stateManager after imports are resolved
-function setStateManager(manager) {
-  stateManager = manager;
+function ensureStateManager() {
+  if (!stateManager) {
+    stateManager = getStateManager();
+  }
+  return stateManager;
 }
 
 const { compare: jsonPatchCompare } = pkg;
@@ -129,37 +131,30 @@ class NewStateService extends ContinuousService {
     try {
       this.emit('service:state:starting');
       this.log('Starting state service');
-  
+
       // Initialize with current config or empty object if not set
       const config = this.config || {};
       if (this.preferencesPromise) {
         await this.preferencesPromise;
       }
       await this.initialize(config);
-  
+
       // Set up batch processing if not already set up
       if (!this._batchTimer) {
         this._setupBatchProcessing();
       }
-  
+
       // Connect to SignalK if not already connected
       if (!this.connections.signalK.websocket) {
         await this._connectToSignalK();
       }
-  
+
       // Start notification path logging
       this.startNotificationPathLogging();
-  
-      this.isRunning = true;
-      this.lastUpdated = new Date();
-      
-      this.emit('service:state:started', { 
-        timestamp: this.lastUpdated,
-        signalKConnected: this.connections.signalK.websocket
-      });
-      
+
+      await super.start();
+
       this.log('State service started successfully');
-      return this;
     } catch (error) {
       this.logError('Failed to start state service:', error);
       this.emit('service:state:error', { 
@@ -344,7 +339,6 @@ class NewStateService extends ContinuousService {
     }
 
     this._debug("StateService initialized");
-    return this;
   }
 
 /**
@@ -883,6 +877,14 @@ class NewStateService extends ContinuousService {
     }
   }
 
+  getState() {
+    const manager = ensureStateManager();
+    if (!manager || typeof manager.getState !== 'function') {
+      throw new Error('StateManager instance unavailable or missing getState()');
+    }
+    return manager.getState();
+  }
+
   /**
    * Convert a value from SignalK units to user's preferred units
    * @param {string} path - The SignalK path
@@ -973,8 +975,8 @@ class NewStateService extends ContinuousService {
       // Convert to user's preferred units
       const originalValue = transformedValue;
       transformedValue = this._convertToUserUnits(path, transformedValue, sourceUnit);
-      if (path.includes('depth')) {
-        console.log('[StateService] Depth conversion:', {
+      if (path.includes('depth') && this._debug.enabled) {
+        this._debug('Depth conversion', {
           original: originalValue,
           sourceUnit,
           targetUnit: this.userUnitPreferences?.length,
@@ -1135,7 +1137,6 @@ class NewStateService extends ContinuousService {
       "environment.depth.belowTransducer": {
         path: "navigation.depth.belowTransducer.value",
         transform: function(value) {
-          console.log('[StateService] Raw depth value received:', value);
           return value;
         }
       },
@@ -1311,8 +1312,8 @@ class NewStateService extends ContinuousService {
         const patches = jsonPatchCompare(previousState, nextState);
 
         // Apply patches to stateManager
-        if (patches.length > 0 && stateManager) {
-          stateManager.applyPatchAndForward(patches);
+        if (patches.length > 0) {
+          ensureStateManager().applyPatchAndForward(patches);
         }
 
         // console.log("[StateService] After stateData.convert.updateAllDefivedValues", JSON.stringify(stateData, null, 2));
@@ -1415,9 +1416,6 @@ class NewStateService extends ContinuousService {
   }
 }
 
-// Create singleton instance
-const newStateService = new NewStateService();
-
 // Utility function for fetching full SignalK state
 async function fetchSignalKFullState(signalKBaseUrl, signalKToken) {
   const url = `${signalKBaseUrl}/vessels`;
@@ -1430,4 +1428,4 @@ async function fetchSignalKFullState(signalKBaseUrl, signalKToken) {
   return { vessels: await response.json() };
 }
 
-export { newStateService, NewStateService, fetchSignalKFullState, setStateManager };
+export { NewStateService, fetchSignalKFullState, ensureStateManager };

@@ -5,12 +5,18 @@
  * the boat's unique ID and vessel details from SignalK
  */
 
-import { getBoatInfo as getBoatInfoFromId } from '../uniqueAppId.js';
-import { stateService } from '../../state/StateService.js';
+import { getBoatInfo as buildBoatInfo } from '../uniqueAppId.js';
+import { requireService } from '../../services/serviceLocator.js';
 
 // Re-export getBoatInfo with stateService pre-bound
 export function getBoatInfo() {
-  return getBoatInfoFromId(stateService);
+  try {
+    const state = requireService('state');
+    return buildBoatInfo(state);
+  } catch (error) {
+    // If the state service is unavailable, fall back to base info without it
+    return buildBoatInfo();
+  }
 }
 
 /**
@@ -37,7 +43,8 @@ export function registerBoatInfoRoutes(app) {
    */
   app.get('/api/boat-info', (req, res) => {
     try {
-      const boatInfo = getBoatInfo(stateService);
+      const state = requireService('state');
+      const boatInfo = buildBoatInfo(state);
       res.json(boatInfo);
     } catch (error) {
       console.error('Error getting boat info:', error);

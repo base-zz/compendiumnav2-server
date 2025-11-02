@@ -332,6 +332,7 @@ export class BluetoothService extends ContinuousService {
 
     try {
       this.log("Starting Bluetooth service...");
+      await super.start();
       
       // Initialize DeviceManager with error handling
       try {
@@ -422,8 +423,6 @@ export class BluetoothService extends ContinuousService {
       // Start the scan cycle
       await this._startScanCycle();
       this.log("Scan cycle started");
-
-      this.isRunning = true;
       this.log("Bluetooth service started successfully");
     } catch (error) {
       this.logError(`❌ Failed to start Bluetooth service: ${error.message}`);

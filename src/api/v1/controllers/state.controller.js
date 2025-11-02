@@ -1,9 +1,29 @@
 // src/server/api/v1/controllers/state.controller.js
-import { stateService } from '../../../state/StateService.js';
+import { requireService } from '../../../services/serviceLocator.js';
+
+function resolveStateService(res) {
+  try {
+    const stateService = requireService('state');
+    if (!stateService) {
+      throw new Error('State service not registered');
+    }
+    return stateService;
+  } catch (error) {
+    res.status(503).json({
+      status: 'error',
+      error: 'State service unavailable',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+    return null;
+  }
+}
 
 // ========== ANCHOR ENDPOINTS ==========
 export const getAnchorState = (req, res) => {
-  const anchor = stateService.stateData.anchor || {};
+  const stateService = resolveStateService(res);
+  if (!stateService) return;
+
+  const anchor = stateService.stateData?.anchor || {};
   res.json({
     status: 'success',
     data: {
@@ -19,6 +39,9 @@ export const getAnchorState = (req, res) => {
 
 export const setAnchorPosition = (req, res) => {
   try {
+    const stateService = resolveStateService(res);
+    if (!stateService) return;
+
     const { latitude, longitude, time } = req.body;
     if (!stateService.stateData.anchor) stateService.stateData.anchor = {};
     stateService.stateData.anchor.anchorDropLocation = {
@@ -44,6 +67,9 @@ export const setAnchorPosition = (req, res) => {
 
 export const updateRodeLength = (req, res) => {
   try {
+    const stateService = resolveStateService(res);
+    if (!stateService) return;
+
     const { amount, units } = req.body;
     if (!stateService.stateData.anchor) stateService.stateData.anchor = {};
     stateService.stateData.anchor.rode = {
@@ -64,6 +90,9 @@ export const updateRodeLength = (req, res) => {
 };
 
 export const getAnchorHistory = (req, res) => {
+  const stateService = resolveStateService(res);
+  if (!stateService) return;
+
   res.json({
     status: 'success',
     data: stateService.stateData.anchor?.history || []
@@ -71,7 +100,10 @@ export const getAnchorHistory = (req, res) => {
 };
 
 export const getAnchorStatus = (req, res) => {
-  const anchor = stateService.stateData.anchor || {};
+  const stateService = resolveStateService(res);
+  if (!stateService) return;
+
+  const anchor = stateService.stateData?.anchor || {};
   res.json({
     status: 'success',
     data: {
@@ -84,6 +116,9 @@ export const getAnchorStatus = (req, res) => {
 
 // ========== NAVIGATION ENDPOINTS ==========
 export const getNavigationSnapshot = (req, res) => {
+  const stateService = resolveStateService(res);
+  if (!stateService) return;
+
   res.json({
     status: 'success',
     data: stateService.stateData.navigation || {}
@@ -91,6 +126,9 @@ export const getNavigationSnapshot = (req, res) => {
 };
 
 export const getCurrentPosition = (req, res) => {
+  const stateService = resolveStateService(res);
+  if (!stateService) return;
+
   const position = stateService.stateData.navigation?.position || {};
   if (!position.latitude || !position.longitude) {
     return res.status(503).json({
@@ -106,6 +144,9 @@ export const getCurrentPosition = (req, res) => {
 };
 
 export const getCurrentHeading = (req, res) => {
+  const stateService = resolveStateService(res);
+  if (!stateService) return;
+
   res.json({
     status: 'success',
     data: { heading: stateService.stateData.navigation?.heading }
@@ -113,6 +154,9 @@ export const getCurrentHeading = (req, res) => {
 };
 
 export const getCurrentSpeed = (req, res) => {
+  const stateService = resolveStateService(res);
+  if (!stateService) return;
+
   res.json({
     status: 'success',
     data: { speed: stateService.stateData.navigation?.speed }
@@ -120,6 +164,9 @@ export const getCurrentSpeed = (req, res) => {
 };
 
 export const getBatteryStatus = (req, res) => {
+  const stateService = resolveStateService(res);
+  if (!stateService) return;
+
   res.json({
     status: 'success',
     data: stateService.stateData.navigation?.batteries || {}
@@ -127,6 +174,9 @@ export const getBatteryStatus = (req, res) => {
 };
 
 export const getTankLevels = (req, res) => {
+  const stateService = resolveStateService(res);
+  if (!stateService) return;
+
   res.json({
     status: 'success',
     data: stateService.stateData.navigation?.tanks || {}
@@ -134,6 +184,9 @@ export const getTankLevels = (req, res) => {
 };
 
 export const getNavigationStatus = (req, res) => {
+  const stateService = resolveStateService(res);
+  if (!stateService) return;
+
   res.json({
     status: 'success',
     data: { status: stateService.stateData.navigation?.status }
@@ -142,6 +195,9 @@ export const getNavigationStatus = (req, res) => {
 
 // ========== SIGNALK/LEGACY ==========
 export const getSignalKPosition = (req, res) => {
+  const stateService = resolveStateService(res);
+  if (!stateService) return;
+
   const position = stateService.stateData.navigation?.position;
   if (!position?.latitude || !position?.longitude) {
     return res.status(503).json({

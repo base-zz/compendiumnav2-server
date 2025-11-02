@@ -18,65 +18,226 @@ export class TidalService extends ScheduledService {
 
   debugLog = debug("tidal-service");
 
-  constructor(stateService, positionService) {
+  /** @type {Function|null} */
+  _positionListener;
+
+  /** @type {NodeJS.Timeout|null} */
+  _delayedPositionCheck;
+
+  constructor() {
     super("tidal", {
       interval: 7200000, // 2 hours
       immediate: false,
       runOnInit: false,
     });
 
-    // Initialize state service reference with type checking
-    if (!stateService || typeof stateService.getState !== "function") {
-      throw new Error("stateService must be provided and implement getState()");
-    }
+    this.setServiceDependency("state");
+    this.setServiceDependency("position");
 
-    this.stateService = stateService;
     this.baseUrl = "https://marine-api.open-meteo.com/v1/marine";
     this._currentFetch = null;
 
     // Internal position state
     this.position = { latitude: null, longitude: null };
     this._hasScheduled = false;
+    this._positionListener = null;
+    this._stateFullUpdateHandler = null;
+    this._statePatchHandler = null;
+    this._delayedPositionCheck = null;
+  }
 
-    // Listen for position updates from PositionService
-    if (positionService && typeof positionService.on === "function") {
-      console.log("[TidalService] Attaching to positionService events");
-      this.debugLog("TidalService attaching to positionService events");
-      positionService.on("position:update", (position) => {
-        // console.log("[TidalService] Received position:update:", position);
-        if (
-          typeof position.latitude === "number" &&
-          typeof position.longitude === "number"
-        ) {
-          this.position = {
-            latitude: position.latitude,
-            longitude: position.longitude,
-          };
-
-          // Start scheduled runs after first valid position
-          if (!this._hasScheduled) {
-            this._hasScheduled = true;
-            console.log("[TidalService] Starting scheduled runs...");
-            this.runNow().catch(err => {
-              console.error("[TidalService] Error in initial runNow():", err);
-              this.logError("Error in initial runNow():", err);
-            }); // Run immediately with error handling
-            this.start(); // Start interval scheduling
-            console.log("[TidalService] Scheduling started.");
-            this.log("TidalService scheduling started.");
-          }
-        } else {
-          console.log("[TidalService] Received invalid position data:", position);
-          this.logError(
-            "Received invalid position data from PositionService:",
-            position
-          );
-        }
-      });
-    } else {
-      console.log("[TidalService] Could not attach to PositionService");
-      this.logError("TidalService could not attach to PositionService");
+  _seedPositionFromState() {
+    if (!this.stateService || typeof this.stateService.getState !== "function") {
+      return false;
     }
+
+    try {
+      const state = this.stateService.getState();
+      const navPosition = state?.navigation?.position;
+      const latitude = navPosition?.latitude?.value ?? navPosition?.latitude ?? null;
+      const longitude = navPosition?.longitude?.value ?? navPosition?.longitude ?? null;
+
+      if (typeof latitude === "number" && typeof longitude === "number") {
+        this.position = { latitude, longitude };
+        this.debugLog("Seeded tidal position from state", this.position);
+        return true;
+      }
+      this.debugLog("Unable to seed tidal position from state", {
+        latitudeType: typeof latitude,
+        longitudeType: typeof longitude,
+      });
+    } catch (error) {
+      this.logError("Failed to seed tidal position from state", error);
+    }
+
+    return false;
+  }
+
+  async _triggerInitialRunIfPossible() {
+    if (this._hasScheduled) {
+      return;
+    }
+
+    const hasInitialPosition = this._seedPositionFromState();
+    if (hasInitialPosition) {
+      this._hasScheduled = true;
+      try {
+        await this.run();
+        this.log("TidalService initial fetch complete.");
+      } catch (err) {
+        this.logError("Error running initial tidal fetch:", err);
+      }
+      return;
+    }
+
+    // Set up deferred handlers for when position becomes available later
+    this.debugLog("No initial tidal position available, deferring to state updates");
+    if (this.stateService) {
+      if (!this._stateFullUpdateHandler) {
+        this._stateFullUpdateHandler = async () => {
+          await this._handleDeferredStateUpdate("state:full-update");
+        };
+        this.stateService.on("state:full-update", this._stateFullUpdateHandler);
+      }
+
+      if (!this._statePatchHandler) {
+        this._statePatchHandler = async (event) => {
+          const patches = Array.isArray(event?.patches)
+            ? event.patches
+            : Array.isArray(event?.data)
+            ? event.data
+            : null;
+          if (!patches) {
+            return;
+          }
+          const touchesNavigation = patches.some(
+            (patch) =>
+              typeof patch.path === "string" &&
+              patch.path.startsWith("/navigation/position")
+          );
+          if (touchesNavigation) {
+            await this._handleDeferredStateUpdate("state:patch");
+          }
+        };
+        this.stateService.on("state:patch", this._statePatchHandler);
+      }
+    }
+
+    // Also set up a delayed check in case position arrives shortly after startup
+    if (!this._delayedPositionCheck) {
+      this._delayedPositionCheck = setTimeout(async () => {
+        if (!this._hasScheduled && this._seedPositionFromState()) {
+          this._hasScheduled = true;
+          try {
+            await this.run();
+            this.log("TidalService delayed initial fetch complete.");
+            this._cleanupStateFallbackHandlers();
+          } catch (err) {
+            this.logError("Error running delayed tidal fetch:", err);
+          }
+        }
+        this._delayedPositionCheck = null;
+      }, 15000); // Check 15 seconds after startup
+    }
+  }
+
+  async _handleDeferredStateUpdate(source) {
+    if (this._hasScheduled) {
+      return;
+    }
+    const seeded = this._seedPositionFromState();
+    if (!seeded) {
+      this.debugLog(`No valid position available for deferred tidal fetch after ${source}`);
+      return;
+    }
+    this._hasScheduled = true;
+    try {
+      await this.run();
+      this.log(`TidalService initial fetch complete (post ${source}).`);
+      this.debugLog(`TidalService initial fetch triggered by ${source}`);
+    } catch (err) {
+      this.logError(`Error running tidal fetch after ${source}:`, err);
+    }
+    this._cleanupStateFallbackHandlers();
+  }
+
+  _cleanupStateFallbackHandlers() {
+    if (this.stateService && this._stateFullUpdateHandler) {
+      this.stateService.off("state:full-update", this._stateFullUpdateHandler);
+      this._stateFullUpdateHandler = null;
+    }
+    if (this.stateService && this._statePatchHandler) {
+      this.stateService.off("state:patch", this._statePatchHandler);
+      this._statePatchHandler = null;
+    }
+  }
+
+  async start() {
+    if (this.isRunning) {
+      return;
+    }
+
+    await super.start();
+
+    const stateDependency = this.dependencies.state;
+    if (!stateDependency || typeof stateDependency.getState !== "function") {
+      throw new Error("TidalService requires 'state' service with getState()");
+    }
+    this.stateService = stateDependency;
+
+    const positionService = this.dependencies.position;
+    if (!positionService || typeof positionService.on !== "function") {
+      this.logError("TidalService could not attach to PositionService");
+      return;
+    }
+
+    if (this._positionListener) {
+      positionService.off("position:update", this._positionListener);
+      this._positionListener = null;
+    }
+
+    this._positionListener = async (position) => {
+      if (
+        position &&
+        typeof position.latitude === "number" &&
+        typeof position.longitude === "number"
+      ) {
+        this.position = {
+          latitude: position.latitude,
+          longitude: position.longitude,
+        };
+
+        if (!this._hasScheduled) {
+          this._hasScheduled = true;
+          try {
+            await this.run();
+          } catch (err) {
+            this.logError("Error running initial tidal fetch:", err);
+          }
+          this.log("TidalService initial fetch complete.");
+        }
+      } else {
+        this.logError("Received invalid position data from PositionService:", position);
+      }
+    };
+
+    positionService.on("position:update", this._positionListener);
+    this.debugLog("TidalService attached to PositionService events");
+    await this._triggerInitialRunIfPossible();
+  }
+
+  async stop() {
+    if (this._positionListener && this.dependencies.position) {
+      this.dependencies.position.off("position:update", this._positionListener);
+      this._positionListener = null;
+    }
+    this._cleanupStateFallbackHandlers();
+    if (this._delayedPositionCheck) {
+      clearTimeout(this._delayedPositionCheck);
+      this._delayedPositionCheck = null;
+    }
+    await super.stop();
+    this._hasScheduled = false;
   }
 
   /**

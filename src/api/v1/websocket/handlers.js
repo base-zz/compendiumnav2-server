@@ -1,6 +1,6 @@
 // src/server/api/v1/websocket/handlers.js
 import { createServiceBridge } from '../../../bridges/serviceBridge.js';
-import { stateService } from '../../../state/StateService.js';
+import { requireService } from '../../../services/serviceLocator.js';
 
 export function setupWebSocketHandlers(wss) {
   wss.on('connection', (ws, req) => {
@@ -14,15 +14,26 @@ export function setupWebSocketHandlers(wss) {
       console.log('[WS][CLOSE] code:', code, 'reason:', reason.toString());
     });
 
-    // Anchor updates
-    let anchorUnsubscribe = () => {};
-    let navUnsubscribe = () => {};
-    if (stateService.on) {
-      anchorUnsubscribe = stateService.on('anchorUpdate', (data) => {
-        console.log('[WS HANDLER] Sending anchor update to client:', data);
+    let stateService;
+    try {
+      stateService = requireService('state');
+    } catch (error) {
+      console.warn('[WS HANDLER] State service unavailable:', error.message);
+      ws.send(JSON.stringify({
+        type: 'error',
+        error: 'state-unavailable',
+        message: 'State service is not ready. Please retry later.'
+      }));
+      ws.close();
+      return;
+    }
+
+    const subscriptions = [];
+
+    if (typeof stateService.on === 'function') {
+      const anchorSub = stateService.on('anchorUpdate', (data) => {
         try {
-          console.log('[WS-BACKEND] Sending to client:', arguments[0]);
-ws.send(JSON.stringify({
+          ws.send(JSON.stringify({
             type: 'anchor',
             data
           }));
@@ -30,11 +41,13 @@ ws.send(JSON.stringify({
           console.warn('Failed to send anchor update:', err);
         }
       });
-      navUnsubscribe = stateService.on('navigationUpdate', (data) => {
-        console.log('[WS HANDLER] Sending navigation update to client:', data);
+      if (typeof anchorSub === 'function') {
+        subscriptions.push(anchorSub);
+      }
+
+      const navSub = stateService.on('navigationUpdate', (data) => {
         try {
-          console.log('[WS-BACKEND] Sending to client:', arguments[0]);
-ws.send(JSON.stringify({
+          ws.send(JSON.stringify({
             type: 'navigation',
             data
           }));
@@ -42,16 +55,21 @@ ws.send(JSON.stringify({
           console.warn('Failed to send navigation update:', err);
         }
       });
-      // Ensure unsubscribe functions are valid
-      anchorUnsubscribe = typeof anchorUnsubscribe === 'function' ? anchorUnsubscribe : () => {};
-      navUnsubscribe = typeof navUnsubscribe === 'function' ? navUnsubscribe : () => {};
-    } else {
-      // TODO: Implement event emitters in stateService for real-time updates
-      console.warn('stateService.on not implemented. Real-time updates will not work.');
+      if (typeof navSub === 'function') {
+        subscriptions.push(navSub);
+      }
     }
+
     ws.on('close', () => {
-      if (typeof anchorUnsubscribe === 'function') anchorUnsubscribe();
-      if (typeof navUnsubscribe === 'function') navUnsubscribe();
+      subscriptions.forEach((unsubscribe) => {
+        if (typeof unsubscribe === 'function') {
+          try {
+            unsubscribe();
+          } catch (err) {
+            console.warn('Error unsubscribing from state event:', err);
+          }
+        }
+      });
       console.log('WebSocket connection closed');
     });
 

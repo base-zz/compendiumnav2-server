@@ -5,23 +5,26 @@ import fetch from 'node-fetch';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { stateService, setStateManager } from "./state/StateService.js";
 import { startRelayServer, startDirectServerWrapper } from "./relay/server/index.js";
-import { stateManager } from "./relay/core/state/StateManager.js";
+import { getStateManager, setStateManagerInstance } from "./relay/core/state/StateManager.js";
 import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
 import { registerVpsRoutes } from "./server/vps/registration.js";
 import { registerVictronRoutes } from "./server/api/victron.js";
+import debug from 'debug';
+import { bootstrapServices, startRegisteredServices } from "./services/bootstrap.js";
+import { serviceManager } from "./services/ServiceManager.js";
+import { requireService } from "./services/serviceLocator.js";
+import { NewStateService } from "./services/NewStateService.js";
+import { PositionService } from "./services/PositionService.js";
 import { TidalService } from "./services/TidalService.js";
 import { WeatherService } from "./services/WeatherService.js";
-import { PositionService } from "./services/PositionService.js";
 import { BluetoothService } from "./services/BluetoothService.js";
 import { VictronModbusService } from "./services/VictronModbusService.js";
-import debug from 'debug';
 
 const log = debug('server:main');
 
-// Set up circular dependency
-setStateManager(stateManager);
+const stateManager = getStateManager();
+setStateManagerInstance(stateManager);
 
 console.log("Loading .env");
 dotenv.config({ path: ".env" });
@@ -54,125 +57,117 @@ async function bridgeStateToRelay() {
   log('Starting state bridge to relay');
   try {
     const { stateData } = await import("./state/StateData.js");
-    const { stateManager } = await import(
+    const { getStateManager: resolveStateManager } = await import(
       "./relay/core/state/StateManager.js"
     );
+    const relayStateManager = resolveStateManager();
+    const stateService = requireService('state');
 
-    // Bridge canonical StateService events to relay stateManager
     stateService.on("state:full-update", (msg) => {
-      // console.log("[SERVER] Received full state update from StateService:", JSON.stringify(msg) );
-      stateManager.receiveExternalStateUpdate(msg.data);
+      relayStateManager.receiveExternalStateUpdate(msg.data);
     });
 
     stateService.on("state:patch", (msg) => {
-      // console.log("[SERVER] Received patch update from StateService:", msg);
-      stateManager.applyPatchAndForward(msg.data);
+      relayStateManager.applyPatchAndForward(msg.data);
     });
     log('StateService patch listener registered');
     log('State bridge activated');
   } catch (err) {
     console.error("[SERVER] !!!!!! Failed to set up state bridge:", err);
+    throw err;
   }
 }
 
-// --- Initialize secondary services (Weather, Tidal, Position, Bluetooth) ---
-async function initializeSecondaryServices() {
-  log('Initializing secondary services');
-  
-  try {
-    // Initialize Position Service
-    const positionSources = {
-      gps: { priority: 1, timeout: 10000 },
-      ais: { priority: 2, timeout: 15000 },
-      state: { priority: 3, timeout: 20000 }
-    };
-    const positionService = new PositionService({ sources: positionSources });
-    
-    // Connect PositionService to StateService so it can receive position:update events
-    positionService.dependencies.state = stateService;
+function buildServiceManifest() {
+  const positionSources = {
+    gps: { priority: 1, timeout: 10000 },
+    ais: { priority: 2, timeout: 15000 },
+    state: { priority: 3, timeout: 20000 }
+  };
 
-    // Initialize Tidal and Weather services with position service
-    const tidalService = new TidalService(stateService, positionService);
-    const weatherService = new WeatherService(stateService, positionService);
+  return [
+    {
+      name: "state",
+      create: () => new NewStateService()
+    },
+    {
+      name: "position",
+      create: () => new PositionService({ sources: positionSources })
+    },
+    {
+      name: "bluetooth",
+      create: () => new BluetoothService({ stateManager })
+    },
+    {
+      name: "victron-modbus",
+      create: () => new VictronModbusService({
+        host: '192.168.50.158',
+        port: 502,
+        pollInterval: 5000
+      })
+    },
+    {
+      name: "tidal",
+      create: () => new TidalService()
+    },
+    {
+      name: "weather",
+      create: () => new WeatherService()
+    },    
+  ];
+}
 
-    // Initialize Bluetooth service
-    const bluetoothService = new BluetoothService({ stateManager });
+async function startSecondaryServices() {
+  const services = [
+    "position",
+    "tidal",
+    "weather",
+    "bluetooth",
+    "victron-modbus"
+  ];
 
-    // Initialize Victron Modbus service
-    const victronModbusService = new VictronModbusService({
-      host: '192.168.50.158',
-      port: 502,
-      pollInterval: 5000
-    });
-    
-    // Store for API access
-    global.victronModbusService = victronModbusService;
-    
-    // Wire services to StateManager
-    stateManager.listenToService(positionService);
-    stateManager.listenToService(tidalService);
-    stateManager.listenToService(weatherService);
-    stateManager.listenToService(bluetoothService);
-    stateManager.listenToService(victronModbusService);
-    
-    // Wire StateManager events to BluetoothService
-    // This allows BluetoothService to react to state changes
-    stateManager.on("bluetooth:metadata-updated", async ({ deviceId, metadata }) => {
-      try {
-        await bluetoothService.updateDeviceMetadata(deviceId, metadata);
-      } catch (error) {
-        console.error(`[SERVER] Failed to update BluetoothService DeviceManager:`, error);
-      }
-    });
-
-    // Start position service
-    await positionService.start();
-    log('PositionService started');
-
-    // Start Bluetooth service
-    try {
-      await bluetoothService.start();
-      log('BluetoothService started');
-
-      // Start Victron Modbus service
-      await victronModbusService.start();
-      log('VictronModbusService started');
-    } catch (error) {
-      console.error("❌ [SERVER] BluetoothService failed to start:", error.message);
-      console.error("Stack trace:", error.stack);
+  for (const name of services) {
+    const service = serviceManager.getService(name);
+    if (!service) {
+      throw new Error(`Service '${name}' was not registered correctly`);
     }
-
-    
-    // Verify the connection by checking event listeners
-    const listenerCount = stateService.listenerCount('position:update');
-    log(`StateService has ${listenerCount} listeners for 'position:update'`);
-    
-    // Test if PositionService can receive events
-    // positionService.on('position:update', (pos) => {
-    //   console.log('[SERVER] PositionService emitted position:update:', pos);
-    // });
-    
-    // Check how many listeners are on PositionService
-    const posListenerCount = positionService.listenerCount('position:update');
-    log(`PositionService listener count: ${posListenerCount}`);
-
-    log('Secondary services initialized');
-  } catch (error) {
-    console.error("[SERVER] Failed to initialize secondary services:", error);
-    throw error;
   }
+
+  const stateService = requireService('state');
+  const positionService = requireService('position');
+  const tidalService = requireService('tidal');
+  const weatherService = requireService('weather');
+  const bluetoothService = requireService('bluetooth');
+  const victronService = requireService('victron-modbus');
+
+  stateManager.listenToService(positionService);
+  stateManager.listenToService(tidalService);
+  stateManager.listenToService(weatherService);
+  stateManager.listenToService(bluetoothService);
+  stateManager.listenToService(victronService);
+
+  stateManager.on("bluetooth:metadata-updated", async ({ deviceId, metadata }) => {
+    try {
+      await bluetoothService.updateDeviceMetadata(deviceId, metadata);
+    } catch (error) {
+      console.error(`[SERVER] Failed to update BluetoothService DeviceManager:`, error);
+    }
+  });
 }
 
 async function startServer() {
   try {
-    // 0. Start StateService (SignalK, data ingestion)
-    await stateService.initialize();
+    const manifest = buildServiceManifest();
+    const { failures } = await bootstrapServices(manifest);
+    if (failures.length > 0) {
+      throw new Error(`Service bootstrap failures: ${failures.map(f => `${f.name}:${f.reason}`).join(', ')}`);
+    }
 
-    // 1. Bridge canonical state into relay state manager
+    await startRegisteredServices();
+    await serviceManager.waitForAllReady();
+
     await bridgeStateToRelay();
-
-    // 2. Initialize secondary services (Weather, Tidal, Position)
-    await initializeSecondaryServices();
+    await startSecondaryServices();
 
     // 3. Build relay config
     const relayConfig = {
@@ -276,6 +271,7 @@ async function startServer() {
     });
 
     // 7. Relay state updates to VPS (optional, placeholder for future logic)
+    const stateService = requireService('state');
     stateService.on("state-updated", (data) => {
       // VPS relay logic can be added here if needed in the future
     });

@@ -352,18 +352,58 @@ export class StateManager extends EventEmitter {
 
       // Apply to both our local state and the canonical state
       // Use mutateDocument=true so patch persists in this.appState
-      try {
-        applyPatch(this.appState, validPatch, true, true);
-        applyPatch(currentState, validPatch, true, true);
-        log('Successfully applied patches');
-      } catch (patchError) {
-        console.error(`[StateManager] Error applying patches:`, patchError.message);
-        throw patchError;
+      let sanitizedPatch = validPatch;
+
+      const applySafely = (target, operations) => {
+        let ops = operations;
+        while (ops.length) {
+          try {
+            applyPatch(target, ops, true, true);
+            log("Successfully applied patches");
+            return ops;
+          } catch (patchError) {
+            const conciseMessage =
+              typeof patchError.message === "string"
+                ? patchError.message.split("\n")[0]
+                : patchError.message;
+
+            if (
+              patchError?.name === "OPERATION_PATH_UNRESOLVABLE" &&
+              typeof patchError.index === "number"
+            ) {
+              log(
+                `Skipping unresolved patch op at index ${patchError.index}: ${conciseMessage}`
+              );
+              ops = ops.filter((_, idx) => idx !== patchError.index);
+              continue;
+            }
+
+            const errorInfo = {
+              name: patchError.name,
+              message: conciseMessage,
+              index: patchError.index,
+              operation: patchError.operation,
+            };
+            console.error(
+              `[StateManager] Error applying patches:`,
+              JSON.stringify(errorInfo, null, 2)
+            );
+            throw patchError;
+          }
+        }
+        return ops;
+      };
+
+      sanitizedPatch = applySafely(this.appState, sanitizedPatch);
+      if (sanitizedPatch.length === 0) {
+        log("All patch operations skipped after resolving inconsistencies");
+        return;
       }
+      sanitizedPatch = applySafely(currentState, sanitizedPatch);
 
       // Convert patch to a change object and notify the rule engine
       const changes = this._convertPatchToStateChanges(
-        validPatch,
+        sanitizedPatch,
         stateBeforePatch
       );
       this.ruleEngine.updateState(changes);
@@ -371,7 +411,7 @@ export class StateManager extends EventEmitter {
       // Always emit patch events for direct server
       const patchPayload = {
         type: "state:patch",
-        data: validPatch,
+        data: sanitizedPatch,
         boatId: this._boatId,
         timestamp: Date.now(),
       };
@@ -380,7 +420,7 @@ export class StateManager extends EventEmitter {
       this.emit("state:patch", patchPayload);
 
       if (RECORD_DATA) {
-        recordPatch(validPatch);
+        recordPatch(sanitizedPatch);
       }
     } catch (error) {
       this.logError("Patch error:", error);
@@ -1754,3 +1794,22 @@ export class StateManager extends EventEmitter {
 }
 
 export const stateManager = new StateManager();
+
+let sharedStateManager = stateManager;
+
+export function getStateManager(initialState = null) {
+  if (!sharedStateManager) {
+    sharedStateManager = new StateManager(initialState);
+  } else if (initialState && !sharedStateManager._hasSentInitialFullState) {
+    try {
+      sharedStateManager.initialState = initialState;
+    } catch (error) {
+      sharedStateManager.logError("Failed to set shared state manager initial state", error);
+    }
+  }
+  return sharedStateManager;
+}
+
+export function setStateManagerInstance(stateManagerInstance) {
+  sharedStateManager = stateManagerInstance;
+}

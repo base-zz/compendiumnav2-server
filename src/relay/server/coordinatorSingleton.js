@@ -1,5 +1,5 @@
 import { ClientSyncCoordinator } from './ClientSyncCoordinator.js';
-import { stateManager as defaultStateManager } from '../core/state/StateManager.js';
+import { getStateManager } from '../core/state/StateManager.js';
 
 let coordinatorInstance = null;
 
@@ -10,7 +10,7 @@ let coordinatorInstance = null;
  * @returns {ClientSyncCoordinator}
  */
 export function getClientSyncCoordinator(options = {}) {
-  const manager = options.stateManager || coordinatorInstance?.stateManager || defaultStateManager;
+  const manager = options.stateManager || coordinatorInstance?.stateManager || getStateManager();
 
   if (!manager) {
     throw new Error('ClientSyncCoordinator requires a state manager');

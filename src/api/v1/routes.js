@@ -1,6 +1,6 @@
 // src/server/api/v1/routes.js
 import express from 'express';
-import { stateService } from '../../state/StateService.js';
+import { requireService } from '../../services/serviceLocator.js';
 import {
   getAnchorState,
   setAnchorPosition,
@@ -21,19 +21,38 @@ import { anchorPositionSchema } from './schemas/anchor.schema.js';
 
 const router = express.Router();
 
+function tryGetStateService() {
+  try {
+    return requireService('state');
+  } catch (error) {
+    return null;
+  }
+}
+
+function respondStateUnavailable(res) {
+  return res.status(503).json({
+    status: 'error',
+    error: 'State service unavailable',
+    timestamp: new Date().toISOString()
+  });
+}
+
 // ======================================
 // Service Health Endpoints
 // ======================================
 router.get('/health', (req, res) => {
+  const stateService = tryGetStateService();
   const services = {
-    anchor: !!stateService.stateData.anchor,
-    navigation: !!stateService.stateData.navigation,
-    signalk: !!stateService.isInitialized
+    anchor: !!stateService?.stateData?.anchor,
+    navigation: !!stateService?.stateData?.navigation,
+    signalk: !!stateService?.isInitialized
   };
 
-  const allHealthy = Object.values(services).every(Boolean);
+  const allHealthy = stateService && Object.values(services).every(Boolean);
+  const status = stateService ? (allHealthy ? 'operational' : 'degraded') : 'unavailable';
+
   res.status(allHealthy ? 200 : 503).json({
-    status: allHealthy ? 'operational' : 'degraded',
+    status,
     services,
     timestamp: new Date().toISOString(),
     version: process.env.APP_VERSION || '1.0.0'
@@ -46,6 +65,10 @@ router.get('/health', (req, res) => {
 router.get('/debug/signalk', (req, res) => {
   if (process.env.NODE_ENV !== 'development') {
     return res.status(403).json({ error: 'Debug endpoint disabled in production' });
+  }
+  const stateService = tryGetStateService();
+  if (!stateService) {
+    return respondStateUnavailable(res);
   }
   const skData = stateService.getSnapshot ? stateService.getSnapshot() : stateService.stateData;
   res.json({
@@ -79,10 +102,18 @@ router.get('/navigation/status', getNavigationStatus);
 // Position Data Endpoints (legacy)
 // ======================================
 router.get('/position', (req, res) => {
-  res.json(stateService.stateData.navigation?.position || {});
+  const stateService = tryGetStateService();
+  if (!stateService) {
+    return respondStateUnavailable(res);
+  }
+  res.json(stateService.stateData?.navigation?.position || {});
 });
 router.get('/position/raw', (req, res) => {
-  res.json(stateService.stateData.navigation?.position || {});
+  const stateService = tryGetStateService();
+  if (!stateService) {
+    return respondStateUnavailable(res);
+  }
+  res.json(stateService.stateData?.navigation?.position || {});
 });
 
 // ======================================

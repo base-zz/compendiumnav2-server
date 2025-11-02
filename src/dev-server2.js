@@ -7,7 +7,9 @@ import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import express from "express";
 import { serviceManager } from "./services/ServiceManager.js";
-import newStateServiceDemo from "./services/NewStateServiceDemo.js";
+import { requireService } from "./services/serviceLocator.js";
+import { bootstrapServices, startRegisteredServices } from "./services/bootstrap.js";
+import { NewStateServiceDemo } from "./services/NewStateServiceDemo.js";
 import { TidalService } from "./services/TidalService.js";
 import { WeatherService } from "./services/WeatherService.js";
 import { PositionService } from "./services/PositionService.js";
@@ -64,33 +66,65 @@ function buildVpsUrl() {
 
 // --- Initialize and register services ---
 async function initializeServices() {
-  log("Initializing services...");
+  log("Initializing services via manifest...");
 
-  try {
-    // Initialize Bluetooth service
-    log("Initializing NewStateServiceDemo...");
+  const serviceManifest = [
+    {
+      name: "state",
+      create: () => new NewStateServiceDemo(),
+    },
+    {
+      name: "position",
+      dependencies: ["state"],
+      create: ({ options }) => new PositionService(options),
+      options: {
+        sources: {
+          gps: { priority: 1, timeout: 10000 },
+          ais: { priority: 2, timeout: 15000 },
+          state: { priority: 3, timeout: 20000 },
+        },
+      },
+    },
+    {
+      name: "tidal",
+      dependencies: ["state", "position"],
+      create: () => new TidalService(),
+    },
+    {
+      name: "weather",
+      dependencies: ["state", "position"],
+      create: () => new WeatherService(),
+    },
+    {
+      name: "bluetooth",
+      create: () =>
+        new BluetoothService({
+          scanDuration: 10000,
+          scanInterval: 30000,
+          debug: true,
+          logLevel: "debug",
+          stateManager: null,
+        }),
+    },
+  ];
 
-    // Initialize the demo service, which loads data from the DB
-    const stateService = newStateServiceDemo;
-    await stateService.start();
-    await stateService.loadInitialData();
-
-    // Register the state service with the service manager
-    serviceManager.registerService("state", stateService);
-
-    // Start mock data generation for other systems
-    log("Starting mock data generation...");
-    stateService.startMockMultipleTanksAndBatteries(5000); // Update every 5 seconds
-
-    log("NewStateServiceDemo initialized.");
-    return true;
-  } catch (error) {
-    logError(
-      "Failed to initialize NewStateServiceDemo:",
-      error
+  const { failures } = await bootstrapServices(serviceManifest);
+  if (failures.length > 0) {
+    throw new Error(
+      `Failed to register services: ${failures
+        .map((failure) => `${failure.name}: ${failure.reason}`)
+        .join(", ")}`
     );
-    throw error;
   }
+
+  await startRegisteredServices();
+
+  const demoStateService = requireService("state");
+  if (typeof demoStateService.startMockMultipleTanksAndBatteries === "function") {
+    demoStateService.startMockMultipleTanksAndBatteries(5000);
+  }
+
+  log("Services initialized via ServiceManager.");
 }
 
 // --- Bridge state and initialize dependent services ---
@@ -103,7 +137,7 @@ async function bridgeStateToRelay() {
   );
   try {
     // Get the state service instance that was already created
-    const stateService = serviceManager.getService("state");
+    const stateService = requireService("state");
     if (!stateService) {
       throw new Error("State service not found in service manager");
     }
@@ -133,8 +167,10 @@ async function bridgeStateToRelay() {
     });
 
     // --- Initialize secondary services ---
-    initializeSecondaryServices(stateManager, serviceManager);
-    stateService.startPlayback();
+    initializeSecondaryServices(stateManager);
+    if (typeof stateService.startPlayback === "function") {
+      stateService.startPlayback();
+    }
     log("State bridge to relay activated and all services running.");
 
     return stateManager;
@@ -145,49 +181,25 @@ async function bridgeStateToRelay() {
 }
 
 // --- Bridge state and initialize dependent services ---
-async function initializeSecondaryServices(stateManager, serviceManager) {
+async function initializeSecondaryServices(stateManager) {
   log("Starting secondary services...");
+  const stateService = requireService("state");
+  const positionService = requireService("position");
+  const tidalService = requireService("tidal");
+  const weatherService = requireService("weather");
+  const bluetoothService = serviceManager.getService("bluetooth");
 
-  const stateService = serviceManager.getService("state");
-  
-  // --- Initialize Position Service first ---
-  const positionSources = {
-    gps: { priority: 1, timeout: 10000 },
-    ais: { priority: 2, timeout: 15000 },
-    state: { priority: 3, timeout: 20000 }
-  };
-  const positionService = new PositionService({ sources: positionSources });
-  
-  // Initialize Tidal and Weather services with position service
-  const tidalService = new TidalService(stateService, positionService);
-  const weatherService = new WeatherService(stateService, positionService);
-  const bluetoothService = new BluetoothService({
-    scanDuration: 10000,
-    scanInterval: 30000,
-    debug: true,
-    logLevel: "debug",
-    stateManager: stateManager,
-  });
-
-  serviceManager.registerService("tidal", tidalService);
-  serviceManager.registerService("weather", weatherService);
-  serviceManager.registerService("position", positionService);
-  // SignalK position provider removed in favor of direct PositionService integration
-  serviceManager.registerService("bluetooth", bluetoothService);
-
-  // --- Wire up services to the State Manager ---
-  // StateManager will now listen for 'state:patch' events from these services.
   log("Wiring services to StateManager2...");
   stateManager.listenToService(stateService);
   stateManager.listenToService(positionService);
   stateManager.listenToService(tidalService);
   stateManager.listenToService(weatherService);
+
+  if (bluetoothService) {
+    bluetoothService.stateManager = stateManager;
+  }
+
   log("Service wiring complete.");
-
-  // --- Start all services ---
-  log("Starting all registered services...");
-  await serviceManager.startAll();
-
 }
 
 

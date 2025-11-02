@@ -7,6 +7,8 @@ import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import express from "express";
 import { serviceManager } from "./services/ServiceManager.js";
+import { requireService } from "./services/serviceLocator.js";
+import { bootstrapServices, startRegisteredServices } from "./services/bootstrap.js";
 import { NewStateServiceDemo } from "./services/NewStateServiceDemo.js";
 import { TidalService } from "./services/TidalService.js";
 import { WeatherService } from "./services/WeatherService.js";
@@ -18,12 +20,11 @@ import http from "http";
 import fs from "fs";
 import path from "path";
 import { stateData } from "./state/StateData.js";
-import { StateManager } from "./relay/core/state/StateManager.js";
+import { getStateManager, setStateManagerInstance } from "./relay/core/state/StateManager.js";
 import { BluetoothService } from "./services/BluetoothService.js";
 
 // --- NEW IMPORTS FOR REFACTORED ARCHITECTURE ---
-import { DirectServer } from "./relay/server/DirectServer2.js";
-import { RelayServer } from "./relay/server/RelayServer2.js";
+import { startDirectServerWrapper, startRelayServer } from "./relay/server/index.js";
 import { StateMediator } from "./relay/core/StateMediator.js";
 
 // Create Express app
@@ -49,98 +50,72 @@ function buildVpsUrl() {
 
 // --- Initialize and register services ---
 async function initializeServices() {
-  try {
-    log("Initializing services...");
-    const newStateService = new NewStateServiceDemo();
-    
-    // Register services with the service manager first
-    log("Registering services with service manager...");
-    serviceManager.registerService("state", newStateService);
-    
-    // Start the state service and wait for it to be ready
-    log("Starting state service...");
-    await newStateService.start();
-    
-    // Explicitly load initial data
-    log("Ensuring state service has loaded initial data...");
-    await newStateService.loadInitialData();
-    log("Initial state data loaded successfully");
-    
-    // Wait for state service to be fully ready
-    log("Waiting for state service to be fully ready...");
-    await new Promise((resolve) => {
-      if (newStateService.isReady) {
-        log("State service is already ready");
-        resolve();
-      } else {
-        log("Waiting for state service ready event...");
-        newStateService.once("ready", () => {
-          log("Received state service ready event");
-          resolve();
-        });
-      }
-    });
-    log("State service is ready, initializing other services...");
+  const manifest = [
+    {
+      name: "state",
+      create: () => new NewStateServiceDemo(),
+    },
+    {
+      name: "position",
+      dependencies: ["state"],
+      create: ({ options }) => new PositionService(options),
+      options: {
+        sources: {
+          gps: { priority: 1, timeout: 10000 },
+          ais: { priority: 2, timeout: 15000 },
+          state: { priority: 3, timeout: 20000 },
+        },
+      },
+    },
+    {
+      name: "tidal",
+      dependencies: ["state", "position"],
+      create: () => new TidalService(),
+    },
+    {
+      name: "weather",
+      dependencies: ["state", "position"],
+      create: () => new WeatherService(),
+    },
+    {
+      name: "bluetooth",
+      create: () =>
+        new BluetoothService({
+          scanDuration: 10000,
+          scanInterval: 30000,
+          debug: true,
+          logLevel: "debug",
+          stateManager: null,
+        }),
+    },
+  ];
 
-    // Initialize other services with the ready state service
-    log("Creating service instances...");
-    const bluetoothService = new BluetoothService();
-    log("BluetoothService created");
-    
-    // Initialize PositionService with source configurations
-    const positionSources = {
-      gps: { priority: 1, timeout: 10000 },
-      ais: { priority: 2, timeout: 15000 },
-      state: { priority: 3, timeout: 20000 }
-    };
-    const positionService = new PositionService({ sources: positionSources });
-    const tidalService = new TidalService(newStateService, positionService);
-    const weatherService = new WeatherService(newStateService, positionService);
-
-    log("Registering services with serviceManager...");
-    serviceManager.registerService("bluetooth", bluetoothService);
-    log("Registered bluetooth service");
-    
-    serviceManager.registerService("position-service", positionService);
-    log("Registered position service");
-    
-    serviceManager.registerService("tidal-service", tidalService);
-    log("Registered tide service");
-    
-    serviceManager.registerService("weather-service", weatherService);
-    log("Registered weather service");
-    // State service already registered above
-    
-
-    // --- Register Transport Servers as Services ---
-    const directConfig = {
-      port: process.env.DIRECT_WS_PORT || 3001,
-      host: process.env.DIRECT_WS_HOST || "localhost",
-    };
-    const directServer = new DirectServer(directConfig);
-    serviceManager.registerService("direct", directServer);
-
-    const relayConfig = {
-      vpsUrl: buildVpsUrl(),
-      vpsReconnectInterval: process.env.RECONNECT_DELAY || 5000,
-      vpsMaxRetries: process.env.MAX_RETRIES || 10,
-    };
-    const relayServer = new RelayServer(relayConfig);
-    serviceManager.registerService("relay", relayServer);
-
-    log("Starting all services via serviceManager.startAll()...");
-    await serviceManager.startAll();
-    log("All services started successfully.");
-    
-    // Log the status of key services
-    log("Service status check:");
-    log("- TidalService running:", tidalService.isRunning);
-    log("- WeatherService running:", weatherService.isRunning);
-    log("- PositionService running:", positionService.isRunning);
-  } catch (error) {
-    logError("Error initializing services:", error);
-    throw error;
+  const { failures } = await bootstrapServices(manifest);
+  if (failures.length > 0) {
+    throw new Error(
+      `Service bootstrap failures: ${failures
+        .map((failure) => `${failure.name}: ${failure.reason}`)
+        .join(", ")}`
+    );
   }
+
+  await startRegisteredServices();
+
+  const stateService = requireService("state");
+  if (typeof stateService.startMockMultipleTanksAndBatteries === "function") {
+    stateService.startMockMultipleTanksAndBatteries(5000);
+  }
+
+  const positionService = requireService("position");
+  const tidalService = requireService("tidal");
+  const weatherService = requireService("weather");
+  const bluetoothService = serviceManager.getService("bluetooth");
+
+  if (bluetoothService) {
+    bluetoothService.stateManager = getStateManager();
+  }
+
+  log("Services initialized via ServiceManager.");
 }
 
 async function startDevServer() {
@@ -151,9 +126,10 @@ async function startDevServer() {
     await initializeServices();
 
     // --- 2. Initialize State Manager and Mediator ---
-    const stateService = serviceManager.getService("state");
+    const stateService = requireService("state");
     const initialState = stateService.getState();
-    const stateManager = new StateManager(initialState);
+    const stateManager = getStateManager(initialState);
+    setStateManagerInstance(stateManager);
     
     // Connect the StateManager to the state service
     log("Connecting StateManager to state service events");
@@ -169,9 +145,9 @@ async function startDevServer() {
     
     // Connect the StateManager to listen for tide and weather updates
     log("Connecting StateManager to tidal and weather services");
-    const tidalService = serviceManager.getService("tidal-service");
-    const weatherService = serviceManager.getService("weather-service");
-    const positionService = serviceManager.getService("position-service");
+    const tidalService = requireService("tidal");
+    const weatherService = requireService("weather");
+    const positionService = requireService("position");
     
     if (tidalService) {
       log("Connecting TidalService to StateManager");
@@ -196,10 +172,20 @@ async function startDevServer() {
     const stateMediator = new StateMediator({ stateManager });
 
     // --- 4. Register transports with the mediator ---
-    const directServerInstance = serviceManager.getService("direct");
-    const relayServerInstance = serviceManager.getService("relay");
-    stateMediator.registerTransport(directServerInstance);
-    stateMediator.registerTransport(relayServerInstance);
+    const directServer = await startDirectServerWrapper(stateManager, {
+      port: parseInt(process.env.DIRECT_WS_PORT || "3001", 10),
+      host: process.env.DIRECT_WS_HOST || "localhost",
+    });
+
+    const relayServer = await startRelayServer(stateManager, {
+      port: parseInt(process.env.RELAY_PORT || "8090", 10),
+      vpsUrl: buildVpsUrl(),
+      vpsReconnectInterval: parseInt(process.env.RECONNECT_DELAY || "5000", 10),
+      vpsMaxRetries: parseInt(process.env.MAX_RETRIES || "10", 10),
+    });
+
+    stateMediator.registerTransport(directServer);
+    stateMediator.registerTransport(relayServer);
     log("All transports registered with StateMediator.");
     
     // Set up a test interval to trigger state updates for debugging
@@ -220,8 +206,7 @@ async function startDevServer() {
     // --- 6. Setup Express API routes ---
     await getBoatInfo(); // Get boat info but don't pass it to registerBoatInfoRoutes
     registerBoatInfoRoutes(app); // Only pass the app parameter
-    const relayServer = serviceManager.getService("relay");
-    registerVpsRoutes(app, { vpsUrl: relayServer.config.vpsUrl });
+    registerVpsRoutes(app, { vpsUrl: buildVpsUrl() });
 
     const httpPort = process.env.HTTP_PORT || 3000;
     server.listen(httpPort, () => {

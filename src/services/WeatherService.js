@@ -5,56 +5,183 @@ import debug from "debug";
 export class WeatherService extends ScheduledService {
   /** @type {Object} */
   stateService;
-  
+
+  /** @type {Function|null} */
+  _positionListener;
+
+  /** @type {NodeJS.Timeout|null} */
+  _delayedPositionCheck;
+
   debugLog = debug("weather-service");
-  constructor(stateService, positionService) {
+
+  constructor() {
     super("weather", { interval: 800000, immediate: false, runOnInit: false });
-    
-    // Store reference to state service if provided
-    if (stateService) {
-      this.stateService = stateService;
-    }
+
+    this.setServiceDependency("state");
+    this.setServiceDependency("position");
 
     // Internal position state
     this.position = { latitude: null, longitude: null };
     this._hasScheduled = false;
+    this._positionListener = null;
+    this._stateFullUpdateHandler = null;
+    this._delayedPositionCheck = null;
+  }
 
-    // Listen for position updates from PositionService
-    if (positionService && typeof positionService.on === "function") {
-      console.log("[WeatherService] Attaching to positionService events");
-      this.debugLog("WeatherService attaching to positionService events");
-      positionService.on("position:update", (position) => {
-        // console.log("[WeatherService] Received position:update:", position);
-        if (
-          typeof position.latitude === "number" &&
-          typeof position.longitude === "number"
-        ) {
-          this.position = {
-            latitude: position.latitude,
-            longitude: position.longitude,
-          };
-
-          // Start scheduled runs after first valid position
-          if (!this._hasScheduled) {
-            this._hasScheduled = true;
-            console.log("[WeatherService] Starting scheduled runs...");
-            this.runNow(); // Run immediately
-            this.start();  // Start interval scheduling
-            console.log("[WeatherService] Scheduling started.");
-            this.log("WeatherService scheduling started.");
-          }
-        } else {
-          console.log("[WeatherService] Received invalid position data:", position);
-          this.logError("Received invalid position data from PositionService:", position);
-        }
-      });
-    } else {
-      console.log("[WeatherService] Could not attach to PositionService - missing or invalid");
-      this.debugLog("WeatherService could not attach to PositionService - missing or invalid");
-      this.logError(
-        "WeatherService could not attach to PositionService (missing or invalid)"
-      );
+  _seedPositionFromState() {
+    if (!this.stateService || typeof this.stateService.getState !== 'function') {
+      return false;
     }
+
+    try {
+      const state = this.stateService.getState();
+      const navPosition = state?.navigation?.position;
+      const latitude = navPosition?.latitude?.value ?? navPosition?.latitude ?? null;
+      const longitude = navPosition?.longitude?.value ?? navPosition?.longitude ?? null;
+
+      if (typeof latitude === 'number' && typeof longitude === 'number') {
+        this.position = { latitude, longitude };
+        return true;
+      }
+    } catch (error) {
+      this.logError('Failed to seed weather position from state', error);
+    }
+
+    return false;
+  }
+
+  async _triggerInitialRunIfPossible() {
+    if (this._hasScheduled) {
+      return;
+    }
+
+    const hasInitialPosition = this._seedPositionFromState();
+    if (hasInitialPosition) {
+      this._hasScheduled = true;
+      try {
+        await this.run();
+        this.log("WeatherService initial fetch complete.");
+      } catch (err) {
+        this.logError("Error running initial weather fetch:", err);
+      }
+      return;
+    }
+
+    // Set up deferred handler for when position becomes available later
+    if (this.stateService && !this._stateFullUpdateHandler) {
+      this._stateFullUpdateHandler = async () => {
+        if (this._hasScheduled) {
+          return;
+        }
+        const seeded = this._seedPositionFromState();
+        if (!seeded) {
+          return;
+        }
+        this._hasScheduled = true;
+        try {
+          await this.run();
+          this.log("WeatherService initial fetch complete (post state update).");
+        } catch (err) {
+          this.logError("Error running weather fetch after state update:", err);
+        }
+        if (this.stateService && this._stateFullUpdateHandler) {
+          this.stateService.off("state:full-update", this._stateFullUpdateHandler);
+          this._stateFullUpdateHandler = null;
+        }
+      };
+      this.stateService.on("state:full-update", this._stateFullUpdateHandler);
+    }
+
+    // Also set up a delayed check in case position arrives shortly after startup
+    if (!this._delayedPositionCheck) {
+      this._delayedPositionCheck = setTimeout(async () => {
+        if (!this._hasScheduled && this._seedPositionFromState()) {
+          this._hasScheduled = true;
+          try {
+            await this.run();
+            this.log("WeatherService delayed initial fetch complete.");
+            if (this.stateService && this._stateFullUpdateHandler) {
+              this.stateService.off("state:full-update", this._stateFullUpdateHandler);
+              this._stateFullUpdateHandler = null;
+            }
+          } catch (err) {
+            this.logError("Error running delayed weather fetch:", err);
+          }
+        }
+        this._delayedPositionCheck = null;
+      }, 15000); // Check 15 seconds after startup
+    }
+  }
+
+  async start() {
+    if (this.isRunning) {
+      return;
+    }
+
+    await super.start();
+
+    const stateDependency = this.dependencies.state;
+    if (!stateDependency || typeof stateDependency.getState !== "function") {
+      throw new Error("WeatherService requires 'state' service with getState()");
+    }
+    this.stateService = stateDependency;
+
+    const positionService = this.dependencies.position;
+    if (!positionService || typeof positionService.on !== "function") {
+      this.logError("WeatherService could not attach to PositionService");
+      return;
+    }
+
+    if (this._positionListener) {
+      positionService.off("position:update", this._positionListener);
+      this._positionListener = null;
+    }
+
+    this._positionListener = async (position) => {
+      if (
+        position &&
+        typeof position.latitude === "number" &&
+        typeof position.longitude === "number"
+      ) {
+        this.position = {
+          latitude: position.latitude,
+          longitude: position.longitude,
+        };
+
+        if (!this._hasScheduled) {
+          this._hasScheduled = true;
+          try {
+            await this.run();
+          } catch (err) {
+            this.logError("Error running initial weather fetch:", err);
+          }
+          this.log("WeatherService initial fetch complete.");
+        }
+      } else {
+        this.logError("Received invalid position data from PositionService:", position);
+      }
+    };
+
+    positionService.on("position:update", this._positionListener);
+    this.debugLog("WeatherService attached to PositionService events");
+    await this._triggerInitialRunIfPossible();
+  }
+
+  async stop() {
+    if (this._positionListener && this.dependencies.position) {
+      this.dependencies.position.off("position:update", this._positionListener);
+      this._positionListener = null;
+    }
+    if (this.stateService && this._stateFullUpdateHandler) {
+      this.stateService.off("state:full-update", this._stateFullUpdateHandler);
+      this._stateFullUpdateHandler = null;
+    }
+    if (this._delayedPositionCheck) {
+      clearTimeout(this._delayedPositionCheck);
+      this._delayedPositionCheck = null;
+    }
+    await super.stop();
+    this._hasScheduled = false;
   }
 
   /**
@@ -66,18 +193,15 @@ export class WeatherService extends ScheduledService {
   }
 
   async runNow() {
-    console.log("[WeatherService] runNow() called");
     this.debugLog("WeatherService.runNow() called");
     const { latitude, longitude } = this.position;
     if (
       typeof latitude !== "number" ||
       typeof longitude !== "number"
     ) {
-      console.log("[WeatherService] No valid position available for weather fetch.");
       this.logError("No valid position available for weather fetch.");
       return;
     }
-    console.log(`[WeatherService] Fetching weather for position: ${latitude}, ${longitude}`);
     this.debugLog(`Fetching weather for position: ${latitude}, ${longitude}`);
 
     // Check for user unit preferences
@@ -153,7 +277,6 @@ export class WeatherService extends ScheduledService {
     });
 
     const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
-    console.log("[WeatherService] Fetching weather from:", url);
     this.log("Fetching weather from:", url);
 
     try {
@@ -162,7 +285,6 @@ export class WeatherService extends ScheduledService {
         throw new Error(`Open-Meteo API error: ${response.statusText}`);
       }
       const weatherApiResponse = await response.json();
-      console.log("[WeatherService] Received weather data from API");
       
       // Format the data in the expected structure for clients
       const formattedWeatherData = {
@@ -194,12 +316,9 @@ export class WeatherService extends ScheduledService {
         this.logError("Weather data is missing expected sections");
       }
       
-      console.log("[WeatherService] Emitting weather:update event");
       this.emit("weather:update", formattedWeatherData);
-      console.log("[WeatherService] Weather:update event emitted successfully");
       this.debugLog("Weather:update event emitted successfully");
     } catch (err) {
-      console.log("[WeatherService] Weather fetch failed:", err);
       this.logError("Weather fetch failed:", err);
     }
   }
