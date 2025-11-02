@@ -1,0 +1,214 @@
+{
+  "manufacturerId": 1177,
+  "name": "RuuviTag",
+  "description": "RuuviTag environmental sensor",
+  "formatField": {
+    "offset": 0,
+    "length": 1,
+    "type": "uint8"
+  },
+  "formats": [
+    {
+      "version": 3,
+      "formatName": "ruuvi/rawv1",
+      "minLength": 15,
+      "description": "RAWv1 data format",
+      "fields": [
+        {
+          "name": "temperature",
+          "type": "composite",
+          "unit": "°C",
+          "parts": [
+            {
+              "offset": 1,
+              "length": 1,
+              "type": "int8",
+              "multiplier": 1
+            },
+            {
+              "offset": 2,
+              "length": 1,
+              "type": "uint8",
+              "multiplier": 0.01
+            }
+          ],
+          "derived": [
+            {
+              "name": "fahrenheit",
+              "formula": "x * 9/5 + 32"
+            }
+          ]
+        },
+        {
+          "name": "humidity",
+          "offset": 3,
+          "length": 1,
+          "type": "uint8",
+          "scale": 0.5,
+          "unit": "%"
+        },
+        {
+          "name": "pressure",
+          "offset": 4,
+          "length": 2,
+          "type": "uint16",
+          "endian": "BE",
+          "transform": {
+            "type": "add",
+            "value": 500
+          },
+          "unit": "hPa"
+        },
+        {
+          "name": "acceleration.x",
+          "offset": 6,
+          "length": 2,
+          "type": "int16",
+          "endian": "BE",
+          "unit": "mg"
+        },
+        {
+          "name": "acceleration.y",
+          "offset": 8,
+          "length": 2,
+          "type": "int16",
+          "endian": "BE",
+          "unit": "mg"
+        },
+        {
+          "name": "acceleration.z",
+          "offset": 10,
+          "length": 2,
+          "type": "int16",
+          "endian": "BE",
+          "unit": "mg"
+        },
+        {
+          "name": "battery.voltage",
+          "offset": 12,
+          "length": 2,
+          "type": "uint16",
+          "endian": "BE",
+          "scale": 0.001,
+          "unit": "V"
+        }
+      ]
+    },
+    {
+      "version": 5,
+      "formatName": "ruuvi/rawv2",
+      "minLength": 24,
+      "description": "RAWv2 data format",
+      "fields": [
+        {
+          "name": "temperature",
+          "offset": 1,
+          "length": 2,
+          "type": "int16",
+          "endian": "BE",
+          "scale": 0.005,
+          "unit": "°C",
+          "derived": [
+            {
+              "name": "fahrenheit",
+              "formula": "x * 9/5 + 32"
+            }
+          ]
+        },
+        {
+          "name": "humidity",
+          "offset": 3,
+          "length": 2,
+          "type": "uint16",
+          "endian": "BE",
+          "scale": 0.0025,
+          "unit": "%"
+        },
+        {
+          "name": "pressure",
+          "offset": 5,
+          "length": 2,
+          "type": "uint16",
+          "endian": "BE",
+          "transform": {
+            "type": "formula",
+            "formula": "(x + 50000) / 100"
+          },
+          "unit": "hPa"
+        },
+        {
+          "name": "acceleration.x",
+          "offset": 7,
+          "length": 2,
+          "type": "int16",
+          "endian": "BE",
+          "scale": 0.001,
+          "unit": "g"
+        },
+        {
+          "name": "acceleration.y",
+          "offset": 9,
+          "length": 2,
+          "type": "int16",
+          "endian": "BE",
+          "scale": 0.001,
+          "unit": "g"
+        },
+        {
+          "name": "acceleration.z",
+          "offset": 11,
+          "length": 2,
+          "type": "int16",
+          "endian": "BE",
+          "scale": 0.001,
+          "unit": "g"
+        },
+        {
+          "name": "battery.voltage",
+          "offset": 13,
+          "length": 2,
+          "type": "bitfield",
+          "bitOffset": 5,
+          "bitLength": 11,
+          "transform": {
+            "type": "add",
+            "value": 1600
+          },
+          "unit": "mV"
+        },
+        {
+          "name": "radio.txPower",
+          "offset": 13,
+          "length": 2,
+          "type": "bitfield",
+          "bitOffset": 0,
+          "bitLength": 5,
+          "transform": {
+            "type": "formula",
+            "formula": "x * 2 - 40"
+          },
+          "unit": "dBm"
+        },
+        {
+          "name": "counters.movement",
+          "offset": 15,
+          "length": 1,
+          "type": "uint8"
+        },
+        {
+          "name": "counters.sequence",
+          "offset": 16,
+          "length": 2,
+          "type": "uint16",
+          "endian": "BE"
+        },
+        {
+          "name": "macAddress",
+          "offset": 18,
+          "length": 6,
+          "type": "mac"
+        }
+      ]
+    }
+  ]
+}
