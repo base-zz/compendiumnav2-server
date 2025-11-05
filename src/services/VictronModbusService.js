@@ -297,6 +297,7 @@ export class VictronModbusService extends ContinuousService {
         if (systemBattery) {
           data.battery = systemBattery;
           console.log('[VictronModbus] Using system-level battery registers as fallback');
+          console.log('[VictronModbus] System battery SOC array length:', systemBattery.soc?.length || 0);
         } else {
           console.log('[VictronModbus] No system-level battery data available as fallback');
         }
@@ -425,6 +426,13 @@ export class VictronModbusService extends ContinuousService {
       // Parse and convert to state updates
       const parsedData = this._parseModbusData(data);
       const stateUpdate = this._convertToStateUpdate(parsedData);
+      
+      // Validate that we have battery data before emitting
+      // This prevents overwriting good battery data with empty/missing data
+      if (!stateUpdate.vessel?.systems?.electrical?.battery1) {
+        console.log('[VictronModbus] Skipping update - no battery data available');
+        return;
+      }
       
       // Emit victron:update event with the parsed data
       // StateManager will handle converting this to patches
@@ -655,13 +663,24 @@ export class VictronModbusService extends ContinuousService {
       const power = this._toSignedInt16(rawData.battery.power[0]);
       
       // Register 266: SOC (uint16, scale 10) - divide by 10
-      const soc = rawData.battery.soc[0] / 10;
+      const rawSoc = rawData.battery.soc[0];
+      const soc = rawSoc / 10;
+      
+      // Validate SOC value - reject if it's clearly invalid
+      // Valid SOC should be between 0 and 100, and raw value should not be 0xFFFF (invalid/missing)
+      // Also check for undefined/NaN which can occur when soc array is empty
+      if (rawSoc === undefined || rawSoc === null || isNaN(soc) || 
+          rawSoc === 0xFFFF || soc < 0 || soc > 100) {
+        console.log(`[VictronModbus] Invalid SOC value detected: raw=${rawSoc}, parsed=${soc}% - skipping battery data`);
+        return parsed;
+      }
       
       this.log('Decoded BMV-712 data:', {
         voltage,
         current,
         power,
-        soc
+        soc,
+        rawSoc
       });
       
       parsed.battery = {

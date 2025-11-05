@@ -180,8 +180,10 @@ export class PositionService extends ContinuousService {
       trace: true
     });
     
-    // Always process position events from any source
-    this.log(`Processing position data from ${sourceName}`);
+    // Only log detailed processing when debug mode is enabled
+    if (this.debug) {
+      this.log(`Processing position data from ${sourceName}`);
+    }
     
     // Always emit position:update events for any source
     this.emit('position:update', {
@@ -192,3 +194,5 @@ export class PositionService extends ContinuousService {
     });
   }
 }
+
+export default PositionService;

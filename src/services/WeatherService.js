@@ -240,6 +240,7 @@ export class WeatherService extends ScheduledService {
         "wind_speed_10m",
         "wind_direction_10m",
         "wind_gusts_10m",
+        "visibility",
       ].join(","),
       hourly: [
         "temperature_2m",

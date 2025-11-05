@@ -27,6 +27,21 @@ export class StateManager extends EventEmitter {
     return state;
   }
 
+  _ensurePositionRoot(patches) {
+    const needsPosition = patches.some((operation) =>
+      operation.path.startsWith("/position/")
+    );
+
+    if (!needsPosition) {
+      return;
+    }
+
+    if (!this.appState.position || typeof this.appState.position !== "object") {
+      this.appState.position = {};
+      logState("Initialized missing position root on appState");
+    }
+  }
+
   /**
    * Get all selected Bluetooth devices
    * @returns {Object} - Object with device IDs as keys and device objects as values
@@ -347,6 +362,7 @@ export class StateManager extends EventEmitter {
 
       // Ensure parent paths exist before applying the patch
       this._ensureParentPaths(validPatch);
+      this._ensurePositionRoot(validPatch);
 
       const stateBeforePatch = this._safeClone(this.appState);
 

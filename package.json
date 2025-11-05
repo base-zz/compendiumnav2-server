@@ -7,8 +7,7 @@
   "scripts": {
     "start": "node -r module-alias/register dist/index.js",
     "build": "tsc",
-    "dev": "node -r module-alias/register src/dev-server2.js",
-    "dev2": "node -r module-alias/register src/dev-server2.js",
+    "dev": "node -r module-alias/register src/mainServer.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {

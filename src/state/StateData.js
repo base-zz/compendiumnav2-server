@@ -59,6 +59,12 @@ const baseState = createStateDataModel(UNIT_PRESETS.IMPERIAL);
 
 export const stateData = {
   ...baseState,
+  _lastWindCalcInputs: {
+    apparentSpeed: null,
+    apparentAngle: null,
+    heading: null,
+    boatSpeed: null
+  },
   convert: {
     // Length/Distance
     mToFeet(m) {
@@ -293,9 +299,31 @@ export const stateData = {
       const trueAngleUnits = ensureUnits(wind.true?.angle, defaultAngleUnit);
       const trueDirectionUnits = ensureUnits(wind.true?.direction, defaultAngleUnit);
 
-      // Apparent wind derived values
+      // Get current inputs for true wind calculation
+      const headingNode = stateData.navigation?.course?.heading?.true;
+      const headingUnits = ensureUnits(headingNode, defaultAngleUnit);
+      const stwNode = stateData.navigation?.speed?.stw;
+      const sogNode = stateData.navigation?.speed?.sog;
+      const stwUnits = ensureUnits(stwNode, defaultSpeedUnit);
+      const sogUnits = ensureUnits(sogNode, defaultSpeedUnit);
+
+      const apparentSpeedBase = convertToBase(wind.apparent?.speed?.value, apparentSpeedUnits);
+      const apparentAngleBase = convertToBase(wind.apparent?.angle?.value, apparentAngleUnits);
+      const headingBase = convertToBase(headingNode?.value, headingUnits);
+      const stwBase = convertToBase(stwNode?.value, stwUnits);
+      const sogBase = convertToBase(sogNode?.value, sogUnits);
+      const boatSpeedBase = stwBase !== null ? stwBase : (sogBase !== null ? sogBase : 0);
+      
+
+      // Check if inputs have changed since last calculation
+      const inputsChanged = 
+        stateData._lastWindCalcInputs.apparentSpeed !== apparentSpeedBase ||
+        stateData._lastWindCalcInputs.apparentAngle !== apparentAngleBase ||
+        stateData._lastWindCalcInputs.heading !== headingBase ||
+        stateData._lastWindCalcInputs.boatSpeed !== boatSpeedBase;
+
+      // Apparent wind derived values (always update these)
       if (wind.apparent?.angle?.value !== undefined && wind.apparent.angle.value !== null) {
-        const apparentAngleBase = convertToBase(wind.apparent.angle.value, apparentAngleUnits);
         if (apparentAngleBase !== null) {
           wind.apparent.angle.degrees = convertFromBase(apparentAngleBase, 'deg');
           wind.apparent.angle.side = apparentAngleBase >= 0 ? "starboard" : "port";
@@ -319,19 +347,18 @@ export const stateData = {
         wind.apparent.speed.knots = null;
       }
 
-      // True wind calculation
-      const headingNode = stateData.navigation?.course?.heading?.true;
-      const headingUnits = ensureUnits(headingNode, defaultAngleUnit);
-      const stwNode = stateData.navigation?.speed?.stw;
-      const sogNode = stateData.navigation?.speed?.sog;
-      const stwUnits = ensureUnits(stwNode, defaultSpeedUnit);
-      const sogUnits = ensureUnits(sogNode, defaultSpeedUnit);
+      // Only recalculate true wind if inputs have changed
+      if (!inputsChanged) {
+        return;
+      }
 
-      const apparentSpeedBase = convertToBase(wind.apparent?.speed?.value, apparentSpeedUnits);
-      const apparentAngleBase = convertToBase(wind.apparent?.angle?.value, apparentAngleUnits);
-      const headingBase = convertToBase(headingNode?.value, headingUnits);
-      const stwBase = convertToBase(stwNode?.value, stwUnits);
-      const sogBase = convertToBase(sogNode?.value, sogUnits);
+      // Store current inputs for next comparison
+      stateData._lastWindCalcInputs.apparentSpeed = apparentSpeedBase;
+      stateData._lastWindCalcInputs.apparentAngle = apparentAngleBase;
+      stateData._lastWindCalcInputs.heading = headingBase;
+      stateData._lastWindCalcInputs.boatSpeed = boatSpeedBase;
+
+      // True wind calculation
 
       // if (apparentSpeedBase !== null || apparentAngleBase !== null || headingBase !== null) {
       //   console.debug('[StateData] True wind inputs', {
@@ -358,17 +385,27 @@ export const stateData = {
         apparentAngleBase !== null &&
         headingBase !== null
       ) {
-        const boatSpeedBase = stwBase !== null ? stwBase : (sogBase !== null ? sogBase : 0);
+        let trueWindAngleBase;
+        let trueWindSpeedBase;
+        
+        // When boat speed is very low (< 0.1 m/s or ~0.2 knots), 
+        // true wind equals apparent wind
+        if (boatSpeedBase < 0.1) {
+          trueWindAngleBase = apparentAngleBase;
+          trueWindSpeedBase = apparentSpeedBase;
+        } else {
+          // Normal true wind calculation when moving
+          const numerator = apparentSpeedBase * Math.sin(apparentAngleBase);
+          const denominator = apparentSpeedBase * Math.cos(apparentAngleBase) - boatSpeedBase;
+          trueWindAngleBase = toSignedRadians(Math.atan2(numerator, denominator));
 
-        const numerator = apparentSpeedBase * Math.sin(apparentAngleBase);
-        const denominator = apparentSpeedBase * Math.cos(apparentAngleBase) - boatSpeedBase;
-        const trueWindAngleBase = toSignedRadians(Math.atan2(numerator, denominator));
-
-        const speedSquared =
-          apparentSpeedBase * apparentSpeedBase +
-          boatSpeedBase * boatSpeedBase -
-          2 * apparentSpeedBase * boatSpeedBase * Math.cos(apparentAngleBase);
-        const trueWindSpeedBase = Math.sqrt(Math.max(0, speedSquared));
+          const speedSquared =
+            apparentSpeedBase * apparentSpeedBase +
+            boatSpeedBase * boatSpeedBase -
+            2 * apparentSpeedBase * boatSpeedBase * Math.cos(apparentAngleBase);
+          trueWindSpeedBase = Math.sqrt(Math.max(0, speedSquared));
+        }
+        
         const trueWindDirectionBase = UnitConversion.normalizeRadians(headingBase + trueWindAngleBase);
 
         // console.debug('[StateData] True wind results', {

@@ -78,6 +78,7 @@ class NewStateService extends ContinuousService {
     this._notificationPathLoggingTimer = null;
     this.signalKAdapter = null;
     this.signalKWsUrl = null;
+    this._positionService = null;
     
     // Load user unit preferences - default to imperial if not set
     this.userUnitPreferences = null;
@@ -953,7 +954,7 @@ class NewStateService extends ContinuousService {
     // console.log("[DEBUG] Incoming SignalK update:", path, value);
 
     // First check special transforms
-    if (this._applySpecialTransform(path, value)) {
+    if (this._applySpecialTransform(path, value, source)) {
       return;
     }
 
@@ -973,19 +974,14 @@ class NewStateService extends ContinuousService {
       else if (path.includes('angle') || path.includes('direction') || path.includes('heading')) sourceUnit = 'rad';
       
       // Convert to user's preferred units
-      const originalValue = transformedValue;
       transformedValue = this._convertToUserUnits(path, transformedValue, sourceUnit);
-      if (path.includes('depth') && this._debug.enabled) {
-        this._debug('Depth conversion', {
-          original: originalValue,
-          sourceUnit,
-          targetUnit: this.userUnitPreferences?.length,
-          converted: transformedValue
-        });
-      }
       
       // Queue the update with the converted value
       this._queueUpdate(mapping.path, transformedValue, source);
+
+      if (mapping.path === 'navigation.position') {
+        this._emitPositionUpdateFromState(transformedValue, source);
+      }
 
       return;
     }
@@ -996,7 +992,7 @@ class NewStateService extends ContinuousService {
     // console.log("[DEBUG] Queued fallback update:", fallbackPath, value, source);
   }
 
-  _applySpecialTransform(path, value) {
+  _applySpecialTransform(path, value, source) {
     const transform = this._getSpecialTransform(path);
     if (transform) {
       // First convert the value to user's preferred units
@@ -1008,14 +1004,19 @@ class NewStateService extends ContinuousService {
       else if (path.includes('pressure')) sourceUnit = 'Pa';
       else if (path.includes('angle') || path.includes('direction') || path.includes('heading')) sourceUnit = 'rad';
       
+      // Create a queueUpdate function for the transform to use
+      const queueUpdate = (updatePath, updateValue) => {
+        this._queueUpdate(updatePath, updateValue, source);
+      };
+      
       // Convert to user's preferred units if it's a numeric value
       if (typeof value === 'number') {
         const convertedValue = this._convertToUserUnits(path, value, sourceUnit);
         // Apply the special transform with the converted value
-        transform(convertedValue, stateData);
+        transform(convertedValue, stateData, queueUpdate);
       } else {
         // Apply the special transform with the original value
-        transform(value, stateData);
+        transform(value, stateData, queueUpdate);
       }
       return true;
     }
@@ -1025,10 +1026,13 @@ class NewStateService extends ContinuousService {
   _getSpecialTransform(path) {
     // Special transforms take priority
     const specialTransforms = {
-      "navigation.headingMagnetic": (value, state) => {
+      "navigation.headingMagnetic": (value, state, queueUpdate) => {
         // Normalize the magnetic heading and convert to degrees
         const normalizedMagneticHeading = UnitConversion.normalizeRadians(value);
         const magneticHeadingDegrees = UnitConversion.radToDeg(normalizedMagneticHeading);
+        
+        // Queue the update for category tracking
+        queueUpdate('navigation.course.heading.magnetic.value', magneticHeadingDegrees);
         
         // Store with proper units
         state.navigation.course.heading.magnetic.value = magneticHeadingDegrees;
@@ -1040,15 +1044,21 @@ class NewStateService extends ContinuousService {
           const normalizedTrueHeadingRad = UnitConversion.normalizeRadians(trueHeadingRad);
           const trueHeadingDegrees = UnitConversion.radToDeg(normalizedTrueHeadingRad);
           
+          // Queue the derived true heading update
+          queueUpdate('navigation.course.heading.true.value', trueHeadingDegrees);
+          
           // Store with proper units
           state.navigation.course.heading.true.value = trueHeadingDegrees;
           state.navigation.course.heading.true.units = 'deg';
         }
       },
-      "navigation.headingTrue": (value, state) => {
+      "navigation.headingTrue": (value, state, queueUpdate) => {
         // Normalize the true heading and convert to degrees
         const normalizedTrueHeading = UnitConversion.normalizeRadians(value);
         const trueHeadingDegrees = UnitConversion.radToDeg(normalizedTrueHeading);
+        
+        // Queue the update for category tracking
+        queueUpdate('navigation.course.heading.true.value', trueHeadingDegrees);
         
         // Store with proper units
         state.navigation.course.heading.true.value = trueHeadingDegrees;
@@ -1060,33 +1070,43 @@ class NewStateService extends ContinuousService {
           const normalizedMagneticHeadingRad = UnitConversion.normalizeRadians(magneticHeadingRad);
           const magneticHeadingDegrees = UnitConversion.radToDeg(normalizedMagneticHeadingRad);
           
+          // Queue the derived magnetic heading update
+          queueUpdate('navigation.course.heading.magnetic.value', magneticHeadingDegrees);
+          
           // Store with proper units
           state.navigation.course.heading.magnetic.value = magneticHeadingDegrees;
           state.navigation.course.heading.magnetic.units = 'deg';
         }
       },
-      "environment.wind.angleApparent": (value, state) => {
-        // Normalize the apparent wind angle and convert to degrees
-        const normalizedWindAngleRad = UnitConversion.normalizeRadians(value);
-        const windAngleDegrees = UnitConversion.radToDeg(normalizedWindAngleRad);
+      "environment.wind.angleApparent": (value, state, queueUpdate) => {
+        // SignalK is sending degrees (not radians as per spec)
+        // Normalize to signed angle (-180 to +180 degrees)
+        let windAngleDegrees = ((value % 360) + 360) % 360;
+        if (windAngleDegrees > 180) {
+          windAngleDegrees = windAngleDegrees - 360;
+        }
+        
+        windAngleDegrees = Math.round(windAngleDegrees * 10) / 10;
+        
+        // Queue the update so category tracking works
+        queueUpdate('navigation.wind.apparent.angle.value', windAngleDegrees);
         
         // Store with proper units
         state.navigation.wind.apparent.angle.value = windAngleDegrees;
         state.navigation.wind.apparent.angle.units = 'deg';
         
         if (state.navigation.course.heading.true.value !== null) {
-          // Get the heading in radians for calculation
-          let headingRad;
-          if (state.navigation.course.heading.true.units === 'deg') {
-            headingRad = UnitConversion.degToRad(state.navigation.course.heading.true.value);
-          } else {
-            headingRad = state.navigation.course.heading.true.value;
-          }
+          // Calculate apparent wind direction (compass bearing)
+          // Direction = Heading + Angle
+          let headingDeg = state.navigation.course.heading.true.value;
+          let directionDegrees = headingDeg + windAngleDegrees;
           
-          // Calculate apparent wind direction, normalize, and convert to degrees
-          const directionRad = headingRad + normalizedWindAngleRad;
-          const normalizedDirectionRad = UnitConversion.normalizeRadians(directionRad);
-          const directionDegrees = UnitConversion.radToDeg(normalizedDirectionRad);
+          // Normalize to 0-360
+          directionDegrees = ((directionDegrees % 360) + 360) % 360;
+          directionDegrees = Math.round(directionDegrees * 10) / 10;
+          
+          // Queue direction update too
+          queueUpdate('navigation.wind.apparent.direction.value', directionDegrees);
           
           // Store with proper units
           state.navigation.wind.apparent.direction.value = directionDegrees;
@@ -1112,12 +1132,8 @@ class NewStateService extends ContinuousService {
       "navigation.courseOverGroundTrue": {
         path: "navigation.course.cog.value",
       },
-      "navigation.headingMagnetic": {
-        path: "navigation.course.heading.magnetic.value",
-      },
-      "navigation.headingTrue": {
-        path: "navigation.course.heading.true.value",
-      },
+      // Note: headingMagnetic and headingTrue are handled by special transforms above
+      // to properly calculate derived values (true from magnetic + variation, etc.)
       "navigation.magneticVariation": {
         path: "navigation.course.variation.value",
       },
@@ -1145,9 +1161,7 @@ class NewStateService extends ContinuousService {
       "environment.wind.speedApparent": {
         path: "navigation.wind.apparent.speed.value",
       },
-      "environment.wind.angleApparent": {
-        path: "navigation.wind.apparent.angle.value",
-      },
+      // Note: angleApparent is handled by special transform above to convert to signed angle
       "environment.wind.directionApparent": {
         path: "navigation.wind.apparent.direction.value",
       },
@@ -1240,6 +1254,75 @@ class NewStateService extends ContinuousService {
     return null;
   }
 
+  _getPositionService() {
+    if (this._positionService && this._positionService.isRunning) {
+      return this._positionService;
+    }
+
+    if (this.serviceManager && typeof this.serviceManager.getService === 'function') {
+      const service = this.serviceManager.getService('position');
+      if (service) {
+        this._positionService = service;
+        return service;
+      }
+    }
+
+    return null;
+  }
+
+  _normalizePositionSource(rawSource) {
+    if (!rawSource || typeof rawSource !== 'string') {
+      return 'state';
+    }
+
+    const trimmed = rawSource.trim();
+    const lower = trimmed.toLowerCase();
+
+    if (lower.includes('signalk') || lower.startsWith('yethernet')) {
+      return 'signalk';
+    }
+
+    if (lower === 'gps' || lower === 'ais') {
+      return lower;
+    }
+
+    return trimmed;
+  }
+
+  _emitPositionUpdateFromState(positionValue, source) {
+    if (!positionValue || typeof positionValue !== 'object') {
+      return;
+    }
+
+    const latitude = positionValue.latitude?.value;
+    const longitude = positionValue.longitude?.value;
+    const timestamp = positionValue.timestamp;
+
+    if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+      return;
+    }
+
+    const positionService = this._getPositionService();
+    if (!positionService) {
+      return;
+    }
+
+    const normalizedSource = this._normalizePositionSource(source);
+
+    const payload = {
+      latitude,
+      longitude,
+      timestamp: typeof timestamp === 'string' ? timestamp : new Date().toISOString(),
+      source: normalizedSource,
+    };
+
+    if (typeof positionService._onPositionUpdate === 'function') {
+      positionService._onPositionUpdate(payload);
+    } else if (typeof positionService.emit === 'function') {
+      positionService.emit('position:update', payload);
+    }
+  }
+
   _calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371e3; // meters
     const φ1 = (lat1 * Math.PI) / 180;
@@ -1282,6 +1365,9 @@ class NewStateService extends ContinuousService {
     const updates = [];
     const previousState = JSON.parse(JSON.stringify(stateData.state));
 
+    // Track which categories of data changed
+    const changedCategories = new Set();
+
     this.updateQueue.forEach(({value, source}, path) => {
       // Skip external paths that aren't mapped to our canonical state
       if (path.startsWith('external.')) {
@@ -1291,6 +1377,23 @@ class NewStateService extends ContinuousService {
 
       try {
         updates.push({ path, value });
+        
+        // Track which categories changed
+        if (path.startsWith('navigation.wind')) {
+          changedCategories.add('wind');
+        } else if (path.startsWith('navigation.speed')) {
+          changedCategories.add('speed');
+          changedCategories.add('wind'); // Speed affects true wind calculation
+        } else if (path.startsWith('navigation.course')) {
+          changedCategories.add('course');
+          changedCategories.add('wind'); // Heading affects true wind calculation
+        } else if (path.startsWith('navigation.position')) {
+          changedCategories.add('position');
+        } else if (path.startsWith('anchor')) {
+          changedCategories.add('anchor');
+        } else if (path.startsWith('navigation.depth')) {
+          changedCategories.add('depth');
+        }
       } catch (error) {
         console.warn(`[StateService] Failed to process update for ${path}:`, error);
       }
@@ -1305,8 +1408,25 @@ class NewStateService extends ContinuousService {
         // Apply updates to stateData
         stateData.batchUpdate(updates);
         
-        // Update derived values before generating patches
-        stateData.convert.updateAllDerivedValues();
+        // Only update derived values for categories that changed
+        if (changedCategories.has('position')) {
+          stateData.convert.convertPositionValues();
+        }
+        if (changedCategories.has('course')) {
+          stateData.convert.convertCourseValues();
+        }
+        if (changedCategories.has('speed')) {
+          stateData.convert.convertSpeedValues();
+        }
+        if (changedCategories.has('wind')) {
+          stateData.convert.convertWindValues();
+        }
+        if (changedCategories.has('anchor')) {
+          stateData.convert.convertAnchorValues();
+        }
+        if (changedCategories.has('depth')) {
+          stateData.convert.convertDepthValues();
+        }
 
         const nextState = JSON.parse(JSON.stringify(stateData.state));
         const patches = jsonPatchCompare(previousState, nextState);
