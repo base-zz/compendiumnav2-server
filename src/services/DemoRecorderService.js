@@ -11,12 +11,6 @@ import { serviceManager } from "./ServiceManager.js";
  * and stores them as newline-delimited JSON for later playback.
  */
 export default class DemoRecorderService extends BaseService {
-  /**
-   * @param {Object} [options]
-   * @param {string} [options.outputDir] Directory to store recordings
-   * @param {string[]} [options.events] Event names to capture via ServiceManager event bus
-   * @param {string} [options.filePrefix] Prefix for generated recording files
-   */
   constructor(options = {}) {
     super("demo-recorder", "continuous");
 
@@ -51,26 +45,35 @@ export default class DemoRecorderService extends BaseService {
     const fileName = `${this.filePrefix}-${timestamp}.jsonl`;
     const filePath = path.join(this.outputDir, fileName);
     this._recordStream = fs.createWriteStream(filePath, { flags: "a" });
+    this._listeners = [];
 
-    this._eventListener = (payload) => {
-      if (!payload || !payload.event || !this.eventsToRecord.includes(payload.event)) {
-        return;
-      }
+    this.log(`Recording to ${filePath}`);
 
-      const entry = {
-        seq: ++this._sequence,
-        timestamp: new Date().toISOString(),
-        service: payload.service,
-        event: payload.event,
-        data: payload.args && payload.args.length === 1 ? payload.args[0] : payload.args,
+    // Get the state service to listen to its events directly
+    const stateService = serviceManager.getService('state');
+    if (!stateService) {
+      throw new Error('State service not found - cannot record');
+    }
+
+    // Subscribe to each event directly from the state service
+    for (const eventName of this.eventsToRecord) {
+      const listener = (data) => {
+        const entry = {
+          seq: ++this._sequence,
+          timestamp: Date.now(),
+          event: eventName,
+          data,
+        };
+        this._recordStream.write(`${JSON.stringify(entry)}\n`);
       };
 
-      this._recordStream.write(`${JSON.stringify(entry)}\n`);
-    };
-
-    serviceManager.on("*", this._eventListener);
+      // Listen directly on the state service
+      stateService.on(eventName, listener);
+      this._listeners.push({ service: stateService, event: eventName, listener });
+    }
 
     await super.start();
+    this.log(`Started recording ${this.eventsToRecord.length} event types from state service`);
   }
 
   async stop() {
@@ -78,9 +81,12 @@ export default class DemoRecorderService extends BaseService {
       return;
     }
 
-    if (this._eventListener) {
-      serviceManager.off("*", this._eventListener);
-      this._eventListener = null;
+    // Remove all event listeners
+    if (this._listeners) {
+      for (const { service, event, listener } of this._listeners) {
+        service.off(event, listener);
+      }
+      this._listeners = [];
     }
 
     await new Promise((resolve) => {
@@ -90,6 +96,7 @@ export default class DemoRecorderService extends BaseService {
       }
 
       this._recordStream.end(() => {
+        this.log(`Recording stopped. Wrote ${this._sequence} events`);
         this._recordStream = null;
         resolve();
       });

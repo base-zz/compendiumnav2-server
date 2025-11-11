@@ -91,6 +91,16 @@
     </style>
 </head>
 <body>
+    <script>
+        // Remove map-attribution elements as soon as they appear
+        const observer = new MutationObserver(() => {
+            const attribution = document.querySelector('#app > ion-app > div > div > div.map-attribution > div');
+            if (attribution) {
+                attribution.remove();
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    </script>
     <h1>DirectServer2 Test Client</h1>
     
     <div id="connection-status" class="disconnected">Disconnected</div>

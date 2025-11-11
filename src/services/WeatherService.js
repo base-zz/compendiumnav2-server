@@ -15,7 +15,7 @@ export class WeatherService extends ScheduledService {
   debugLog = debug("weather-service");
 
   constructor() {
-    super("weather", { interval: 800000, immediate: false, runOnInit: false });
+    super("weather", { interval: 900000, immediate: false, runOnInit: false });
 
     this.setServiceDependency("state");
     this.setServiceDependency("position");

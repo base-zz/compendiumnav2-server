@@ -29,6 +29,8 @@ import { TidalService } from "./services/TidalService.js";
 import { WeatherService } from "./services/WeatherService.js";
 import { BluetoothService } from "./services/BluetoothService.js";
 import { VictronModbusService } from "./services/VictronModbusService.js";
+import DemoRecorderService from "./services/DemoRecorderService.js";
+import RecordedDemoService from "./services/RecordedDemoService.js";
 
 const log = debug("server:main");
 
@@ -37,6 +39,20 @@ setStateManagerInstance(stateManager);
 
 console.log("Loading .env");
 dotenv.config({ path: ".env" });
+
+// --- CLI flag parsing ---
+const recordFlag = process.argv.includes('--record');
+const demoFlag = process.argv.includes('--demo');
+if (recordFlag && demoFlag) {
+  console.error('[SERVER] Cannot use --record and --demo together');
+  process.exit(1);
+}
+if (recordFlag) {
+  console.log('[SERVER] Demo recording enabled via --record flag');
+}
+if (demoFlag) {
+  console.log('[SERVER] Demo playback enabled via --demo flag');
+}
 
 // --- Helper to build the VPS URL ---
 function buildVpsUrl() {
@@ -94,81 +110,93 @@ function buildServiceManifest() {
     state: { priority: 3, timeout: 20000 },
   };
 
-  return [
-    {
-      name: "state",
-      create: () => new NewStateService(),
-    },
-    {
-      name: "position",
-      create: () => new PositionService({ sources: positionSources }),
-    },
-    {
-      name: "bluetooth",
-      create: () => new BluetoothService({ stateManager }),
-    },
-    {
-      name: "victron-modbus",
-      create: () =>
-        new VictronModbusService({
-          host: "192.168.50.158",
-          port: 502,
-          pollInterval: 5000,
-        }),
-    },
-    {
-      name: "tidal",
-      create: () => new TidalService(),
-    },
-    {
-      name: "weather",
-      create: () => new WeatherService(),
-    },
-  ];
+  const manifest = [];
+
+  manifest.push({
+    name: "state",
+    create: () => (demoFlag ? new RecordedDemoService() : new NewStateService()),
+  });
+
+  manifest.push({
+    name: "position",
+    create: () => new PositionService({ sources: positionSources }),
+  });
+
+  manifest.push({
+    name: "tidal",
+    create: () => new TidalService(),
+  });
+
+  manifest.push({
+    name: "weather",
+    create: () => new WeatherService(),
+  });
+
+  if (!demoFlag) {
+    manifest.push(
+      {
+        name: "bluetooth",
+        create: () => new BluetoothService({ stateManager }),
+      },
+      {
+        name: "victron-modbus",
+        create: () =>
+          new VictronModbusService({
+            host: "192.168.50.158",
+            port: 502,
+            pollInterval: 5000,
+          }),
+      }
+    );
+  }
+
+  if (recordFlag) {
+    manifest.push({
+      name: "demo-recorder",
+      create: () => new DemoRecorderService(),
+    });
+  }
+
+  return manifest;
 }
 
 async function startSecondaryServices() {
-  const services = [
-    "position",
-    "tidal",
-    "weather",
-    "bluetooth",
-    "victron-modbus",
-  ];
-
-  for (const name of services) {
+  const stateService = requireService("state");
+  const resolveService = (name, { required = false } = {}) => {
     const service = serviceManager.getService(name);
-    if (!service) {
+    if (!service && required) {
       throw new Error(`Service '${name}' was not registered correctly`);
     }
-  }
+    return service;
+  };
 
-  const stateService = requireService("state");
-  const positionService = requireService("position");
-  const tidalService = requireService("tidal");
-  const weatherService = requireService("weather");
-  const bluetoothService = requireService("bluetooth");
-  const victronService = requireService("victron-modbus");
+  const positionService = resolveService("position", { required: true });
+  const tidalService = resolveService("tidal", { required: true });
+  const weatherService = resolveService("weather", { required: true });
+  const bluetoothService = resolveService("bluetooth");
+  const victronService = resolveService("victron-modbus");
 
-  stateManager.listenToService(positionService);
-  stateManager.listenToService(tidalService);
-  stateManager.listenToService(weatherService);
-  stateManager.listenToService(bluetoothService);
-  stateManager.listenToService(victronService);
+  [positionService, tidalService, weatherService, bluetoothService, victronService]
+    .filter(Boolean)
+    .forEach((service) => {
+      stateManager.listenToService(service);
+    });
 
-  stateManager.on(
-    "bluetooth:metadata-updated",
-    async ({ deviceId, metadata }) => {
-      try {
-        await bluetoothService.updateDeviceMetadata(deviceId, metadata);
-      } catch (error) {
-        console.error(
-          `[SERVER] Failed to update BluetoothService DeviceManager:`,
-          error
-        );
+  if (bluetoothService) {
+    stateManager.on(
+      "bluetooth:metadata-updated",
+      async ({ deviceId, metadata }) => {
+        try {
+          await bluetoothService.updateDeviceMetadata(deviceId, metadata);
+        } catch (error) {
+          console.error(
+            `[SERVER] Failed to update BluetoothService DeviceManager:`,
+            error
+          );
+        }
       }
-    }
-  );
+    );
+  }
 }
 
 async function startServer() {
