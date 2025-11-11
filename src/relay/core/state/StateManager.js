@@ -9,13 +9,9 @@ import { AlertService } from "../services/AlertService.js";
 import { getOrCreateAppUuid } from "../../../server/uniqueAppId.js";
 import { defaultProfile } from "../../../config/profiles.js";
 import { UNIT_PRESETS } from "../../../shared/unitPreferences.js";
-import { recordPatch, recordFullState } from "./db.js";
-
 // import { applyPatch } from 'fast-json-patch';
 import pkg from "fast-json-patch";
 const { applyPatch } = pkg;
-
-const RECORD_DATA = false;
 
 const log = debug("state-manager");
 const logError = debug("state-manager:error");
@@ -108,7 +104,6 @@ export class StateManager extends EventEmitter {
       if (obj === null || typeof obj !== "object") {
         return obj;
       }
-
       if (Array.isArray(obj)) {
         return obj.map((item) => safeClone(item));
       }
@@ -435,9 +430,7 @@ export class StateManager extends EventEmitter {
       logState(`Emitting state:patch event with ${validPatch.length} operations, listener count: ${this.listenerCount('state:patch')}`);
       this.emit("state:patch", patchPayload);
 
-      if (RECORD_DATA) {
-        recordPatch(sanitizedPatch);
-      }
+      
     } catch (error) {
       this.logError("Patch error:", error);
     }
@@ -532,9 +525,6 @@ export class StateManager extends EventEmitter {
     );
     this.emit("state:full-update", payload);
 
-    if (RECORD_DATA) {
-      recordFullState(this.appState);
-    }
   }
 
   /**

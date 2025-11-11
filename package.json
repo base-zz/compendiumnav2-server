@@ -34,7 +34,6 @@
     "pouchdb": "^9.0.0",
     "pouchdb-find": "^9.0.0",
     "socket.io": "^4.7.2",
-    "sqlite3": "^5.1.7",
     "winston": "^3.17.0",
     "ws": "^8.14.2"
   },

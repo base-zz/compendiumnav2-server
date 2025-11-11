@@ -26,8 +26,22 @@ export class VictronModbusService extends ContinuousService {
     this._lastBMVRescan = 0;
     this._bmvRescanCooldownMs = 5 * 60 * 1000; // 5 minutes
     this._maxBMVFailuresBeforeRescan = 3;
-    
+    this._missingDeviceLogCooldownMs = 5 * 60 * 1000;
+    this._deviceLogState = new Map();
+
     this.log(`VictronModbusService initialized for ${this.host}:${this.port}`);
+  }
+
+  _shouldLogMissingDevice(key, message) {
+    const now = Date.now();
+    const last = this._deviceLogState.get(key);
+
+    if (!last || last.message !== message || now - last.timestamp >= this._missingDeviceLogCooldownMs) {
+      this._deviceLogState.set(key, { message, timestamp: now });
+      return true;
+    }
+
+    return false;
   }
   
   async start() {
@@ -253,7 +267,9 @@ export class VictronModbusService extends ContinuousService {
       let bmvFound = false;
       
       if (bmvUnitIds.length === 0) {
-        console.log('[VictronModbus] No candidate BMV unit IDs available, scheduling background rescan');
+        if (this._shouldLogMissingDevice('bmv:no-candidates', 'No candidate BMV unit IDs available, scheduling background rescan')) {
+          console.log('[VictronModbus] No candidate BMV unit IDs available, scheduling background rescan');
+        }
         this._scheduleBMVRescan();
       }
 
@@ -292,14 +308,20 @@ export class VictronModbusService extends ContinuousService {
       }
       
       if (!bmvFound) {
-        console.log('[VictronModbus] BMV-712 not found on any unit ID');
+        if (this._shouldLogMissingDevice('bmv:not-found', 'BMV-712 not found on any unit ID')) {
+          console.log('[VictronModbus] BMV-712 not found on any unit ID');
+        }
         const systemBattery = await this._readSystemBatteryRegisters();
         if (systemBattery) {
           data.battery = systemBattery;
-          console.log('[VictronModbus] Using system-level battery registers as fallback');
-          console.log('[VictronModbus] System battery SOC array length:', systemBattery.soc?.length || 0);
+          if (this._shouldLogMissingDevice('bmv:fallback', 'Using system-level battery registers as fallback')) {
+            console.log('[VictronModbus] Using system-level battery registers as fallback');
+            console.log('[VictronModbus] System battery SOC array length:', systemBattery.soc?.length || 0);
+          }
         } else {
-          console.log('[VictronModbus] No system-level battery data available as fallback');
+          if (this._shouldLogMissingDevice('bmv:no-fallback', 'No system-level battery data available as fallback')) {
+            console.log('[VictronModbus] No system-level battery data available as fallback');
+          }
         }
         this._handleBMVFailure();
       }
@@ -361,7 +383,10 @@ export class VictronModbusService extends ContinuousService {
         } catch (e) {
           // This Unit ID didn't work, try next one
           if (unitId === multiplusUnitIds[multiplusUnitIds.length - 1]) {
-            console.log('[VictronModbus] MultiPlus not found on any Unit ID:', e.message);
+            const message = e?.message || 'Unknown Modbus error';
+            if (this._shouldLogMissingDevice('multiplus:not-found', message)) {
+              console.log('[VictronModbus] MultiPlus not found on any Unit ID:', message);
+            }
           }
         }
       }
@@ -415,7 +440,10 @@ export class VictronModbusService extends ContinuousService {
         } catch (e) {
           // This Unit ID didn't work, try next one
           if (unitId === solarUnitIds[solarUnitIds.length - 1]) {
-            console.log('[VictronModbus] Solar charger not found on any Unit ID:', e.message);
+            const message = e?.message || 'Unknown Modbus error';
+            if (this._shouldLogMissingDevice('solar:not-found', message)) {
+              console.log('[VictronModbus] Solar charger not found on any Unit ID:', message);
+            }
           }
         }
       }
