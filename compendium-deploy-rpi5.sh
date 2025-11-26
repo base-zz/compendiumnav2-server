@@ -1460,85 +1460,84 @@ generate_and_register_keys() {
     
     # Create the key setup script
     cat > "$key_script" << 'EOL'
-    import { getOrCreateKeyPair, registerPublicKeyWithVPS } from './src/state/keyPair.js';
-    import fs from 'fs';
-    import path from 'path';
-    import { fileURLToPath } from 'url';
+import { getOrCreateKeyPair, registerPublicKeyWithVPS } from './src/state/keyPair.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Get the directory of the current module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Set the key file paths
+const KEYS_DIR = process.env.HOME ? path.join(process.env.HOME, '.compendium/keys') : '/etc/compendium/keys';
+const PRIVATE_KEY_PATH = path.join(KEYS_DIR, 'private-key');
+const PUBLIC_KEY_PATH = path.join(KEYS_DIR, 'public-key');
+
+// Set environment variables for the key paths
+process.env.COMPENDIUM_PRIVATE_KEY_FILE = PRIVATE_KEY_PATH;
+process.env.COMPENDIUM_PUBLIC_KEY_FILE = PUBLIC_KEY_PATH;
+
+// Ensure the keys directory exists
+if (!fs.existsSync(KEYS_DIR)) {
+  fs.mkdirSync(KEYS_DIR, { recursive: true, mode: 0o700 });
+}
+
+async function setupKeys() {
+  try {
+    console.log('Generating key pair...');
+    const keyPair = getOrCreateKeyPair();
     
-    // Get the directory of the current module
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    
-    // Set the key file paths
-    const KEYS_DIR = process.env.HOME ? path.join(process.env.HOME, '.compendium/keys') : '/etc/compendium/keys';
-    const PRIVATE_KEY_PATH = path.join(KEYS_DIR, 'private-key');
-    const PUBLIC_KEY_PATH = path.join(KEYS_DIR, 'public-key');
-    
-    // Set environment variables for the key paths
-    process.env.COMPENDIUM_PRIVATE_KEY_FILE = PRIVATE_KEY_PATH;
-    process.env.COMPENDIUM_PUBLIC_KEY_FILE = PUBLIC_KEY_PATH;
-    
-    // Ensure the keys directory exists
-    if (!fs.existsSync(KEYS_DIR)) {
-      fs.mkdirSync(KEYS_DIR, { recursive: true, mode: 0o700 });
+    if (!keyPair || !keyPair.publicKey) {
+      throw new Error('Failed to generate key pair');
     }
     
-    async function setupKeys() {
-      try {
-        console.log('Generating key pair...');
-        const keyPair = getOrCreateKeyPair();
-        
-        if (!keyPair || !keyPair.publicKey) {
-          throw new Error('Failed to generate key pair');
-        }
-        
-        console.log('Key pair generated successfully');
-        
-        // Get VPS URL from environment
-        const vpsHost = process.env.VPS_HOST || 'compendiumnav.com';
-        const vpsProtocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-        const vpsPort = process.env.NODE_ENV === 'production' ? '443' : (process.env.VPS_WS_PORT || '3009');
-        const vpsPath = process.env.VPS_PATH || '/relay';
-        const vpsUrl = `${vpsProtocol}://${vpsHost}:${vpsPort}${vpsPath}`;
-        
-        console.log(`Registering public key with VPS at ${vpsUrl}...`);
-        const success = await registerPublicKeyWithVPS(vpsUrl);
-        
-        if (!success) {
-          throw new Error('Failed to register public key with VPS');
-        }
-        
-        console.log('Successfully registered public key with VPS');
-        console.log('Private key stored at:', PRIVATE_KEY_PATH);
-        console.log('Public key stored at:', PUBLIC_KEY_PATH);
-        process.exit(0);
-      } catch (error) {
-        console.error('Error during key setup:', error);
-        process.exit(1);
-      }
+    console.log('Key pair generated successfully');
+    
+    // Get VPS URL from environment
+    const vpsHost = process.env.VPS_HOST || 'compendiumnav.com';
+    const vpsProtocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+    const vpsPort = process.env.NODE_ENV === 'production' ? '443' : (process.env.VPS_WS_PORT || '3009');
+    const vpsPath = process.env.VPS_PATH || '/relay';
+    const vpsUrl = `${vpsProtocol}://${vpsHost}:${vpsPort}${vpsPath}`;
+    
+    console.log(`Registering public key with VPS at ${vpsUrl}...`);
+    const success = await registerPublicKeyWithVPS(vpsUrl);
+    
+    if (!success) {
+      throw new Error('Failed to register public key with VPS');
     }
     
-    setupKeys();
-    EOL
+    console.log('Successfully registered public key with VPS');
+    console.log('Private key stored at:', PRIVATE_KEY_PATH);
+    console.log('Public key stored at:', PUBLIC_KEY_PATH);
+    process.exit(0);
+  } catch (error) {
+    console.error('Error during key setup:', error);
+    process.exit(1);
+  }
+}
+
+setupKeys();
+EOL
     
-    # Create a package.json for the keys directory
+    # Prepare key scripts and package.json in the keys directory
     mkdir -p "${KEYS_DIR}/src/state"
     cp "${APP_DIR}/src/state/keyPair.js" "${KEYS_DIR}/src/state/"
     cp "${APP_DIR}/src/state/uniqueAppId.js" "${KEYS_DIR}/src/state/"
     
-    # Create a package.json for the keys directory
     cat > "${KEYS_DIR}/package.json" << 'EOL'
-    {
-      "name": "compendium-keys",
-      "version": "1.0.0",
-      "description": "Key management for Compendium Navigation Server",
-      "type": "module",
-      "dependencies": {
-        "node-forge": "^1.3.1",
-        "node-fetch": "^2.6.7"
-      }
-    }
-    EOL
+{
+  "name": "compendium-keys",
+  "version": "1.0.0",
+  "description": "Key management for Compendium Navigation Server",
+  "type": "module",
+  "dependencies": {
+    "node-forge": "^1.3.1",
+    "node-fetch": "^2.6.7"
+  }
+}
+EOL
     
     # Install required dependencies
     echo -e "${BLUE}Installing required Node.js dependencies...${NC}"
