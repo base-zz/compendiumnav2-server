@@ -108,14 +108,15 @@ fi  # For Avahi service
 
 # User-specific directories
 USER_HOME=$(eval echo ~"$APP_USER")
-APP_DIR="${USER_HOME}/compendium"
-BACKUP_DIR="${USER_HOME}/compendium-backups"
+# Main application directory now targets the server repo clone
+APP_DIR="${USER_HOME}/compendiumnav2-server"
+BACKUP_DIR="${USER_HOME}/compendiumnav2-server-backups"
 DATA_DIR="${USER_HOME}/compendium-data"
 LOG_DIR="${USER_HOME}/compendium-logs"
 
-# Application settings
+# Application settings - clone the server repository, not the client
 NODE_VERSION="18"
-GIT_REPO="https://github.com/base-zz/compendium2.git"
+GIT_REPO="https://github.com/base-zz/compendiumnav2-server.git"
 GIT_BRANCH="main"
 TARGET_VERSION="${COMPENDIUM_VERSION:-latest}"
 
