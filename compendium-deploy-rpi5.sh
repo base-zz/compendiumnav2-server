@@ -187,17 +187,16 @@ check_raspberry_pi() {
     fi
     
     export IS_RASPBERRY_PI RPI_MODEL IS_RPI5
-        
-        # Check memory
-        local mem_total=$(free -m | awk '/^Mem:/{print $2}')
-        if [ "$mem_total" -lt 1024 ]; then
-            echo -e "${YELLOW}Warning: Low memory detected ($mem_total MB). Performance may be affected.${NC}"
-        fi
-        
-        # Check available disk space
-        local disk_space=$(df -h / | awk 'NR==2 {print $4}')
-        echo -e "${BLUE}Available disk space: $disk_space${NC}"
+    
+    # Check memory
+    local mem_total=$(free -m | awk '/^Mem:/{print $2}')
+    if [ "$mem_total" -lt 1024 ]; then
+        echo -e "${YELLOW}Warning: Low memory detected ($mem_total MB). Performance may be affected.${NC}"
     fi
+    
+    # Check available disk space
+    local disk_space=$(df -h / | awk 'NR==2 {print $4}')
+    echo -e "${BLUE}Available disk space: $disk_space${NC}"
 }
 
 # Configure memory management and system limits
