@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import http from "http";
 import express from "express";
+import cors from "cors";
 import fetch from "node-fetch";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
@@ -249,6 +250,36 @@ async function startServer() {
     // 5. Create and configure Express app for API endpoints
     const app = express();
     app.use(express.json());
+
+    const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+
+    app.use(
+      cors({
+        origin(origin, callback) {
+          if (!origin) {
+            return callback(null, true);
+          }
+
+          try {
+            const parsedOrigin = new URL(origin);
+            if (
+              parsedOrigin.hostname.endsWith("compendium.local") ||
+              allowedOrigins.includes(origin) ||
+              (parsedOrigin.protocol === "capacitor:" &&
+                parsedOrigin.hostname === "localhost")
+            ) {
+              return callback(null, true);
+            }
+          } catch (error) {}
+
+          callback(new Error(`Origin not allowed: ${origin}`));
+        },
+        credentials: true,
+      })
+    );
 
     // Register API routes
     registerBoatInfoRoutes(app);

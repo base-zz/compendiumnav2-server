@@ -1,6 +1,11 @@
 import ContinuousService from './ContinuousService.js';
 import ModbusRTU from 'modbus-serial';
 import storageService from '../bluetooth/services/storage/storageService.js';
+import { scanVictronDevices } from './victron/discoveryHelpers.js';
+
+const UNIT_IDS_SETTING_KEY = 'victronModbusUnitIds';
+const DEVICES_SETTING_KEY = 'victronModbusDevices';
+const DEFAULT_UNIT_SCAN_RANGE = { start: 0, end: 247 };
 
 /**
  * VictronModbusService
@@ -28,6 +33,9 @@ export class VictronModbusService extends ContinuousService {
     this._maxBMVFailuresBeforeRescan = 3;
     this._missingDeviceLogCooldownMs = 5 * 60 * 1000;
     this._deviceLogState = new Map();
+    this.deviceDefinitions = [];
+    this._solarUnitIds = new Set();
+    this._multiplusUnitIds = new Set();
 
     this.log(`VictronModbusService initialized for ${this.host}:${this.port}`);
   }
@@ -50,28 +58,29 @@ export class VictronModbusService extends ContinuousService {
     try {
       await this._connect();
       
-      // Check if we have saved Unit IDs
-      const savedUnitIds = await this._loadSavedUnitIds();
-      
-      if (savedUnitIds && savedUnitIds.length > 0) {
-        console.log('[VictronModbus] Using saved Unit IDs:', savedUnitIds);
-        this.discoveredDevices = savedUnitIds;
+      const savedDevices = await this._loadSavedDevices();
+      if (Array.isArray(savedDevices) && savedDevices.length > 0) {
+        console.log(`[VictronModbus] Loaded ${savedDevices.length} saved device definitions.`);
+        this._applyDiscoveredDevices(savedDevices);
       } else {
-        // First try to discover BMV specifically
-        this.bmvUnitId = await this.discoverBMV();
+        // Check if we have saved Unit IDs (legacy format)
+        const savedUnitIds = await this._loadSavedUnitIds();
         
-        if (this.bmvUnitId) {
-          console.log(`[VictronModbus] Discovered BMV at Unit ID ${this.bmvUnitId}`);
-          this.discoveredDevices = [this.bmvUnitId];
+        if (savedUnitIds && savedUnitIds.length > 0) {
+          console.log('[VictronModbus] Using legacy saved Unit IDs:', savedUnitIds);
+          this._applyLegacyUnitIds(savedUnitIds);
         } else {
-          // Fallback to general device discovery
-          console.log('[VictronModbus] Starting general device discovery...');
+          // First try to discover BMV specifically to speed up boot
+          this.bmvUnitId = await this.discoverBMV();
+          
+          if (this.bmvUnitId) {
+            console.log(`[VictronModbus] Discovered BMV at Unit ID ${this.bmvUnitId}`);
+            this.discoveredDevices = [{ unitId: this.bmvUnitId }];
+          }
+          
+          // Run full discovery to map all devices
+          console.log('[VictronModbus] Starting enhanced general device discovery...');
           await this._discoverDevices();
-        }
-        
-        // Save discovered devices
-        if (this.discoveredDevices && this.discoveredDevices.length > 0) {
-          await this._saveSavedUnitIds(this.discoveredDevices);
         }
       }
       
@@ -85,7 +94,7 @@ export class VictronModbusService extends ContinuousService {
   
   async _loadSavedUnitIds() {
     try {
-      const saved = await storageService.getSetting('victronModbusUnitIds');
+      const saved = await storageService.getSetting(UNIT_IDS_SETTING_KEY);
       return saved;
     } catch (error) {
       console.log('[VictronModbus] No saved Unit IDs found');
@@ -95,82 +104,135 @@ export class VictronModbusService extends ContinuousService {
   
   async _saveSavedUnitIds(devices) {
     try {
-      await storageService.setSetting('victronModbusUnitIds', devices);
+      await storageService.setSetting(UNIT_IDS_SETTING_KEY, devices);
     } catch (error) {
       console.error('[VictronModbus] Failed to save Unit IDs:', error.message);
     }
   }
   
-  async _discoverDevices() {
-    console.log('[VictronModbus] Scanning all Unit IDs 1-247 for Victron devices...');
-    console.log('[VictronModbus] This will take about 30-60 seconds...');
-    const foundDevices = [];
-    
-    // Scan ALL Unit IDs from 1 to 247
-    for (let unitId = 1; unitId <= 247; unitId++) {
-      try {
-        this.client.setID(unitId);
-        
-        // Try multiple common registers to detect any device
-        // Register 840 = Battery voltage (system level)
-        // Register 31 = VE.Bus state
-        // Register 771 = Solar voltage
-        let deviceFound = false;
-        let testResult = null;
-        
-        // Try register 840 (battery/system)
-        try {
-          testResult = await this.client.readHoldingRegisters(840, 1);
-          if (testResult && testResult.data && testResult.data[0] !== undefined) {
-            deviceFound = true;
-          }
-        } catch (e) {}
-        
-        // Try register 31 (VE.Bus)
-        if (!deviceFound) {
-          try {
-            testResult = await this.client.readHoldingRegisters(31, 1);
-            if (testResult && testResult.data && testResult.data[0] !== undefined) {
-              deviceFound = true;
-            }
-          } catch (e) {}
-        }
-        
-        // Try register 771 (Solar)
-        if (!deviceFound) {
-          try {
-            testResult = await this.client.readHoldingRegisters(771, 1);
-            if (testResult && testResult.data && testResult.data[0] !== undefined) {
-              deviceFound = true;
-            }
-          } catch (e) {}
-        }
-        
-        if (deviceFound) {
-          foundDevices.push({
-            unitId: unitId,
-            testValue: testResult.data[0]
-          });
-          console.log(`[VictronModbus] Found device at Unit ID ${unitId}`);
-        }
-      } catch (e) {
-        // No device at this Unit ID, continue
+  async _loadSavedDevices() {
+    try {
+      const saved = await storageService.getSetting(DEVICES_SETTING_KEY);
+      return saved;
+    } catch (error) {
+      console.log('[VictronModbus] No saved device definitions found');
+      return null;
+    }
+  }
+  
+  async _saveDiscoveredDevices(devices) {
+    try {
+      await storageService.setSetting(DEVICES_SETTING_KEY, devices);
+    } catch (error) {
+      console.error('[VictronModbus] Failed to save device definitions:', error.message);
+    }
+  }
+  
+  _applyLegacyUnitIds(entries) {
+    if (!Array.isArray(entries)) {
+      this.deviceDefinitions = [];
+      this.discoveredDevices = [];
+      this._solarUnitIds = new Set();
+      this._multiplusUnitIds = new Set();
+      return;
+    }
+    this.deviceDefinitions = [];
+    this._solarUnitIds = new Set();
+    this._multiplusUnitIds = new Set();
+    const uniqueUnitIds = new Set();
+    const normalized = [];
+    for (const entry of entries) {
+      let unitId = null;
+      if (typeof entry === 'number') {
+        unitId = entry;
+      } else if (entry && typeof entry.unitId === 'number') {
+        unitId = entry.unitId;
       }
-      
-      // Show progress every 50 IDs
-      if (unitId % 50 === 0) {
-        console.log(`[VictronModbus] Scanned ${unitId}/247 Unit IDs...`);
+      if (typeof unitId === 'number' && !uniqueUnitIds.has(unitId)) {
+        uniqueUnitIds.add(unitId);
+        normalized.push({ unitId });
       }
     }
-    
-    // Reset to default Unit ID
-    this.client.setID(this.unitId);
-    
-    console.log(`[VictronModbus] Discovery complete. Found ${foundDevices.length} devices:`);
-    foundDevices.forEach(d => console.log(`  - Unit ID ${d.unitId}`));
-    this.discoveredDevices = foundDevices;
-    
-    return foundDevices;
+    this.discoveredDevices = normalized;
+  }
+  
+  _applyDiscoveredDevices(devices = []) {
+    if (!Array.isArray(devices)) {
+      this.deviceDefinitions = [];
+      return [];
+    }
+    this.deviceDefinitions = devices;
+    const unitIdSet = new Set();
+    const solarIds = new Set();
+    const multiplusIds = new Set();
+    let batteryUnitId = this.bmvUnitId;
+
+    for (const device of devices) {
+      if (!device || !Array.isArray(device.sources)) {
+        continue;
+      }
+      for (const source of device.sources) {
+        if (!source || typeof source.unitId !== 'number') {
+          continue;
+        }
+        unitIdSet.add(source.unitId);
+        if (device.type === 'solar_charger') {
+          solarIds.add(source.unitId);
+        } else if (device.type === 'multiplus') {
+          multiplusIds.add(source.unitId);
+        } else if (device.type === 'battery_monitor' && (batteryUnitId === undefined || batteryUnitId === null)) {
+          batteryUnitId = source.unitId;
+        }
+      }
+    }
+
+    if (batteryUnitId !== undefined && batteryUnitId !== null) {
+      this.bmvUnitId = batteryUnitId;
+    }
+
+    this._solarUnitIds = solarIds;
+    this._multiplusUnitIds = multiplusIds;
+    const legacyList = Array.from(unitIdSet).map(unitId => ({ unitId }));
+    this.discoveredDevices = legacyList;
+    return Array.from(unitIdSet);
+  }
+  
+  async discoverAndPersistDevices(options = {}) {
+    const {
+      range = DEFAULT_UNIT_SCAN_RANGE,
+      retries = 1,
+      delay = 10,
+      verbose = false
+    } = options;
+
+    console.log('[VictronModbus] Running enhanced device discovery...');
+    try {
+      const discoveryResult = await scanVictronDevices({
+        client: this.client,
+        range,
+        retries,
+        delay,
+        verbose,
+        defaultUnitId: this.unitId,
+        logger: {
+          info: (...args) => console.log('[VictronModbus]', ...args),
+          warn: (...args) => console.warn('[VictronModbus]', ...args)
+        }
+      });
+
+      const unitIds = this._applyDiscoveredDevices(discoveryResult.devices);
+      await this._saveDiscoveredDevices(discoveryResult.devices);
+      await this._saveSavedUnitIds(this.discoveredDevices);
+      console.log(`[VictronModbus] Discovery complete. Found ${discoveryResult.devices.length} device types across ${unitIds.length} unit IDs.`);
+      return discoveryResult;
+    } catch (error) {
+      console.error(`[VictronModbus] Enhanced discovery failed: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async _discoverDevices(options = {}) {
+    return this.discoverAndPersistDevices(options);
   }
   
   async stop() {
@@ -243,12 +305,29 @@ export class VictronModbusService extends ContinuousService {
       
       const data = {};
       
+      const addUnitIdsFromDefinitions = (targetSet, type) => {
+        if (!Array.isArray(this.deviceDefinitions)) {
+          return;
+        }
+        for (const device of this.deviceDefinitions) {
+          if (!device || device.type !== type || !Array.isArray(device.sources)) {
+            continue;
+          }
+          for (const source of device.sources) {
+            if (source && typeof source.unitId === 'number') {
+              targetSet.add(source.unitId);
+            }
+          }
+        }
+      };
+
       // Try BMV-712 on different unit IDs
       // BMV-712 registers: 259=Voltage, 261=Current, 258=Power, 266=SOC
       const bmvUnitIdCandidates = new Set();
       if (this.bmvUnitId !== undefined && this.bmvUnitId !== null) {
         bmvUnitIdCandidates.add(this.bmvUnitId);
       }
+      addUnitIdsFromDefinitions(bmvUnitIdCandidates, 'battery_monitor');
       if (Array.isArray(this.discoveredDevices)) {
         for (const device of this.discoveredDevices) {
           if (device === undefined || device === null) {
@@ -330,10 +409,12 @@ export class VictronModbusService extends ContinuousService {
       
       // Try different Unit IDs for MultiPlus (VE.Bus)
       // Common Unit IDs: 227, 246, 100
-      const multiplusUnitIds = [100, 227, 246, 225, 228];
+      const multiplusUnitIdCandidates = new Set(this._multiplusUnitIds || []);
+      addUnitIdsFromDefinitions(multiplusUnitIdCandidates, 'multiplus');
+      [100, 227, 246, 225, 228].forEach(id => multiplusUnitIdCandidates.add(id));
       let multiplusFound = false;
       
-      for (const unitId of multiplusUnitIds) {
+      for (const unitId of multiplusUnitIdCandidates) {
         if (multiplusFound) break;
         
         try {
@@ -382,7 +463,7 @@ export class VictronModbusService extends ContinuousService {
           this.client.setID(this.unitId);
         } catch (e) {
           // This Unit ID didn't work, try next one
-          if (unitId === multiplusUnitIds[multiplusUnitIds.length - 1]) {
+          if (unitId === Array.from(multiplusUnitIdCandidates).pop()) {
             const message = e?.message || 'Unknown Modbus error';
             if (this._shouldLogMissingDevice('multiplus:not-found', message)) {
               console.log('[VictronModbus] MultiPlus not found on any Unit ID:', message);
@@ -396,10 +477,29 @@ export class VictronModbusService extends ContinuousService {
       
       // Try different Unit IDs for Solar Charger
       // Use discovered devices first, then try common ranges
-      const discoveredIds = this.discoveredDevices ? this.discoveredDevices.map(d => d.unitId) : [];
-      const solarUnitIds = [...discoveredIds, 100, ...Array.from({length: 31}, (_, i) => 20 + i)];
+      const solarUnitIdCandidates = new Set(this._solarUnitIds || []);
+      addUnitIdsFromDefinitions(solarUnitIdCandidates, 'solar_charger');
+      if (Array.isArray(this.discoveredDevices)) {
+        for (const device of this.discoveredDevices) {
+          if (device === undefined || device === null) {
+            continue;
+          }
+          if (typeof device === 'number') {
+            solarUnitIdCandidates.add(device);
+            continue;
+          }
+          if (typeof device.unitId === 'number') {
+            solarUnitIdCandidates.add(device.unitId);
+          }
+        }
+      }
+      solarUnitIdCandidates.add(100);
+      for (let i = 20; i < 51; i += 1) {
+        solarUnitIdCandidates.add(i);
+      }
       let solarFound = false;
       
+      const solarUnitIds = Array.from(solarUnitIdCandidates);
       for (const unitId of solarUnitIds) {
         if (solarFound) break;
         

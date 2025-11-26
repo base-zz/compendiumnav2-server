@@ -388,9 +388,11 @@ install_dependencies() {
         libavahi-compat-libdnssd-dev
         libudev-dev
         libusb-1.0-0-dev
-        avahi-daemon    # For mDNS support
-        libnss-mdns     # For .local resolution
-        avahi-utils     # For avahi-publish
+        bluez            # Core Bluetooth stack / bluetoothd
+        bluez-hcidump    # HCI debugging tools useful for BLE issues
+        avahi-daemon     # For mDNS support
+        libnss-mdns      # For .local resolution
+        avahi-utils      # For avahi-publish
     )
     
     if ! run_with_sudo apt-get install -y "${packages[@]}"; then
@@ -935,7 +937,6 @@ EOL
     # Disable unnecessary services if requested
     if [ "$DISABLE_UNNECESSARY_SERVICES" = "true" ]; then
         local services_to_disable=(
-            "bluetooth.service"
             "triggerhappy.service"
             "apt-daily.service"
             "apt-daily-upgrade.service"
@@ -944,6 +945,11 @@ EOL
             "raspi-config.service"
             "raspi-config-autologin.service"
         )
+
+        # Only disable bluetooth.service when explicitly requested
+        if [ "$DISABLE_BLUETOOTH" = "true" ]; then
+            services_to_disable+=("bluetooth.service")
+        fi
         
         for service in "${services_to_disable[@]}"; do
             if systemctl is-enabled --quiet "$service" 2>/dev/null; then

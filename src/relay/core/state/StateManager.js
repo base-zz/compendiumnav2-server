@@ -101,11 +101,16 @@ export class StateManager extends EventEmitter {
 
     // Custom clone function to handle function properties
     const safeClone = (obj) => {
-      if (obj === null || typeof obj !== "object") {
+      if (obj === null) {
         return obj;
       }
+
       if (Array.isArray(obj)) {
         return obj.map((item) => safeClone(item));
+      }
+
+      if (typeof obj !== "object") {
+        return obj;
       }
 
       const result = {};
