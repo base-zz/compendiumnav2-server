@@ -202,8 +202,12 @@ async function startSecondaryServices() {
 
 async function startServer() {
   try {
+    console.log("[SERVER] startServer() called, beginning bootstrap...");
     const manifest = buildServiceManifest();
+    console.log("[SERVER] Service manifest built with entries:", manifest.map(m => m.name));
+    console.log("[SERVER] Calling bootstrapServices(manifest)...");
     const { failures } = await bootstrapServices(manifest);
+    console.log("[SERVER] bootstrapServices() completed, failures count:", failures.length);
     if (failures.length > 0) {
       throw new Error(
         `Service bootstrap failures: ${failures
@@ -212,11 +216,16 @@ async function startServer() {
       );
     }
 
+    console.log("[SERVER] Starting registered services...");
     await startRegisteredServices();
+    console.log("[SERVER] Registered services started, waiting for all ready...");
     await serviceManager.waitForAllReady();
+    console.log("[SERVER] All services reported ready. Proceeding to bridge state and start secondary services.");
 
     await bridgeStateToRelay();
+    console.log("[SERVER] bridgeStateToRelay() completed");
     await startSecondaryServices();
+    console.log("[SERVER] startSecondaryServices() completed");
 
     // 3. Build relay config
     const relayConfig = {
@@ -245,9 +254,12 @@ async function startServer() {
       throw new Error("RelayServer: vpsUrl must be set via env");
 
     // 4. Start relay server
+    console.log("[SERVER] Starting relay server with config:", relayConfig);
     await startRelayServer(stateManager, relayConfig);
+    console.log("[SERVER] Relay server started");
 
     // 5. Create and configure Express app for API endpoints
+    console.log("[SERVER] Creating Express app and configuring middleware...");
     const app = express();
     app.use(express.json());
 
@@ -344,6 +356,7 @@ async function startServer() {
       }, 5000); // 5 second delay
     }
 
+    console.log(`[SERVER] About to call httpServer.listen on PORT=${PORT}...`);
     httpServer.listen(PORT, "0.0.0.0", () => {
       const host = `http://localhost:${PORT}`;
       console.log(`[SERVER] HTTP server listening on port ${PORT}`);
