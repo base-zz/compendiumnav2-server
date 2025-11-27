@@ -6,8 +6,12 @@ import os from 'os';
 import EventEmitter from 'events';
 import { fileURLToPath } from 'url';
 
+console.log('[STORAGE] storageService module loading...');
+
 // Initialize PouchDB plugins
+console.log('[STORAGE] Registering PouchDB plugins...');
 PouchDB.plugin(PouchDBFind);
+console.log('[STORAGE] PouchDB plugins registered');
 
 // Get directory name in ES module
 const __filename = fileURLToPath(import.meta.url);
@@ -15,6 +19,7 @@ const __dirname = path.dirname(__filename);
 
 class StorageService extends EventEmitter {
   constructor() {
+    console.log('[STORAGE] StorageService constructor called');
     super(); // Call parent constructor first
     this.basePath = path.join(process.cwd(), 'data');
     this.devicesDB = null;
@@ -43,21 +48,27 @@ class StorageService extends EventEmitter {
   }
 
   async initialize() {
+    console.log('[STORAGE] initialize() called');
     if (this.initialized) return;
     
     // Ensure data directory exists
+    console.log('[STORAGE] Ensuring basePath exists at', this.basePath);
     if (!fs.existsSync(this.basePath)) {
       fs.mkdirSync(this.basePath, { recursive: true });
     }
 
     // Initialize devices database
+    console.log('[STORAGE] Creating devicesDB at', path.join(this.basePath, 'devices.db'));
     this.devicesDB = new PouchDB(path.join(this.basePath, 'devices.db'), {
       auto_compaction: true
     });
 
     // Create design documents for queries
+    console.log('[STORAGE] Calling _ensureDesignDocs()...');
     await this._ensureDesignDocs();
+    console.log('[STORAGE] _ensureDesignDocs() completed');
     this.initialized = true;
+    console.log('[STORAGE] initialize() completed, storageService is ready');
   }
 
   // === Settings Management ===
@@ -630,6 +641,7 @@ class StorageService extends EventEmitter {
 
   async _ensureDesignDocs() {
     try {
+      console.log('[STORAGE] _ensureDesignDocs(): creating indexes and design documents...');
       // Create indexes for devices collection
       await this.devicesDB.createIndex({
         index: {
@@ -687,9 +699,9 @@ class StorageService extends EventEmitter {
         }
       }
 
-      console.log('Database indexes and design documents initialized');
+      console.log('[STORAGE] Database indexes and design documents initialized');
     } catch (error) {
-      console.error('Error initializing database indexes:', error);
+      console.error('[STORAGE] Error initializing database indexes:', error);
       throw error;
     }
   }
