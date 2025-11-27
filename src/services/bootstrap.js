@@ -1,5 +1,7 @@
 import { serviceManager } from './ServiceManager.js';
 
+console.log('[BOOTSTRAP] bootstrap.js loaded');
+
 function assertServiceName(entry) {
   if (!entry || !entry.name) {
     throw new Error('Service entry is missing required "name" property');
@@ -7,6 +9,7 @@ function assertServiceName(entry) {
 }
 
 function resolveDependencies(dependencies) {
+  console.log('[BOOTSTRAP] resolveDependencies called with', dependencies);
   const resolved = {};
   if (!Array.isArray(dependencies)) {
     return resolved;
@@ -25,6 +28,7 @@ function resolveDependencies(dependencies) {
 }
 
 function instantiateService(entry) {
+  console.log('[BOOTSTRAP] instantiateService called for', entry?.name);
   const create = entry.create;
   const factory = entry.factory;
   const modulePath = entry.module;
@@ -49,6 +53,7 @@ function instantiateService(entry) {
 }
 
 export async function bootstrapServices(serviceManifest) {
+  console.log('[BOOTSTRAP] bootstrapServices called with manifest', Array.isArray(serviceManifest) ? serviceManifest.map((v) => v.name) : serviceManifest);
   if (!serviceManifest || !Array.isArray(serviceManifest)) {
     throw new Error('Service manifest must be an array of service definitions');
   }
@@ -63,6 +68,7 @@ export async function bootstrapServices(serviceManifest) {
       }
       const instance = instantiateService(entry);
       serviceManager.registerService(entry.name, instance);
+      console.log('[BOOTSTRAP] registered service', entry.name);
     } catch (error) {
       failures.push({ name: entry?.name, reason: error.message });
     }
