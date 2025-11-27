@@ -8,6 +8,8 @@
 import { getBoatInfo as buildBoatInfo } from '../uniqueAppId.js';
 import { requireService } from '../../services/serviceLocator.js';
 
+console.log('[ROUTES] boatInfo routes module loaded');
+
 // Re-export getBoatInfo with stateService pre-bound
 export function getBoatInfo() {
   try {

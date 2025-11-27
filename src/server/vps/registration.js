@@ -3,6 +3,8 @@ import http from 'http';
 import { getBoatInfo } from '../api/boatInfo.js';
 import debug from 'debug';
 
+console.log('[ROUTES] VPS registration module loaded');
+
 const log = debug('server:vps:registration');
 
 /**

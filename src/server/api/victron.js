@@ -1,4 +1,5 @@
 import debug from 'debug';
+console.log('[ROUTES] Victron routes module loaded');
 import storageService from '../../bluetooth/services/storage/storageService.js';
 
 const log = debug('api:victron');
