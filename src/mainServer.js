@@ -33,6 +33,7 @@ import { VictronModbusService } from "./services/VictronModbusService.js";
 import DemoRecorderService from "./services/DemoRecorderService.js";
 import RecordedDemoService from "./services/RecordedDemoService.js";
 
+console.log("[SERVER] mainServer.js imports completed, entering top-level code...");
 const log = debug("server:main");
 
 const stateManager = getStateManager();
