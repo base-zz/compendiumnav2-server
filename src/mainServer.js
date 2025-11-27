@@ -43,6 +43,7 @@ console.log("Loading .env");
 dotenv.config({ path: ".env" });
 
 // --- CLI flag parsing ---
+console.log("[SERVER] Parsing CLI flags...");
 const recordFlag = process.argv.includes('--record');
 const demoFlag = process.argv.includes('--demo');
 if (recordFlag && demoFlag) {
@@ -106,6 +107,7 @@ async function bridgeStateToRelay() {
 }
 
 function buildServiceManifest() {
+  console.log("[SERVER] buildServiceManifest() called");
   const positionSources = {
     gps: { priority: 1, timeout: 10000 },
     ais: { priority: 2, timeout: 15000 },
@@ -113,7 +115,9 @@ function buildServiceManifest() {
   };
 
   const manifest = [];
+  console.log("[SERVER] buildServiceManifest(): initializing manifest array");
 
+  console.log("[SERVER] buildServiceManifest(): adding state service (NewStateService / RecordedDemoService)");
   manifest.push({
     name: "state",
     create: () => (demoFlag ? new RecordedDemoService() : new NewStateService()),
@@ -135,6 +139,7 @@ function buildServiceManifest() {
   });
 
   if (!demoFlag) {
+    console.log("[SERVER] buildServiceManifest(): demoFlag is false, adding bluetooth and victron-modbus services");
     manifest.push(
       {
         name: "bluetooth",
@@ -153,16 +158,19 @@ function buildServiceManifest() {
   }
 
   if (recordFlag) {
+    console.log("[SERVER] buildServiceManifest(): recordFlag is true, adding demo-recorder service");
     manifest.push({
       name: "demo-recorder",
       create: () => new DemoRecorderService(),
     });
   }
 
+  console.log("[SERVER] buildServiceManifest(): manifest complete with services:", manifest.map(m => m.name));
   return manifest;
 }
 
 async function startSecondaryServices() {
+  console.log("[SERVER] startSecondaryServices() called");
   const stateService = requireService("state");
   const resolveService = (name, { required = false } = {}) => {
     const service = serviceManager.getService(name);
@@ -178,11 +186,21 @@ async function startSecondaryServices() {
   const bluetoothService = resolveService("bluetooth");
   const victronService = resolveService("victron-modbus");
 
+  console.log("[SERVER] startSecondaryServices(): resolved services:", {
+    hasPosition: !!positionService,
+    hasTidal: !!tidalService,
+    hasWeather: !!weatherService,
+    hasBluetooth: !!bluetoothService,
+    hasVictron: !!victronService,
+  });
+
   [positionService, tidalService, weatherService, bluetoothService, victronService]
     .filter(Boolean)
     .forEach((service) => {
       stateManager.listenToService(service);
     });
+
+  console.log("[SERVER] startSecondaryServices(): stateManager now listening to active services");
 
   if (bluetoothService) {
     stateManager.on(
