@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import EventEmitter from 'events';
+import BaseService from './BaseService.js';
 
 console.log('[SERVICE] RecordedDemoService module loaded');
-import BaseService from './BaseService.js';
 
 /**
  * RecordedDemoService
