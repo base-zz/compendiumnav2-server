@@ -317,18 +317,23 @@ export class BluetoothService extends ContinuousService {
         state: "error",
         error: error.message || "Unknown Bluetooth error",
       });
-      }
+    });
+  }
 
-      // Set up a timeout for the state change
-      const timeout = setTimeout(() => {
-        noble.removeListener("stateChange", stateChangeHandler);
-        reject(new Error("Bluetooth adapter initialization timed out"));
-      }, 10000); // 10 second timeout
+  /**
+   * Initialize the Noble BLE library
+   * @private
+   * @returns {Promise<void>}
+   */
+  async _initNoble() {
+    try {
+      // First, remove any existing listeners to prevent duplicates
+      this._removeNobleListeners();
 
-      const stateChangeHandler = (state) => {
-        this.log(`Bluetooth adapter state changed to: ${state}`);
-
-        if (state === "poweredOn") {
+      // Set up the event listeners
+      noble.on("discover", this._onDiscover);
+      noble.on("stateChange", this._onStateChange);
+      noble.on("scanStart", this._onScanStart);
       noble.on("scanStop", this._onScanStop);
 
       return new Promise((resolve, reject) => {
