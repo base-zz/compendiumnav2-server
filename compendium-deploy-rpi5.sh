@@ -388,8 +388,10 @@ install_dependencies() {
         libavahi-compat-libdnssd-dev
         libudev-dev
         libusb-1.0-0-dev
+        bluetooth        # Meta package for Bluetooth support
         bluez            # Core Bluetooth stack / bluetoothd
         bluez-hcidump    # HCI debugging tools useful for BLE issues
+        libbluetooth-dev # Headers needed for noble / HCI bindings
         avahi-daemon     # For mDNS support
         libnss-mdns      # For .local resolution
         avahi-utils      # For avahi-publish
@@ -398,6 +400,13 @@ install_dependencies() {
     if ! run_with_sudo apt-get install -y "${packages[@]}"; then
         echo -e "${RED}Failed to install required packages${NC}" >&2
         return 1
+    fi
+
+    # Ensure Bluetooth service is enabled and running on Raspberry Pi
+    if [ "$IS_RASPBERRY_PI" = true ]; then
+        echo -e "${BLUE}Ensuring Bluetooth service is enabled and running...${NC}"
+        run_with_sudo systemctl enable bluetooth || true
+        run_with_sudo systemctl restart bluetooth || true
     fi
     
     # Install Node.js if needed
@@ -458,6 +467,14 @@ verify_repository() {
             echo -e "${RED}Failed to checkout version $COMPENDIUM_VERSION${NC}" >&2;
             return 1
         }
+    fi
+    
+    # On Raspberry Pi, ensure Node Bluetooth dependencies are present for noble
+    if [ "$IS_RASPBERRY_PI" = true ]; then
+        echo -e "${BLUE}Ensuring Node Bluetooth dependencies (@abandonware/noble, @abandonware/bluetooth-hci-socket)...${NC}"
+        if ! npm list @abandonware/noble >/dev/null 2>&1 || ! npm list @abandonware/bluetooth-hci-socket >/dev/null 2>&1; then
+            npm install @abandonware/noble @abandonware/bluetooth-hci-socket || echo -e "${YELLOW}Warning: Failed to install noble Bluetooth dependencies automatically. Please run 'npm install @abandonware/noble @abandonware/bluetooth-hci-socket' manually if Bluetooth is required.${NC}"
+        fi
     fi
     
     # Configure environment variables

@@ -28,7 +28,7 @@ import { NewStateService } from "./services/NewStateService.js";
 import { PositionService } from "./services/PositionService.js";
 import { TidalService } from "./services/TidalService.js";
 import { WeatherService } from "./services/WeatherService.js";
-// import { BluetoothService } from "./services/BluetoothService.js";
+import { BluetoothService } from "./services/BluetoothService.js";
 import { VictronModbusService } from "./services/VictronModbusService.js";
 import DemoRecorderService from "./services/DemoRecorderService.js";
 import RecordedDemoService from "./services/RecordedDemoService.js";
@@ -145,10 +145,10 @@ function buildServiceManifest() {
   if (!demoFlag) {
     console.log("[SERVER] buildServiceManifest(): demoFlag is false, adding bluetooth and victron-modbus services");
     manifest.push(
-      // {
-      //   name: "bluetooth",
-      //   create: () => new BluetoothService({ stateManager }),
-      // },
+      {
+        name: "bluetooth",
+        create: () => new BluetoothService({ stateManager }),
+      },
       {
         name: "victron-modbus",
         create: () =>
