@@ -1,5 +1,4 @@
 //@ts-nocheck
-import noble from "@abandonware/noble";
 import fs from "fs/promises";
 import * as yaml from "js-yaml";
 import path from "path";
@@ -9,6 +8,8 @@ import { ParserRegistry } from "../bluetooth/parsers/ParserRegistry.js";
 import { DeviceManager } from "../bluetooth/services/DeviceManager.js";
 import ParserFactory from "../bluetooth/parsers/ParserFactory.js";
 import ContinuousService from "./ContinuousService.js";
+
+let noble;
 
 console.log('[SERVICE] BluetoothService module loaded');
 
@@ -316,138 +317,18 @@ export class BluetoothService extends ContinuousService {
         state: "error",
         error: error.message || "Unknown Bluetooth error",
       });
-    });
-  }
-
-  /**
-   * Start the Bluetooth service
-   * @override
-   * @returns {Promise<void>}
-   */
-  async start() {
-    this.log(`BluetoothService.start() called, isRunning=${this.isRunning}`);
-    
-    if (this.isRunning) {
-      this.log("⚠️  Bluetooth service is already running, returning early");
-      return;
-    }
-
-    try {
-      this.log("Starting Bluetooth service...");
-      await super.start();
-      
-      // Initialize DeviceManager with error handling
-      try {
-        // Check if there's a lock file and remove it if it exists
-        const lockFilePath = path.join(process.cwd(), 'data', 'devices.db', 'LOCK');
-        
-        try {
-          // Check for stale lock file and remove it asynchronously.
-          await fs.stat(lockFilePath);
-          await fs.unlink(lockFilePath);
-          this.log(`Removed stale lock file`);
-        } catch (error) {
-          if (error.code !== 'ENOENT') {
-            this.logError(`Error handling stale lock file: ${error.message}`);
-          }
-        }
-        
-        // Reinitialize the DeviceManager
-        if (!this.deviceManager || !this.deviceManager.isInitialized) {
-          this.log(`Initializing DeviceManager...`);
-          this.deviceManager = new DeviceManager();
-          await this.deviceManager.initialize();
-          this.log(`DeviceManager initialized successfully`);
-        }
-      } catch (deviceManagerError) {
-        this.log(`DeviceManager initialization failed, but continuing without device persistence: ${deviceManagerError.message}`);
-        // Create a simple in-memory device manager as fallback
-        this.deviceManager = {
-          isInitialized: true,
-          registerDevice: (id, device) => {
-            // this.log(`In-memory device registration: ${id}`);
-            return Promise.resolve(device);
-          },
-          getDevice: (id) => Promise.resolve(null),
-          getAllDevices: () => Promise.resolve([]),
-          selectedDevices: new Set(),
-          connectedDevices: new Set()
-        };
-      }
-      
-      // Update Bluetooth status in state if state manager is available
-      if (this.stateManager) {
-        try {
-          this.stateManager.updateBluetoothStatus({
-            state: 'enabled',
-            error: null
-          });
-          this.log('Updated Bluetooth status in state manager');
-        } catch (statusError) {
-          this.logError(`Error updating Bluetooth status: ${statusError.message}`);
-        }
       }
 
-      // Ensure ParserRegistry exists
-      if (!this.parserRegistry) {
-        this.parserRegistry = new ParserRegistry();
-        this.log("Created new ParserRegistry instance");
-      }
-      
-      // Load parsers from configuration files
-      this.log("Loading parsers from configuration files...");
-      const parserFactory = new ParserFactory();
-      await parserFactory.loadAllParsers();
-      
-      // Register all loaded parsers
-      const configParsers = parserFactory.getAllParsers();
-      for (const [manufacturerId, parser] of configParsers) {
-        this.registerParser(manufacturerId, parser);
-        this.log(`Registered ${parser.name} for manufacturer ID: 0x${manufacturerId.toString(16).toUpperCase()}`);
-      }
+      // Set up a timeout for the state change
+      const timeout = setTimeout(() => {
+        noble.removeListener("stateChange", stateChangeHandler);
+        reject(new Error("Bluetooth adapter initialization timed out"));
+      }, 10000); // 10 second timeout
 
-      // Initialize the device manager if not already done
-      if (!this.deviceManager) {
-        this.deviceManager = new DeviceManager({
-          log: this.log,
-          logError: this.logError,
-        });
-      }
+      const stateChangeHandler = (state) => {
+        this.log(`Bluetooth adapter state changed to: ${state}`);
 
-      // Load company identifiers
-      await this._loadCompanyMap();
-      this.log("Company map loaded");
-
-      // Initialize the BLE stack
-      await this._initNoble();
-      this.log("Noble initialized");
-
-      // Start the scan cycle
-      await this._startScanCycle();
-      this.log("Scan cycle started");
-      this.log("Bluetooth service started successfully");
-    } catch (error) {
-      this.logError(`❌ Failed to start Bluetooth service: ${error.message}`);
-      this.logError(`Stack: ${error.stack}`);
-      this.emit("error", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Initialize the Noble BLE library
-   * @private
-   * @returns {Promise<void>}
-   */
-  async _initNoble() {
-    try {
-      // First, remove any existing listeners to prevent duplicates
-      this._removeNobleListeners();
-
-      // Set up the event listeners
-      noble.on("discover", this._onDiscover);
-      noble.on("stateChange", this._onStateChange);
-      noble.on("scanStart", this._onScanStart);
+        if (state === "poweredOn") {
       noble.on("scanStop", this._onScanStop);
 
       return new Promise((resolve, reject) => {
