@@ -33,14 +33,18 @@ import { VictronModbusService } from "./services/VictronModbusService.js";
 import DemoRecorderService from "./services/DemoRecorderService.js";
 import RecordedDemoService from "./services/RecordedDemoService.js";
 
-console.log("[SERVER] mainServer.js imports completed, entering top-level code...");
+console.log("[SERVER] TOP: mainServer.js imports completed, entering top-level code...");
 const log = debug("server:main");
 
+console.log("[SERVER] TOP: before getStateManager()");
 const stateManager = getStateManager();
+console.log("[SERVER] TOP: after getStateManager(), before setStateManagerInstance()");
 setStateManagerInstance(stateManager);
+console.log("[SERVER] TOP: after setStateManagerInstance(), before dotenv.config");
 
 console.log("Loading .env");
 dotenv.config({ path: ".env" });
+console.log("[SERVER] TOP: after dotenv.config, before CLI flag parsing");
 
 // --- CLI flag parsing ---
 console.log("[SERVER] Parsing CLI flags...");
