@@ -148,8 +148,11 @@ export class StateManager extends EventEmitter {
     });
 
     // Initialize the new rule engine, which is event-driven
+    console.log('[StateManager] constructor: before creating RuleEngine2');
     this.ruleEngine = new RuleEngine2();
+    console.log('[StateManager] constructor: after RuleEngine2, before getRules');
     const allRules = getRules(); // Get all rules from the new set
+    console.log('[StateManager] constructor: after getRules, rule count =', Array.isArray(allRules) ? allRules.length : 'NON_ARRAY');
 
     this.log(`Retrieved ${allRules.length} rules from getRules().`);
     allRules.forEach((rule) => {
@@ -157,6 +160,7 @@ export class StateManager extends EventEmitter {
       this.ruleEngine.addRule(rule);
     });
     this.log(`Finished adding rules.`);
+    console.log('[StateManager] constructor: finished adding rules');
 
     // Listen for rule triggers and process their actions
     this.ruleEngine.on("rule-triggered", ({ rule, actionResult }) => {
@@ -170,10 +174,15 @@ export class StateManager extends EventEmitter {
     });
 
     // Initialize the alert service
+    console.log('[StateManager] constructor: before AlertService');
     this.alertService = new AlertService(this);
+    console.log('[StateManager] constructor: after AlertService, before defaultProfile clone');
 
     this.currentProfile = this._safeClone(defaultProfile);
+    console.log('[StateManager] constructor: after defaultProfile clone, before getOrCreateAppUuid');
     this._boatId = getOrCreateAppUuid();
+    console.log('[StateManager] constructor: after getOrCreateAppUuid, constructor continuing');
+
     this._clientCount = 0;
     this.tideData = null;
     this.weatherData = null;
