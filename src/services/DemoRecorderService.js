@@ -4,6 +4,8 @@ import { promises as fsPromises } from "fs";
 import BaseService from "./BaseService.js";
 import { serviceManager } from "./ServiceManager.js";
 
+console.log('[SERVICE] DemoRecorderService module loaded');
+
 /**
  * DemoRecorderService
  *

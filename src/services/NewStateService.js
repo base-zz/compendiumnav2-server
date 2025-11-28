@@ -19,6 +19,9 @@ import { UNIT_PRESETS } from '../shared/unitPreferences.js';
 import { getServerUnitPreferences } from '../state/serverUnitPreferences.js';
 import { UnitConversion } from '../shared/unitConversion.js';
 import pkg from "fast-json-patch";
+
+console.log('[SERVICE] NewStateService module loaded');
+
 // StateManager accessor
 let stateManager = null;
 function ensureStateManager() {

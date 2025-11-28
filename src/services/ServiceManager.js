@@ -1,6 +1,8 @@
 import { EventEmitter } from 'events';
 import debug from 'debug';
 
+console.log('[SERVICE] ServiceManager module loaded');
+
 // Import ScheduledService with dynamic import to avoid circular dependencies
 let ScheduledService;
 try {

@@ -1,5 +1,7 @@
 import { serviceManager } from './ServiceManager.js';
 
+console.log('[SERVICE] serviceLocator module loaded');
+
 export function getService(name) {
   return serviceManager.getService(name);
 }

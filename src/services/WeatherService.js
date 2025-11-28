@@ -2,6 +2,8 @@ import ScheduledService from "./ScheduledService.js";
 import fetch from "node-fetch";
 import debug from "debug";
 
+console.log('[SERVICE] WeatherService module loaded');
+
 export class WeatherService extends ScheduledService {
   /** @type {Object} */
   stateService;

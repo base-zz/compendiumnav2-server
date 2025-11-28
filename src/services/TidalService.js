@@ -3,6 +3,8 @@ import { fetchWeatherApi } from "openmeteo";
 import { UNIT_PRESETS } from "../shared/unitPreferences.js";
 import debug from "debug";
 
+console.log('[SERVICE] TidalService module loaded');
+
 export class TidalService extends ScheduledService {
   /** @type {Object} */
   stateService;

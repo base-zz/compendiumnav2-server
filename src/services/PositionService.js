@@ -1,5 +1,7 @@
 import ContinuousService from './ContinuousService.js';
 
+console.log('[SERVICE] PositionService module loaded');
+
 /**
  * @class PositionService
  * @description A continuous service responsible for acquiring position data from one or

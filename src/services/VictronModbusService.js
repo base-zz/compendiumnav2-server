@@ -3,6 +3,8 @@ import ModbusRTU from 'modbus-serial';
 import storageService from '../bluetooth/services/storage/storageService.js';
 import { scanVictronDevices } from './victron/discoveryHelpers.js';
 
+console.log('[SERVICE] VictronModbusService module loaded');
+
 const UNIT_IDS_SETTING_KEY = 'victronModbusUnitIds';
 const DEVICES_SETTING_KEY = 'victronModbusDevices';
 const DEFAULT_UNIT_SCAN_RANGE = { start: 0, end: 247 };

@@ -10,6 +10,8 @@ import { DeviceManager } from "../bluetooth/services/DeviceManager.js";
 import ParserFactory from "../bluetooth/parsers/ParserFactory.js";
 import ContinuousService from "./ContinuousService.js";
 
+console.log('[SERVICE] BluetoothService module loaded');
+
 /**
  * Bluetooth Service for managing BLE device discovery and communication
  * Extends ContinuousService to provide continuous BLE scanning functionality
