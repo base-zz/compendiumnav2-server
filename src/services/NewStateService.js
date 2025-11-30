@@ -1419,10 +1419,29 @@ class NewStateService extends ContinuousService {
           if (prevPos && currPos) {
             const currLat = currPos?.latitude?.value;
             const currLon = currPos?.longitude?.value;
+            const prevLat = prevPos?.latitude?.value;
+            const prevLon = prevPos?.longitude?.value;
 
             const currValid =
               typeof currLat === 'number' && Number.isFinite(currLat) &&
               typeof currLon === 'number' && Number.isFinite(currLon);
+            const prevValid =
+              typeof prevLat === 'number' && Number.isFinite(prevLat) &&
+              typeof prevLon === 'number' && Number.isFinite(prevLon);
+
+            if (currValid && prevValid) {
+              const distanceMeters = this._calculateDistance(prevLat, prevLon, currLat, currLon);
+              const SIGNIFICANT_JUMP_METERS = 200; // purely for logging/diagnostics
+              if (Number.isFinite(distanceMeters) && distanceMeters > SIGNIFICANT_JUMP_METERS) {
+                console.log('[StateService] navigation.position significant jump detected', {
+                  prevLat,
+                  prevLon,
+                  currLat,
+                  currLon,
+                  distanceMeters,
+                });
+              }
+            }
 
             if (!this._nullPositionCount && this._nullPositionCount !== 0) {
               this._nullPositionCount = 0;
