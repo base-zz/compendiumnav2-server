@@ -1413,6 +1413,51 @@ class NewStateService extends ContinuousService {
         
         // Only update derived values for categories that changed
         if (changedCategories.has('position')) {
+          const prevPos = previousState?.navigation?.position;
+          const currPos = stateData.state?.navigation?.position;
+
+          if (prevPos && currPos) {
+            const currLat = currPos?.latitude?.value;
+            const currLon = currPos?.longitude?.value;
+
+            const currValid =
+              typeof currLat === 'number' && Number.isFinite(currLat) &&
+              typeof currLon === 'number' && Number.isFinite(currLon);
+
+            if (!this._nullPositionCount && this._nullPositionCount !== 0) {
+              this._nullPositionCount = 0;
+            }
+            const NULL_THRESHOLD = 3; // require 3 consecutive bad updates before nulling
+
+            if (currValid) {
+              this._nullPositionCount = 0;
+            } else {
+              this._nullPositionCount += 1;
+              console.log('[StateService] navigation.position invalid from batch', {
+                currLat,
+                currLon,
+                prevLat: prevPos?.latitude?.value,
+                prevLon: prevPos?.longitude?.value,
+                nullCount: this._nullPositionCount,
+              });
+
+              if (this._nullPositionCount < NULL_THRESHOLD) {
+                // Debounce: keep last-known-good position instead of emitting null
+                if (currPos.latitude) {
+                  currPos.latitude.value = prevPos?.latitude?.value ?? null;
+                }
+                if (currPos.longitude) {
+                  currPos.longitude.value = prevPos?.longitude?.value ?? null;
+                }
+                console.log('[StateService] Debounced null navigation.position, keeping last-known-good');
+              } else {
+                console.log('[StateService] Accepting null navigation.position after consecutive bad updates', {
+                  nullCount: this._nullPositionCount,
+                });
+              }
+            }
+          }
+
           stateData.convert.convertPositionValues();
         }
         if (changedCategories.has('course')) {
