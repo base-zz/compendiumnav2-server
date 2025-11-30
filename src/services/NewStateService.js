@@ -839,6 +839,13 @@ class NewStateService extends ContinuousService {
 
     if (!processedData.updates) return;
 
+    const rawContext = processedData.context || delta.context || null;
+    let isSelfContext = true;
+    if (rawContext && typeof rawContext === 'string' && this.selfMmsi) {
+      const selfContext = `vessels.${this.selfMmsi}`;
+      isSelfContext = rawContext === selfContext;
+    }
+
     for (const update of processedData.updates) {
       if (!Array.isArray(update.values)) continue;
 
@@ -847,6 +854,11 @@ class NewStateService extends ContinuousService {
 
       for (const value of update.values) {
         if (!value.path) continue;
+
+        // Only allow navigation.position from the self vessel context to update
+        if (value.path === 'navigation.position' && !isSelfContext) {
+          continue;
+        }
 
         this._processSignalKValue(value.path, value.value, source);
       }
