@@ -73,13 +73,25 @@ class DeviceTracker:
 
         key = addr or path
         first_seen = key not in self.devices
-        self.devices[key] = {
-            "path": path,
-            "address": addr,
-            "name": name,
-            "rssi": rssi,
-            "manufacturer": mfr_strs,
-        }
+        if first_seen:
+            # First time seeing this device: store full info
+            self.devices[key] = {
+                "path": path,
+                "address": addr,
+                "name": name,
+                "rssi": rssi,
+                "manufacturer": mfr_strs,
+            }
+        else:
+            # Update existing entry, preserving previously known address/name
+            entry = self.devices[key]
+            entry["path"] = path
+            entry["address"] = addr or entry.get("address", "")
+            entry["name"] = name or entry.get("name", "Unknown")
+            if rssi is not None:
+                entry["rssi"] = rssi
+            if mfr_strs:
+                entry["manufacturer"] = mfr_strs
 
         if first_seen:
             print("Found device:")
@@ -113,6 +125,19 @@ def main():
     bus = dbus.SystemBus()
 
     print("Connecting to BlueZ over D-Bus...\n")
+
+    # Debug: log any signals we see from BlueZ so we can verify subscription
+    def debug_signal_handler(*args, **kwargs):
+        path = kwargs.get("path")
+        print("[DEBUG] Signal from BlueZ:", path, "args=", args)
+
+    bus.add_signal_receiver(
+        debug_signal_handler,
+        dbus_interface=None,
+        signal_name=None,
+        sender=BLUEZ_SERVICE_NAME,
+        path_keyword="path",
+    )
 
     adapter_path = get_adapter(bus, "hci0")
     if not adapter_path:

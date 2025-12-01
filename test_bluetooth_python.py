@@ -8,7 +8,7 @@ from collections import OrderedDict
 SCAN_DURATION_SECONDS = 15
 
 
-DEVICE_LINE_RE = re.compile(r'^\[(NEW|CHG)\]\s+Device\s+([0-9A-F:]{17})\s+(.*)$')
+DEVICE_LINE_RE = re.compile(r'^\[(NEW|CHG)\]\s+Device\s+([0-9A-Fa-f:]{17})\s+(.*)$')
 
 
 def run_bluetoothctl(commands, timeout=5):
@@ -64,14 +64,24 @@ def scan_devices(duration=SCAN_DURATION_SECONDS):
 
         print(f"Starting scan for {duration} seconds...\n")
 
+        import select
         while True:
-            if time.time() - start_time >= duration:
+            # Compute remaining time
+            elapsed = time.time() - start_time
+            remaining = duration - elapsed
+            if remaining <= 0:
                 break
-
+            # Wait for a line with a timeout based on remaining time
+            rlist, _, _ = select.select([proc.stdout], [], [], remaining)
+            if not rlist:
+                # No more data before timeout, stop scanning
+                break
             line = proc.stdout.readline()
             if not line:
                 # bluetoothctl exited unexpectedly
                 break
+
+            print("RAW:", repr(line))
 
             line = line.strip()
             match = DEVICE_LINE_RE.match(line)
