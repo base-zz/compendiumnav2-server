@@ -211,7 +211,7 @@ export class BluetoothService extends ContinuousService {
     // Debounce properties for scan stop logging
     this.lastScanStopTime = 0;
     this.scanStopDebounceTime = 500; // 500ms
-    
+
     // Map to store device updates during a scan cycle
     this.deviceUpdates = new Map(); // Map of device ID -> device info
     this.lastDbUpdateTime = Date.now();
@@ -222,27 +222,42 @@ export class BluetoothService extends ContinuousService {
     this._onStateChange = (state) => this._handleStateChange(state);
     this._onScanStart = () => this._handleScanStart();
     this._onScanStop = () => this._handleScanStop();
-    
+
     // Set up internal event listeners for state management if stateManager is provided
     if (this.stateManager) {
       this._setupStateManagement();
     }
   }
-  
+
   /**
-   * Set the state manager instance after construction
-   * @param {Object} stateManager - StateManager instance
+   * Start the Bluetooth service: initialize noble and begin the scan cycle
+   * @override
    */
-  setStateManager(stateManager) {
-    if (!stateManager) {
-      this.log('Warning: Attempted to set null stateManager');
+  async start() {
+    if (this.isRunning) {
+      this.log("Bluetooth service already running", "debug");
       return;
     }
-    
-    this.stateManager = stateManager;
-    this._setupStateManagement();
+
+    this.log("BluetoothService.start() called");
+
+    await super.start();
+
+    try {
+      await this._loadCompanyMap();
+    } catch (error) {
+      this.logError(`Error loading Bluetooth company map: ${error.message}`);
+    }
+
+    try {
+      await this._initNoble();
+      await this._startScanCycle();
+    } catch (error) {
+      this.logError(`Error starting Bluetooth scanning: ${error.message}`);
+      this.emit("error", error);
+    }
   }
-  
+
   /**
    * Set up internal event listeners for state management
    * @private
