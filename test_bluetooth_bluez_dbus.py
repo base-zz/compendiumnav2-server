@@ -165,10 +165,15 @@ def main():
 
     print("Connecting to BlueZ over D-Bus...\n")
 
-    # Debug: log any signals we see from BlueZ so we can verify subscription
+    # Debug: log any signals we see from BlueZ so we can verify subscription.
+    # Send to stderr so stdout can remain clean for JSON output.
     def debug_signal_handler(*args, **kwargs):
         path = kwargs.get("path")
-        print("[DEBUG] Signal from BlueZ:", path, "args=", args)
+        try:
+            sys.stderr.write(f"[DEBUG] Signal from BlueZ: {path} args= {args}\n")
+        except Exception:
+            # Avoid crashing on encoding / broken pipe issues in debug logging.
+            pass
 
     bus.add_signal_receiver(
         debug_signal_handler,
