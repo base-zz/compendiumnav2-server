@@ -8,7 +8,11 @@ from collections import OrderedDict
 SCAN_DURATION_SECONDS = 15
 
 
-DEVICE_LINE_RE = re.compile(r'^\[(NEW|CHG)\]\s+Device\s+([0-9A-Fa-f:]{17})\s+(.*)$')
+# Match "Device <MAC> <rest of line>", ignoring any [NEW]/[CHG] tag or colours.
+DEVICE_LINE_RE = re.compile(r"Device\s+([0-9A-Fa-f:]{17})\b(?:\s+(.+))?$")
+
+# Strip ANSI escape sequences like \x1b[0;94m and similar.
+ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 
 
 def run_bluetoothctl(commands, timeout=5):
@@ -66,16 +70,18 @@ def scan_devices(duration=SCAN_DURATION_SECONDS):
 
         import select
         while True:
-            # Compute remaining time
+            # Compute remaining time and stop if we've exceeded duration
             elapsed = time.time() - start_time
-            remaining = duration - elapsed
-            if remaining <= 0:
+            if elapsed >= duration:
                 break
-            # Wait for a line with a timeout based on remaining time
+
+            # Wait for data on stdout up to the remaining time
+            remaining = max(0.0, duration - elapsed)
             rlist, _, _ = select.select([proc.stdout], [], [], remaining)
             if not rlist:
-                # No more data before timeout, stop scanning
+                # No data before timeout; end the scan loop
                 break
+
             line = proc.stdout.readline()
             if not line:
                 # bluetoothctl exited unexpectedly
@@ -83,11 +89,16 @@ def scan_devices(duration=SCAN_DURATION_SECONDS):
 
             print("RAW:", repr(line))
 
-            line = line.strip()
-            match = DEVICE_LINE_RE.match(line)
+            # Clean ANSI escape sequences and simple control chars that
+            # bluetoothctl uses around the prompt / tags.
+            cleaned = ANSI_ESCAPE_RE.sub("", line)
+            cleaned = cleaned.replace("\x01", "").replace("\x02", "")
+            cleaned = cleaned.strip()
+
+            match = DEVICE_LINE_RE.search(cleaned)
             if match:
-                _tag, addr, name = match.groups()
-                name = name.strip() or "Unknown"
+                addr, name = match.groups()
+                name = (name or "").strip() or "Unknown"
                 if addr not in devices:
                     devices[addr] = name
                     print(f"Found device: {addr}  {name}")
