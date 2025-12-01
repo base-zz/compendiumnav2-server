@@ -151,6 +151,7 @@ class PiBluetoothReaderPlugin extends EventEmitter {
       manufacturerId,
     };
 
+    console.log("[BT] Pi plugin emitting device:", device);
     this.emit("device", device);
   }
 }
@@ -503,16 +504,20 @@ export class BluetoothService extends ContinuousService {
       this.btReader = new PiBluetoothReaderPlugin({
         scanDurationMs: this.scanDuration,
       });
+      console.log("[BT] Using PiBluetoothReaderPlugin backend");
     } else if (process.platform === "darwin") {
       this.btReader = new MacBluetoothReaderPlugin({
         scanDurationMs: this.scanDuration,
       });
+      console.log("[BT] Using MacBluetoothReaderPlugin backend");
     } else {
       this.btReader = null;
+      console.log("[BT] No btReader backend selected for platform:", process.platform);
     }
 
     if (this.btReader) {
       this.btReader.on("device", (device) => {
+        console.log("[BT] BluetoothService received normalized device:", device);
         this._handleNormalizedDevice(device).catch((error) => {
           this.log(`Error handling normalized device: ${error.message}`, "error");
         });
