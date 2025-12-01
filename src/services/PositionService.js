@@ -373,6 +373,42 @@ export class PositionService extends ContinuousService {
         longitude: this._centerLon,
       },
     });
+
+    // Emit a state patch with a high-level positionStability object (read-only diagnostics)
+    if (windowScatter && Number.isFinite(windowScatter.mean)) {
+      const radius95Meters =
+        Number.isFinite(windowScatter.std)
+          ? windowScatter.mean + 2 * windowScatter.std
+          : windowScatter.mean;
+
+      const timestamp = new Date(nowTsMs).toISOString();
+
+      const patch = [
+        {
+          op: 'add',
+          path: '/positionStability',
+          value: {
+            radius95Meters,
+            meanRadiusMeters: windowScatter.mean,
+            stdRadiusMeters: windowScatter.std,
+            windowSize: this._driftWindow.length,
+            teleportThresholdMeters,
+            teleportCount:
+              teleportThresholdMeters == null
+                ? 0
+                : this._driftWindow.length - (filteredDrift ? filteredDrift.length : 0),
+            lastUpdated: timestamp,
+          },
+        },
+      ];
+
+      this.emit('state:position', {
+        data: patch,
+        source: 'position-service',
+        timestamp,
+        trace: false,
+      });
+    }
   }
 
   _computeWindowStats(values) {
