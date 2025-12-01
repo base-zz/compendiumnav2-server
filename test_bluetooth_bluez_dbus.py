@@ -110,12 +110,14 @@ class DeviceTracker:
 
 
 def interfaces_added_handler(path, interfaces, tracker):
+    print("[HANDLER] InterfacesAdded for", path, "keys=", list(interfaces.keys()))
     tracker.handle_device(path, interfaces)
 
 
 def properties_changed_handler(interface, changed, invalidated, path, tracker):
     if interface != DEVICE_INTERFACE:
         return
+    print("[HANDLER] PropertiesChanged for", path, "keys=", list(changed.keys()))
     props = {DEVICE_INTERFACE: dict(changed)}
     tracker.handle_device(path, props)
 
