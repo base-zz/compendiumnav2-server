@@ -185,22 +185,23 @@ def main():
         print("Connecting to BlueZ over D-Bus...\n")
 
     # Debug: log any signals we see from BlueZ so we can verify subscription.
-    # Send to stderr so stdout can remain clean for JSON output.
-    def debug_signal_handler(*args, **kwargs):
-        path = kwargs.get("path")
-        try:
-            sys.stderr.write(f"[DEBUG] Signal from BlueZ: {path} args= {args}\n")
-        except Exception:
-            # Avoid crashing on encoding / broken pipe issues in debug logging.
-            pass
+    # Only in non-JSON mode to keep stdout clean for parsing.
+    if not json_mode:
+        def debug_signal_handler(*args, **kwargs):
+            path = kwargs.get("path")
+            try:
+                sys.stderr.write(f"[DEBUG] Signal from BlueZ: {path} args= {args}\n")
+            except Exception:
+                # Avoid crashing on encoding / broken pipe issues in debug logging.
+                pass
 
-    bus.add_signal_receiver(
-        debug_signal_handler,
-        dbus_interface=None,
-        signal_name=None,
-        bus_name=BLUEZ_SERVICE_NAME,
-        path_keyword="path",
-    )
+        bus.add_signal_receiver(
+            debug_signal_handler,
+            dbus_interface=None,
+            signal_name=None,
+            bus_name=BLUEZ_SERVICE_NAME,
+            path_keyword="path",
+        )
 
     adapter_path = get_adapter(bus, "hci0")
     if not adapter_path:
