@@ -4,6 +4,7 @@ import * as yaml from "js-yaml";
 import path from "path";
 import { fileURLToPath, URL } from "url";
 import { EventEmitter } from "events";
+import { spawn } from "child_process";
 import noble from "@abandonware/noble";
 import { ParserRegistry } from "../bluetooth/parsers/ParserRegistry.js";
 import { DeviceManager } from "../bluetooth/services/DeviceManager.js";
@@ -11,6 +12,281 @@ import ParserFactory from "../bluetooth/parsers/ParserFactory.js";
 import ContinuousService from "./ContinuousService.js";
 
 console.log('[SERVICE] BluetoothService module loaded');
+
+class PiBluetoothReaderPlugin extends EventEmitter {
+  constructor(options) {
+    super();
+
+    const { scanDurationMs } = options || {};
+    this.scanDurationMs = typeof scanDurationMs === "number" ? scanDurationMs : 10000;
+    this.child = null;
+    this.stdoutBuffer = "";
+  }
+
+  async init() {
+    return;
+  }
+
+  async startScan() {
+    if (this.child) {
+      return;
+    }
+
+    const helperPath = path.join(process.cwd(), "test_bluetooth_bluez_dbus.py");
+
+    const scanDurationSeconds = Math.max(
+      1,
+      Math.round(this.scanDurationMs / 1000)
+    );
+
+    const child = spawn("python3", [
+      helperPath,
+      "--duration",
+      String(scanDurationSeconds),
+      "--json",
+    ]);
+
+    this.child = child;
+    this.stdoutBuffer = "";
+
+    if (child.stdout) {
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        if (typeof chunk !== "string") {
+          return;
+        }
+
+        this.stdoutBuffer += chunk;
+
+        let newlineIndex = this.stdoutBuffer.indexOf("\n");
+
+        while (newlineIndex !== -1) {
+          const line = this.stdoutBuffer.slice(0, newlineIndex).trim();
+          this.stdoutBuffer = this.stdoutBuffer.slice(newlineIndex + 1);
+
+          if (line) {
+            this._handleJsonLine(line);
+          }
+
+          newlineIndex = this.stdoutBuffer.indexOf("\n");
+        }
+      });
+    }
+
+    if (child.stderr) {
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", () => {
+        // Ignore stderr output here; the helper already logs there.
+      });
+    }
+
+    child.on("close", () => {
+      this.child = null;
+      this.stdoutBuffer = "";
+    });
+  }
+
+  async stopScan() {
+    if (!this.child) {
+      return;
+    }
+
+    const child = this.child;
+    this.child = null;
+
+    try {
+      child.kill("SIGINT");
+    } catch {
+      // Ignore errors on kill
+    }
+  }
+
+  _handleJsonLine(line) {
+    let parsed;
+
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      return;
+    }
+
+    if (!parsed || typeof parsed !== "object") {
+      return;
+    }
+
+    const id = typeof parsed.id === "string" ? parsed.id : "";
+    const address = typeof parsed.address === "string" ? parsed.address : "";
+    const name = typeof parsed.name === "string" ? parsed.name : "";
+    const rssi = typeof parsed.rssi === "number" ? parsed.rssi : null;
+
+    const mdata = parsed.manufacturerData && typeof parsed.manufacturerData === "object"
+      ? parsed.manufacturerData
+      : {};
+
+    let manufacturerId = null;
+    let manufacturerDataHex = null;
+
+    const keys = Object.keys(mdata);
+    if (keys.length > 0) {
+      const key = keys[0];
+      const value = mdata[key];
+      if (typeof value === "string") {
+        manufacturerDataHex = value;
+      }
+
+      if (typeof key === "string" && key.startsWith("0x")) {
+        const parsedId = parseInt(key.substring(2), 16);
+        if (!Number.isNaN(parsedId)) {
+          manufacturerId = parsedId;
+        }
+      }
+    }
+
+    const device = {
+      id: id || address,
+      address,
+      name,
+      rssi,
+      manufacturerDataHex,
+      manufacturerId,
+    };
+
+    this.emit("device", device);
+  }
+}
+
+class MacBluetoothReaderPlugin extends EventEmitter {
+  constructor(options) {
+    super();
+
+    const { scanDurationMs } = options || {};
+    this.scanDurationMs = typeof scanDurationMs === "number" ? scanDurationMs : 10000;
+    this.initialized = false;
+    this.scanning = false;
+
+    this._onDiscover = this._onDiscover.bind(this);
+    this._onScanStart = this._onScanStart.bind(this);
+    this._onScanStop = this._onScanStop.bind(this);
+  }
+
+  async init() {
+    if (this.initialized) {
+      return;
+    }
+
+    noble.on("discover", this._onDiscover);
+    noble.on("scanStart", this._onScanStart);
+    noble.on("scanStop", this._onScanStop);
+
+    this.initialized = true;
+  }
+
+  async startScan() {
+    if (this.scanning) {
+      return;
+    }
+
+    const ensurePoweredOn = () => {
+      if (noble.state === "poweredOn") {
+        return Promise.resolve();
+      }
+
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          noble.removeListener("stateChange", handler);
+          reject(new Error("Bluetooth adapter initialization timed out"));
+        }, 10000);
+
+        const handler = (state) => {
+          if (state === "poweredOn") {
+            clearTimeout(timeout);
+            noble.removeListener("stateChange", handler);
+            resolve();
+          } else if (
+            state === "unsupported" ||
+            state === "unauthorized" ||
+            state === "poweredOff"
+          ) {
+            clearTimeout(timeout);
+            noble.removeListener("stateChange", handler);
+            reject(new Error(`Bluetooth not available: ${state}`));
+          }
+        };
+
+        noble.on("stateChange", handler);
+      });
+    };
+
+    await ensurePoweredOn();
+
+    this.scanning = true;
+
+    noble.startScanning([], true, (error) => {
+      if (error) {
+        this.scanning = false;
+        this.emit("error", error);
+      }
+    });
+  }
+
+  async stopScan() {
+    if (!this.scanning) {
+      return;
+    }
+
+    this.scanning = false;
+    noble.stopScanning();
+  }
+
+  _onDiscover(peripheral) {
+    if (!peripheral || typeof peripheral !== "object") {
+      return;
+    }
+
+    const id = typeof peripheral.id === "string" ? peripheral.id : "";
+    const address = typeof peripheral.address === "string" ? peripheral.address : "";
+    const name =
+      peripheral.advertisement &&
+      typeof peripheral.advertisement.localName === "string"
+        ? peripheral.advertisement.localName
+        : "";
+    const rssi = typeof peripheral.rssi === "number" ? peripheral.rssi : null;
+
+    let manufacturerDataHex = null;
+    let manufacturerId = null;
+
+    if (
+      peripheral.advertisement &&
+      Buffer.isBuffer(peripheral.advertisement.manufacturerData) &&
+      peripheral.advertisement.manufacturerData.length >= 2
+    ) {
+      const buf = peripheral.advertisement.manufacturerData;
+      manufacturerDataHex = buf.toString("hex");
+      manufacturerId = buf.readUInt16LE(0);
+    }
+
+    const device = {
+      id: id || address,
+      address,
+      name,
+      rssi,
+      manufacturerDataHex,
+      manufacturerId,
+    };
+
+    this.emit("device", device);
+  }
+
+  _onScanStart() {
+    this.scanning = true;
+    this.emit("scanStart");
+  }
+
+  _onScanStop() {
+    this.scanning = false;
+    this.emit("scanStop");
+  }
+}
 
 /**
  * Bluetooth Service for managing BLE device discovery and communication
@@ -139,6 +415,12 @@ export class BluetoothService extends ContinuousService {
   companyMap = new Map();
 
   /**
+   * PiBluetoothReaderPlugin instance for Linux
+   * @type {PiBluetoothReaderPlugin|null}
+   */
+  btReader = null;
+
+  /**
    * Create a new BluetoothService instance
    * @param {Object} [options] - Configuration options
    * @param {number} [options.scanDuration] - Duration of each scan in ms (default: 10000)
@@ -217,6 +499,26 @@ export class BluetoothService extends ContinuousService {
     this.lastDbUpdateTime = Date.now();
     this.dbUpdateInterval = 5000; // Update database every 5 seconds
 
+    if (process.platform === "linux") {
+      this.btReader = new PiBluetoothReaderPlugin({
+        scanDurationMs: this.scanDuration,
+      });
+    } else if (process.platform === "darwin") {
+      this.btReader = new MacBluetoothReaderPlugin({
+        scanDurationMs: this.scanDuration,
+      });
+    } else {
+      this.btReader = null;
+    }
+
+    if (this.btReader) {
+      this.btReader.on("device", (device) => {
+        this._handleNormalizedDevice(device).catch((error) => {
+          this.log(`Error handling normalized device: ${error.message}`, "error");
+        });
+      });
+    }
+
     // Initialize event handlers with proper binding
     this._onDiscover = (peripheral) => this._handleDeviceDiscovery(peripheral);
     this._onStateChange = (state) => this._handleStateChange(state);
@@ -250,8 +552,13 @@ export class BluetoothService extends ContinuousService {
     }
 
     try {
-      await this._initNoble();
-      await this._startScanCycle();
+      if (this.btReader) {
+        await this.btReader.init();
+        await this._startScanCycle();
+      } else {
+        await this._initNoble();
+        await this._startScanCycle();
+      }
     } catch (error) {
       this.logError(`Error starting Bluetooth scanning: ${error.message}`);
       this.emit("error", error);
@@ -443,8 +750,10 @@ export class BluetoothService extends ContinuousService {
         this.scanTimer = null;
       }
 
-      // Clean up noble
-      this._removeNobleListeners();
+      // Clean up noble if we are using the noble backend directly
+      if (!this.btReader) {
+        this._removeNobleListeners();
+      }
 
       this.isRunning = false;
       this.emit("stopped");
@@ -798,9 +1107,15 @@ export class BluetoothService extends ContinuousService {
     this.log(`Scan complete. Discovered ${this.deviceUpdates ? this.deviceUpdates.size : 0} devices in this scan cycle.`);
     
     try {
-      this.log("Calling noble.stopScanning()", "debug");
-      noble.stopScanning();
-      // The global 'scanStop' handler (_handleScanStop) will take care of the rest.
+      if (this.btReader && process.platform === "linux") {
+        this.log("Calling btReader.stopScan()", "debug");
+        await this.btReader.stopScan();
+        // On Pi, the scan cycle timing controls when _handleScanStop runs.
+      } else {
+        this.log("Calling noble.stopScanning()", "debug");
+        noble.stopScanning();
+        // The global 'scanStop' handler (_handleScanStop) will take care of the rest.
+      }
     } catch (error) {
       this.logError(`Native error during noble.stopScanning(): ${error.message}`);
       // If stopping fails, we should probably reset the state manually
@@ -826,37 +1141,42 @@ export class BluetoothService extends ContinuousService {
     this.isStarting = true;
     this.isStopping = false;
 
-    if (!noble) {
-      this.logError("Noble module is not available");
-      this.isStarting = false; // Reset lock
-      return;
-    }
-
-    if (noble.state !== "poweredOn") {
-      this.log(
-        `Waiting for Bluetooth to be powered on (current state: ${noble.state})`,
-        "debug"
-      );
-      this.isStarting = false; // Release lock while we wait
-      noble.once("stateChange", (state) => {
-        if (state === "poweredOn") {
-          this._startScan(); // Re-call to try again
-        } else {
-          this.log(`Bluetooth state changed to ${state}, not starting scan.`);
-        }
-      });
-      return;
-    }
-
-    this.log("Starting BLE scan...", "debug");
-
     try {
-      noble.startScanning([], true, (error) => {
-        if (error) {
-          this.logError(`Error during scan: ${error.message}`);
-          this.emit("error", error);
+      if (this.btReader && process.platform === "linux") {
+        this.log("Starting BLE scan via btReader (Pi backend)...", "debug");
+        await this.btReader.startScan();
+      } else {
+        if (!noble) {
+          this.logError("Noble module is not available");
+          this.isStarting = false; // Reset lock
+          return;
         }
-      });
+
+        if (noble.state !== "poweredOn") {
+          this.log(
+            `Waiting for Bluetooth to be powered on (current state: ${noble.state})`,
+            "debug"
+          );
+          this.isStarting = false; // Release lock while we wait
+          noble.once("stateChange", (state) => {
+            if (state === "poweredOn") {
+              this._startScan(); // Re-call to try again
+            } else {
+              this.log(`Bluetooth state changed to ${state}, not starting scan.`);
+            }
+          });
+          return;
+        }
+
+        this.log("Starting BLE scan...", "debug");
+
+        noble.startScanning([], true, (error) => {
+          if (error) {
+            this.logError(`Error during scan: ${error.message}`);
+            this.emit("error", error);
+          }
+        });
+      }
 
       if (this.scanDuration > 0) {
         if (this.scanTimeout) clearTimeout(this.scanTimeout);
@@ -868,10 +1188,50 @@ export class BluetoothService extends ContinuousService {
         }, this.scanDuration);
       }
     } catch (error) {
-      this.logError(`Exception during noble.startScanning(): ${error.message}`);
+      this.logError(`Exception during scan start: ${error.message}`);
       this.isStarting = false; // Reset lock on catastrophic failure
       this.emit("error", error);
     }
+  }
+
+  /**
+   * Handle a normalized device object from a backend reader (e.g. PiBluetoothReaderPlugin)
+   * by converting it into a pseudo-peripheral and reusing _handleDeviceDiscovery.
+   * @param {Object} device - Normalized device info
+   * @private
+   */
+  async _handleNormalizedDevice(device) {
+    if (!device || typeof device !== "object") {
+      return;
+    }
+
+    const id = typeof device.id === "string" ? device.id : "";
+    const address = typeof device.address === "string" ? device.address : "";
+    const name = typeof device.name === "string" ? device.name : "";
+    const rssi = typeof device.rssi === "number" ? device.rssi : 0;
+    const manufacturerDataHex =
+      typeof device.manufacturerDataHex === "string"
+        ? device.manufacturerDataHex
+        : null;
+
+    const advertisement = {
+      localName: name,
+      txPowerLevel: null,
+      manufacturerData: manufacturerDataHex
+        ? Buffer.from(manufacturerDataHex, "hex")
+        : null,
+    };
+
+    const pseudoPeripheral = {
+      id: id || address,
+      address: address || id,
+      addressType: "public",
+      rssi,
+      advertisement,
+      state: "disconnected",
+    };
+
+    await this._handleDeviceDiscovery(pseudoPeripheral);
   }
 
   /**
