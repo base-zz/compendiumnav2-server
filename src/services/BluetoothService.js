@@ -1110,7 +1110,7 @@ export class BluetoothService extends ContinuousService {
       if (this.btReader && process.platform === "linux") {
         this.log("Calling btReader.stopScan()", "debug");
         await this.btReader.stopScan();
-        // On Pi, the scan cycle timing controls when _handleScanStop runs.
+        await this._handleScanStop();
       } else {
         this.log("Calling noble.stopScanning()", "debug");
         noble.stopScanning();
@@ -1144,6 +1144,8 @@ export class BluetoothService extends ContinuousService {
     try {
       if (this.btReader && process.platform === "linux") {
         this.log("Starting BLE scan via btReader (Pi backend)...", "debug");
+        this.scanning = true;
+        this.isStarting = false;
         await this.btReader.startScan();
       } else {
         if (!noble) {
