@@ -12,6 +12,8 @@ This is a standalone test tool; it does not talk to your Node app.
 
 import sys
 import time
+import argparse
+import json
 
 SCAN_DURATION_SECONDS = 15
 
@@ -62,14 +64,18 @@ class DeviceTracker:
 
         # ManufacturerData is a dict: {uint16: variant(byte array)}
         mfr_strs = []
+        mfr_dict = {}
         for m_id, payload in mdata.items():
             try:
                 # payload is a dbus Array of bytes
                 raw = bytes(payload)
                 hex_str = raw.hex().upper()
-                mfr_strs.append(f"0x{int(m_id):04X}:{hex_str}")
+                key_str = f"0x{int(m_id):04X}"
+                mfr_strs.append(f"{key_str}:{hex_str}")
+                mfr_dict[key_str] = hex_str
             except Exception:
-                mfr_strs.append(f"0x{int(m_id):04X}:(unreadable)")
+                key_str = f"0x{int(m_id):04X}"
+                mfr_strs.append(f"{key_str}:(unreadable)")
 
         key = addr or path
         first_seen = key not in self.devices
@@ -81,6 +87,7 @@ class DeviceTracker:
                 "name": name,
                 "rssi": rssi,
                 "manufacturer": mfr_strs,
+                "manufacturer_dict": mfr_dict,
             }
         else:
             # Update existing entry, preserving previously known address/name
@@ -92,6 +99,7 @@ class DeviceTracker:
                 entry["rssi"] = rssi
             if mfr_strs:
                 entry["manufacturer"] = mfr_strs
+                entry["manufacturer_dict"] = mfr_dict or entry.get("manufacturer_dict", {})
 
         if first_seen:
             print("Found device:")
@@ -135,6 +143,23 @@ def properties_changed_handler(bus, interface, changed, invalidated, path, track
 
 
 def main():
+    parser = argparse.ArgumentParser(description="BlueZ D-Bus BLE scanner")
+    parser.add_argument(
+        "--duration",
+        type=int,
+        help="Scan duration in seconds (overrides SCAN_DURATION_SECONDS)",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output one JSON object per discovered device on stdout",
+    )
+
+    args = parser.parse_args()
+
+    duration = args.duration if args.duration is not None else SCAN_DURATION_SECONDS
+    json_mode = bool(args.json)
+
     DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
 
@@ -205,10 +230,10 @@ def main():
         loop.quit()
         return False  # do not reschedule
 
-    # Schedule stop after SCAN_DURATION_SECONDS
-    GLib.timeout_add_seconds(SCAN_DURATION_SECONDS, stop_scan)
+    # Schedule stop after requested duration
+    GLib.timeout_add_seconds(duration, stop_scan)
 
-    print(f"Scanning for {SCAN_DURATION_SECONDS} seconds...\n")
+    print(f"Scanning for {duration} seconds...\n")
     start = time.time()
     try:
         loop.run()
@@ -218,6 +243,26 @@ def main():
     elapsed = time.time() - start
     print(f"Scan duration: {elapsed:.1f}s")
 
+    if json_mode:
+        # JSON output mode: one object per line
+        for key, info in tracker.devices.items():
+            addr = info.get("address") or ""
+            device_id = addr or info.get("path", key)
+            out = {
+                "id": device_id,
+                "address": addr,
+                "name": info.get("name"),
+                "rssi": info.get("rssi"),
+                "manufacturerData": info.get("manufacturer_dict", {}),
+            }
+            try:
+                print(json.dumps(out, separators=(",", ":")))
+            except Exception as e:
+                # If JSON serialization fails for some reason, fall back to a simple error line
+                sys.stderr.write(f"Failed to encode device {device_id} as JSON: {e}\n")
+        return
+
+    # Human-readable summary mode (default)
     if not tracker.devices:
         print("No devices discovered.")
     else:
