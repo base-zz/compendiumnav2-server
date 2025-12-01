@@ -4,12 +4,11 @@ import * as yaml from "js-yaml";
 import path from "path";
 import { fileURLToPath, URL } from "url";
 import { EventEmitter } from "events";
+import noble from "@abandonware/noble";
 import { ParserRegistry } from "../bluetooth/parsers/ParserRegistry.js";
 import { DeviceManager } from "../bluetooth/services/DeviceManager.js";
 import ParserFactory from "../bluetooth/parsers/ParserFactory.js";
 import ContinuousService from "./ContinuousService.js";
-
-let noble;
 
 console.log('[SERVICE] BluetoothService module loaded');
 

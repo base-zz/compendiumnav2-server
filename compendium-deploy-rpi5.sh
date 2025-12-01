@@ -402,11 +402,18 @@ install_dependencies() {
         return 1
     fi
 
-    # Ensure Bluetooth service is enabled and running on Raspberry Pi
+    # Ensure Bluetooth service is enabled, running, and controller is powered on (Raspberry Pi)
     if [ "$IS_RASPBERRY_PI" = true ]; then
         echo -e "${BLUE}Ensuring Bluetooth service is enabled and running...${NC}"
         run_with_sudo systemctl enable bluetooth || true
         run_with_sudo systemctl restart bluetooth || true
+
+        # Attempt to power on the Bluetooth controller non-interactively
+        # This is idempotent and safe even if already powered on
+        if command_exists bluetoothctl; then
+            echo -e "${BLUE}Ensuring Bluetooth controller is powered on...${NC}"
+            echo -e 'power on\nquit' | run_with_sudo bluetoothctl || true
+        fi
     fi
     
     # Install Node.js if needed
