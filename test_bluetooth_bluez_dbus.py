@@ -48,8 +48,9 @@ def get_adapter(bus, adapter_name="hci0"):
 
 
 class DeviceTracker:
-    def __init__(self):
+    def __init__(self, json_mode=False):
         self.devices = {}
+        self.json_mode = json_mode
 
     def handle_device(self, path, props):
         if DEVICE_INTERFACE not in props:
@@ -101,31 +102,48 @@ class DeviceTracker:
                 entry["manufacturer"] = mfr_strs
                 entry["manufacturer_dict"] = mfr_dict or entry.get("manufacturer_dict", {})
 
-        if first_seen:
-            print("Found device:")
+        # In JSON mode, output each device update immediately as a JSON line
+        if self.json_mode:
+            out = {
+                "id": addr or path,
+                "address": addr,
+                "name": name,
+                "rssi": rssi,
+                "manufacturerData": mfr_dict,
+            }
+            try:
+                print(json.dumps(out, separators=(",", ":")), flush=True)
+            except Exception as e:
+                sys.stderr.write(f"Failed to encode device as JSON: {e}\n")
         else:
-            print("Updated device:")
+            # Human-readable output
+            if first_seen:
+                print("Found device:")
+            else:
+                print("Updated device:")
 
-        print(f"  Path: {path}")
-        print(f"  Address: {addr or 'Unknown'}")
-        print(f"  Name: {name}")
-        print(f"  RSSI: {rssi if rssi is not None else 'N/A'}")
-        if mfr_strs:
-            print("  ManufacturerData:")
-            for entry in mfr_strs:
-                print(f"    {entry}")
-        print("")
+            print(f"  Path: {path}")
+            print(f"  Address: {addr or 'Unknown'}")
+            print(f"  Name: {name}")
+            print(f"  RSSI: {rssi if rssi is not None else 'N/A'}")
+            if mfr_strs:
+                print("  ManufacturerData:")
+                for entry in mfr_strs:
+                    print(f"    {entry}")
+            print("")
 
 
 def interfaces_added_handler(path, interfaces, tracker):
-    print("[HANDLER] InterfacesAdded for", path, "keys=", list(interfaces.keys()))
+    if not tracker.json_mode:
+        print("[HANDLER] InterfacesAdded for", path, "keys=", list(interfaces.keys()))
     tracker.handle_device(path, interfaces)
 
 
 def properties_changed_handler(bus, interface, changed, invalidated, path, tracker):
     if interface != DEVICE_INTERFACE:
         return
-    print("[HANDLER] PropertiesChanged for", path, "keys=", list(changed.keys()))
+    if not tracker.json_mode:
+        print("[HANDLER] PropertiesChanged for", path, "keys=", list(changed.keys()))
 
     # Fetch full current Device1 properties so we always have Address/Name/etc.
     try:
@@ -133,7 +151,7 @@ def properties_changed_handler(bus, interface, changed, invalidated, path, track
         props_iface = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
         full_dev_props = props_iface.GetAll(DEVICE_INTERFACE)
     except dbus.DBusException as e:
-        print("[HANDLER] Failed to GetAll for", path, "error=", e)
+        sys.stderr.write(f"[HANDLER] Failed to GetAll for {path} error= {e}\n")
         full_dev_props = {}
 
     merged = dict(full_dev_props)
@@ -163,7 +181,8 @@ def main():
     DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
 
-    print("Connecting to BlueZ over D-Bus...\n")
+    if not json_mode:
+        print("Connecting to BlueZ over D-Bus...\n")
 
     # Debug: log any signals we see from BlueZ so we can verify subscription.
     # Send to stderr so stdout can remain clean for JSON output.
@@ -185,15 +204,16 @@ def main():
 
     adapter_path = get_adapter(bus, "hci0")
     if not adapter_path:
-        print("Could not find Bluetooth adapter hci0 via D-Bus.")
+        sys.stderr.write("Could not find Bluetooth adapter hci0 via D-Bus.\n")
         sys.exit(1)
 
-    print(f"Using adapter: {adapter_path}\n")
+    if not json_mode:
+        print(f"Using adapter: {adapter_path}\n")
 
     adapter_obj = bus.get_object(BLUEZ_SERVICE_NAME, adapter_path)
     adapter = dbus.Interface(adapter_obj, ADAPTER_INTERFACE)
 
-    tracker = DeviceTracker()
+    tracker = DeviceTracker(json_mode=json_mode)
 
     # Connect signal handlers
     obj = bus.get_object(BLUEZ_SERVICE_NAME, "/")
@@ -218,27 +238,30 @@ def main():
 
     # Start discovery
     try:
-        print("Starting discovery (BLE + classic)...")
+        if not json_mode:
+            print("Starting discovery (BLE + classic)...")
         adapter.StartDiscovery()
     except dbus.DBusException as e:
-        print("Failed to start discovery:", e)
+        sys.stderr.write(f"Failed to start discovery: {e}\n")
         sys.exit(1)
 
     loop = GLib.MainLoop()
 
     def stop_scan():
-        print("\nStopping discovery and exiting...\n")
+        if not json_mode:
+            print("\nStopping discovery and exiting...\n")
         try:
             adapter.StopDiscovery()
         except dbus.DBusException as e:
-            print("Error stopping discovery:", e)
+            sys.stderr.write(f"Error stopping discovery: {e}\n")
         loop.quit()
         return False  # do not reschedule
 
     # Schedule stop after requested duration
     GLib.timeout_add_seconds(duration, stop_scan)
 
-    print(f"Scanning for {duration} seconds...\n")
+    if not json_mode:
+        print(f"Scanning for {duration} seconds...\n")
     start = time.time()
     try:
         loop.run()
@@ -246,25 +269,11 @@ def main():
         stop_scan()
 
     elapsed = time.time() - start
-    print(f"Scan duration: {elapsed:.1f}s")
+    if not json_mode:
+        print(f"Scan duration: {elapsed:.1f}s")
 
     if json_mode:
-        # JSON output mode: one object per line
-        for key, info in tracker.devices.items():
-            addr = info.get("address") or ""
-            device_id = addr or info.get("path", key)
-            out = {
-                "id": device_id,
-                "address": addr,
-                "name": info.get("name"),
-                "rssi": info.get("rssi"),
-                "manufacturerData": info.get("manufacturer_dict", {}),
-            }
-            try:
-                print(json.dumps(out, separators=(",", ":")))
-            except Exception as e:
-                # If JSON serialization fails for some reason, fall back to a simple error line
-                sys.stderr.write(f"Failed to encode device {device_id} as JSON: {e}\n")
+        # JSON was already output during scanning, nothing more to do
         return
 
     # Human-readable summary mode (default)

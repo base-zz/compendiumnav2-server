@@ -130,15 +130,24 @@ class PiBluetoothReaderPlugin extends EventEmitter {
     if (keys.length > 0) {
       const key = keys[0];
       const value = mdata[key];
-      if (typeof value === "string") {
-        manufacturerDataHex = value;
-      }
-
       if (typeof key === "string" && key.startsWith("0x")) {
         const parsedId = parseInt(key.substring(2), 16);
         if (!Number.isNaN(parsedId)) {
           manufacturerId = parsedId;
         }
+      }
+
+      if (typeof value === "string" && manufacturerId !== null) {
+        // BlueZ gives manufacturerData as payload bytes only, while our
+        // parsers expect a buffer that starts with the 2-byte little-endian
+        // manufacturerId followed by the payload (like noble does).
+        const idBuf = Buffer.alloc(2);
+        idBuf.writeUInt16LE(manufacturerId, 0);
+        const fullHex = idBuf.toString("hex") + value.toLowerCase();
+        manufacturerDataHex = fullHex;
+      } else if (typeof value === "string") {
+        // Fallback: no parsed manufacturerId, keep payload as-is.
+        manufacturerDataHex = value;
       }
     }
 
@@ -485,6 +494,7 @@ export class BluetoothService extends ContinuousService {
 
     this.parserRegistry = new ParserRegistry();
     this.deviceManager = new DeviceManager();
+    this.parserFactory = new ParserFactory();
     this.scanning = false;
     this.scanTimeout = null;
     this.scanTimer = null;
@@ -554,6 +564,26 @@ export class BluetoothService extends ContinuousService {
       await this._loadCompanyMap();
     } catch (error) {
       this.logError(`Error loading Bluetooth company map: ${error.message}`);
+    }
+
+    try {
+      if (this.parserFactory && this.parserRegistry) {
+        const parserMap = await this.parserFactory.loadAllParsers();
+        if (parserMap && typeof parserMap.forEach === "function") {
+          parserMap.forEach((parser, manufacturerId) => {
+            try {
+              this.registerParser(manufacturerId, parser);
+            } catch (error) {
+              this.log(
+                `Error registering parser for manufacturer ${manufacturerId}: ${error.message}`,
+                "error"
+              );
+            }
+          });
+        }
+      }
+    } catch (error) {
+      this.logError(`Error loading Bluetooth parsers: ${error.message}`);
     }
 
     try {
