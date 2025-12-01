@@ -358,6 +358,26 @@ export class PositionService extends ContinuousService {
       ? this._computeWindowStats(filteredDrift)
       : null;
 
+    // Derive a simple scatter threshold (e.g. 99th percentile) and filtered scatter stats
+    let scatterThresholdMeters = null;
+    let filteredScatter = null;
+    if (this._scatterWindow.length > 0) {
+      const sortedScatter = [...this._scatterWindow].sort((a, b) => a - b);
+      const idxScatter = Math.min(
+        sortedScatter.length - 1,
+        Math.floor(sortedScatter.length * 0.99),
+      );
+      scatterThresholdMeters = sortedScatter[idxScatter];
+      filteredScatter = this._scatterWindow.filter(
+        (r) => r <= scatterThresholdMeters,
+      );
+    }
+
+    const filteredScatterStats =
+      filteredScatter && filteredScatter.length
+        ? this._computeWindowStats(filteredScatter)
+        : null;
+
     console.log('[PositionService] drift diagnostics', {
       windowSize: this._driftWindow.length,
       driftWindow: windowDrift,
@@ -368,6 +388,8 @@ export class PositionService extends ContinuousService {
           ? 0
           : this._driftWindow.length - (filteredDrift ? filteredDrift.length : 0),
       scatterWindow: windowScatter,
+      scatterWindowFiltered: filteredScatterStats,
+      scatterThresholdMeters,
       center: {
         latitude: this._centerLat,
         longitude: this._centerLon,
@@ -381,6 +403,13 @@ export class PositionService extends ContinuousService {
           ? windowScatter.mean + 2 * windowScatter.std
           : windowScatter.mean;
 
+      const filteredRadius95Meters =
+        filteredScatterStats && Number.isFinite(filteredScatterStats.mean)
+          ? Number.isFinite(filteredScatterStats.std)
+            ? filteredScatterStats.mean + 2 * filteredScatterStats.std
+            : filteredScatterStats.mean
+          : null;
+
       const timestamp = new Date(nowTsMs).toISOString();
 
       const patch = [
@@ -389,6 +418,7 @@ export class PositionService extends ContinuousService {
           path: '/position/stability',
           value: {
             radius95Meters,
+            filteredRadius95Meters,
             meanRadiusMeters: windowScatter.mean,
             stdRadiusMeters: windowScatter.std,
             windowSize: this._driftWindow.length,
