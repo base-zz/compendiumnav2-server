@@ -55,6 +55,8 @@ export class PositionService extends ContinuousService {
     this._centerLat = null;
     this._centerLon = null;
     this._driftLastLogTime = 0;
+    this._driftWindow = [];
+    this._scatterWindow = [];
     
     this.log('Position service initialized');
   }
@@ -195,6 +197,10 @@ export class PositionService extends ContinuousService {
         );
         if (Number.isFinite(stepDistanceMeters)) {
           this._updateRunningStats(this._driftStats, stepDistanceMeters);
+          this._driftWindow.push(stepDistanceMeters);
+          if (this._driftWindow.length > 2000) {
+            this._driftWindow.shift();
+          }
         }
       }
 
@@ -208,6 +214,10 @@ export class PositionService extends ContinuousService {
         );
         if (Number.isFinite(radiusMeters)) {
           this._updateRunningStats(this._scatterStats, radiusMeters);
+          this._scatterWindow.push(radiusMeters);
+          if (this._scatterWindow.length > 2000) {
+            this._scatterWindow.shift();
+          }
         }
       }
 
@@ -330,29 +340,78 @@ export class PositionService extends ContinuousService {
 
     this._driftLastLogTime = nowTsMs;
 
-    const driftStd = this._getStdDev(this._driftStats);
-    const scatterStd = this._getStdDev(this._scatterStats);
+    // Compute window-based stats for the last N samples
+    const windowDrift = this._computeWindowStats(this._driftWindow);
+    const windowScatter = this._computeWindowStats(this._scatterWindow);
+
+    // Derive a simple teleport threshold from the drift window (e.g. 99th percentile)
+    let teleportThresholdMeters = null;
+    let filteredDrift = null;
+    if (this._driftWindow.length > 0) {
+      const sorted = [...this._driftWindow].sort((a, b) => a - b);
+      const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.99));
+      teleportThresholdMeters = sorted[idx];
+      filteredDrift = this._driftWindow.filter((d) => d <= teleportThresholdMeters);
+    }
+
+    const filteredDriftStats = filteredDrift && filteredDrift.length
+      ? this._computeWindowStats(filteredDrift)
+      : null;
 
     console.log('[PositionService] drift diagnostics', {
-      drift: {
-        count: this._driftStats.count,
-        meanMeters: this._driftStats.mean,
-        stdMeters: driftStd,
-        minMeters: this._driftStats.min,
-        maxMeters: this._driftStats.max,
-      },
-      scatter: {
-        count: this._scatterStats.count,
-        meanRadiusMeters: this._scatterStats.mean,
-        stdRadiusMeters: scatterStd,
-        minRadiusMeters: this._scatterStats.min,
-        maxRadiusMeters: this._scatterStats.max,
-      },
+      windowSize: this._driftWindow.length,
+      driftWindow: windowDrift,
+      driftWindowFiltered: filteredDriftStats,
+      teleportThresholdMeters,
+      teleportCount:
+        teleportThresholdMeters == null
+          ? 0
+          : this._driftWindow.length - (filteredDrift ? filteredDrift.length : 0),
+      scatterWindow: windowScatter,
       center: {
         latitude: this._centerLat,
         longitude: this._centerLon,
       },
     });
+  }
+
+  _computeWindowStats(values) {
+    if (!Array.isArray(values) || values.length === 0) {
+      return {
+        count: 0,
+        mean: null,
+        std: null,
+        min: null,
+        max: null,
+      };
+    }
+
+    let count = 0;
+    let mean = 0;
+    let M2 = 0;
+    let min = null;
+    let max = null;
+
+    for (const v of values) {
+      if (!Number.isFinite(v)) continue;
+      count += 1;
+      const delta = v - mean;
+      mean = mean + delta / count;
+      const delta2 = v - mean;
+      M2 = M2 + delta * delta2;
+      min = min === null ? v : Math.min(min, v);
+      max = max === null ? v : Math.max(max, v);
+    }
+
+    const std = count > 1 ? Math.sqrt(M2 / (count - 1)) : null;
+
+    return {
+      count,
+      mean,
+      std,
+      min,
+      max,
+    };
   }
 }
 export default PositionService;
