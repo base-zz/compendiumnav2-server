@@ -114,11 +114,23 @@ def interfaces_added_handler(path, interfaces, tracker):
     tracker.handle_device(path, interfaces)
 
 
-def properties_changed_handler(interface, changed, invalidated, path, tracker):
+def properties_changed_handler(bus, interface, changed, invalidated, path, tracker):
     if interface != DEVICE_INTERFACE:
         return
     print("[HANDLER] PropertiesChanged for", path, "keys=", list(changed.keys()))
-    props = {DEVICE_INTERFACE: dict(changed)}
+
+    # Fetch full current Device1 properties so we always have Address/Name/etc.
+    try:
+        obj = bus.get_object(BLUEZ_SERVICE_NAME, path)
+        props_iface = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
+        full_dev_props = props_iface.GetAll(DEVICE_INTERFACE)
+    except dbus.DBusException as e:
+        print("[HANDLER] Failed to GetAll for", path, "error=", e)
+        full_dev_props = {}
+
+    merged = dict(full_dev_props)
+    merged.update(dict(changed))
+    props = {DEVICE_INTERFACE: merged}
     tracker.handle_device(path, props)
 
 
@@ -166,7 +178,7 @@ def main():
 
     bus.add_signal_receiver(
         lambda interface, changed, invalidated, path: properties_changed_handler(
-            interface, changed, invalidated, path, tracker
+            bus, interface, changed, invalidated, path, tracker
         ),
         dbus_interface="org.freedesktop.DBus.Properties",
         signal_name="PropertiesChanged",
