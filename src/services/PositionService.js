@@ -35,6 +35,26 @@ export class PositionService extends ContinuousService {
     // Track dynamically discovered sources
     this._discoveredSources = new Set(); 
     this._onPositionUpdate = this._onPositionUpdate.bind(this);
+
+    // Drift & scatter diagnostics for self position when effectively stationary
+    this._prevPosition = null; // { latitude, longitude, timestamp }
+    this._driftStats = {
+      count: 0,
+      mean: 0,
+      M2: 0,
+      min: null,
+      max: null,
+    };
+    this._scatterStats = {
+      count: 0,
+      mean: 0,
+      M2: 0,
+      min: null,
+      max: null,
+    };
+    this._centerLat = null;
+    this._centerLon = null;
+    this._driftLastLogTime = 0;
     
     this.log('Position service initialized');
   }
@@ -158,6 +178,53 @@ export class PositionService extends ContinuousService {
       longitude: positionData.longitude,
       timestamp: timestamp
     };
+
+    // Drift & scatter diagnostics (self position noise over time)
+    const lat = positionData.latitude;
+    const lon = positionData.longitude;
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      const nowMs = Date.parse(timestamp) || Date.now();
+
+      // Step drift: distance between successive samples
+      if (this._prevPosition && Number.isFinite(this._prevPosition.latitude) && Number.isFinite(this._prevPosition.longitude)) {
+        const stepDistanceMeters = this._haversineDistanceMeters(
+          this._prevPosition.latitude,
+          this._prevPosition.longitude,
+          lat,
+          lon,
+        );
+        if (Number.isFinite(stepDistanceMeters)) {
+          this._updateRunningStats(this._driftStats, stepDistanceMeters);
+        }
+      }
+
+      // Scatter around centroid: distance from current point to running center
+      if (Number.isFinite(this._centerLat) && Number.isFinite(this._centerLon)) {
+        const radiusMeters = this._haversineDistanceMeters(
+          this._centerLat,
+          this._centerLon,
+          lat,
+          lon,
+        );
+        if (Number.isFinite(radiusMeters)) {
+          this._updateRunningStats(this._scatterStats, radiusMeters);
+        }
+      }
+
+      // Update centroid (running mean of lat/lon using scatter sample count)
+      if (!Number.isFinite(this._centerLat) || !Number.isFinite(this._centerLon)) {
+        this._centerLat = lat;
+        this._centerLon = lon;
+      } else {
+        const n = (this._scatterStats && this._scatterStats.count ? this._scatterStats.count : 0) + 1;
+        this._centerLat = this._centerLat + (lat - this._centerLat) / n;
+        this._centerLon = this._centerLon + (lon - this._centerLon) / n;
+      }
+
+      this._prevPosition = { latitude: lat, longitude: lon, timestamp };
+
+      this._maybeLogDriftStats(nowMs);
+    }
     
     // Create JSON Patch format (RFC 6902) expected by StateManager
     // Store position data by source in the top-level position object
@@ -195,6 +262,97 @@ export class PositionService extends ContinuousService {
       source: sourceName,
     });
   }
-}
 
+  _updateRunningStats(stats, x) {
+    if (!stats || !Number.isFinite(x)) return;
+
+    const count = stats.count || 0;
+    const mean = stats.mean || 0;
+    const M2 = stats.M2 || 0;
+
+    const newCount = count + 1;
+    const delta = x - mean;
+    const newMean = mean + delta / newCount;
+    const delta2 = x - newMean;
+    const newM2 = M2 + delta * delta2;
+
+    stats.count = newCount;
+    stats.mean = newMean;
+    stats.M2 = newM2;
+    stats.min = stats.min === null ? x : Math.min(stats.min, x);
+    stats.max = stats.max === null ? x : Math.max(stats.max, x);
+  }
+
+  _getStdDev(stats) {
+    if (!stats || !Number.isFinite(stats.count) || stats.count < 2) return null;
+    return Math.sqrt(stats.M2 / (stats.count - 1));
+  }
+
+  _haversineDistanceMeters(lat1, lon1, lat2, lon2) {
+    if (
+      !Number.isFinite(lat1) ||
+      !Number.isFinite(lon1) ||
+      !Number.isFinite(lat2) ||
+      !Number.isFinite(lon2)
+    ) {
+      return null;
+    }
+
+    const R = 6371000; // meters
+    const toRad = (deg) => (deg * Math.PI) / 180;
+
+    const phi1 = toRad(lat1);
+    const phi2 = toRad(lat2);
+    const dPhi = toRad(lat2 - lat1);
+    const dLambda = toRad(lon2 - lon1);
+
+    const a =
+      Math.sin(dPhi / 2) * Math.sin(dPhi / 2) +
+      Math.cos(phi1) * Math.cos(phi2) *
+        Math.sin(dLambda / 2) * Math.sin(dLambda / 2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c;
+  }
+
+  _maybeLogDriftStats(nowTsMs) {
+    const LOG_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+    if (!Number.isFinite(nowTsMs)) return;
+
+    if (
+      this._driftLastLogTime &&
+      nowTsMs - this._driftLastLogTime < LOG_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    this._driftLastLogTime = nowTsMs;
+
+    const driftStd = this._getStdDev(this._driftStats);
+    const scatterStd = this._getStdDev(this._scatterStats);
+
+    console.log('[PositionService] drift diagnostics', {
+      drift: {
+        count: this._driftStats.count,
+        meanMeters: this._driftStats.mean,
+        stdMeters: driftStd,
+        minMeters: this._driftStats.min,
+        maxMeters: this._driftStats.max,
+      },
+      scatter: {
+        count: this._scatterStats.count,
+        meanRadiusMeters: this._scatterStats.mean,
+        stdRadiusMeters: scatterStd,
+        minRadiusMeters: this._scatterStats.min,
+        maxRadiusMeters: this._scatterStats.max,
+      },
+      center: {
+        latitude: this._centerLat,
+        longitude: this._centerLon,
+      },
+    });
+  }
+}
 export default PositionService;
