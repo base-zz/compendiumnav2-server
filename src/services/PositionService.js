@@ -386,7 +386,7 @@ export class PositionService extends ContinuousService {
       const patch = [
         {
           op: 'add',
-          path: '/positionStability',
+          path: '/position/stability',
           value: {
             radius95Meters,
             meanRadiusMeters: windowScatter.mean,
