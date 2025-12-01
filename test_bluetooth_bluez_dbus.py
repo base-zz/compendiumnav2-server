@@ -135,7 +135,7 @@ def main():
         debug_signal_handler,
         dbus_interface=None,
         signal_name=None,
-        sender=BLUEZ_SERVICE_NAME,
+        bus_name=BLUEZ_SERVICE_NAME,
         path_keyword="path",
     )
 
