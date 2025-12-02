@@ -192,10 +192,6 @@ export class ClientSyncCoordinator {
 
     if (normalized.type === 'anchor:update') {
       try {
-        console.log(
-          '[ClientSyncCoordinator] Received anchor:update message',
-          JSON.stringify(normalized)
-        );
         const success = this.stateManager.updateAnchorState(normalized);
         respondFn({
           type: 'anchor:update:ack',
@@ -217,10 +213,6 @@ export class ClientSyncCoordinator {
 
     if (normalized.type === 'anchor:reset') {
       try {
-        console.log(
-          '[ClientSyncCoordinator] Received anchor:reset message',
-          JSON.stringify(normalized)
-        );
         const success = this.stateManager.resetAnchorState();
         respondFn({
           type: 'anchor:reset:ack',
