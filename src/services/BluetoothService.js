@@ -160,7 +160,6 @@ class PiBluetoothReaderPlugin extends EventEmitter {
       manufacturerId,
     };
 
-    console.log("[BT] Pi plugin emitting device:", device);
     this.emit("device", device);
   }
 }
