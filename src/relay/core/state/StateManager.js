@@ -797,6 +797,28 @@ export class StateManager extends EventEmitter {
     }
   }
 
+  /**
+   * Reset the anchor state back to the default model definition.
+   * This is intended to be called when the client retrieves the anchor
+   * ("anchor:reset" message), so the server becomes the single source
+   * of truth for all anchor-derived fields again.
+   */
+  resetAnchorState() {
+    try {
+      const freshModel = createStateDataModel(UNIT_PRESETS.IMPERIAL);
+      const freshAnchor = this._safeClone(freshModel.anchor);
+
+      const patch = [{ op: "replace", path: "/anchor", value: freshAnchor }];
+      this.applyPatchAndForward(patch);
+
+      this.log("[StateManager][resetAnchorState] Anchor state reset to default model");
+      return true;
+    } catch (error) {
+      this.logError("[StateManager][resetAnchorState] Error resetting anchor state:", error);
+      return false;
+    }
+  }
+
   _runStateHelpers(patchOps) {
     const hasPatchOps = Array.isArray(patchOps);
 
@@ -811,12 +833,26 @@ export class StateManager extends EventEmitter {
         )
       : true;
 
+    // For quick troubleshooting without DEBUG noise, log when anchor-related
+    // patches are processed. This avoids logging for high-frequency
+    // /position-only updates.
+    const hasAnchorPatch = hasPatchOps
+      ? patchOps.some((op) =>
+          typeof op.path === "string" && op.path.startsWith("/anchor")
+        )
+      : false;
+
     if (anchorRelevant) {
       logState(
         `[StateManager][_runStateHelpers] Running anchor helper (hasPatchOps=${hasPatchOps})`
       );
       const updatedAnchor = recomputeAnchorDerivedState(this.appState);
       if (updatedAnchor) {
+        if (hasAnchorPatch) {
+          console.log(
+            "[StateManager][_runStateHelpers] Anchor helper updated anchor state after anchor patch"
+          );
+        }
         logState(
           "[StateManager][_runStateHelpers] Anchor helper produced updated anchor state"
         );

@@ -211,6 +211,26 @@ export class ClientSyncCoordinator {
       return true;
     }
 
+    if (normalized.type === 'anchor:reset') {
+      try {
+        const success = this.stateManager.resetAnchorState();
+        respondFn({
+          type: 'anchor:reset:ack',
+          success,
+          timestamp: Date.now(),
+        });
+      } catch (error) {
+        logError('Error processing anchor reset:', error);
+        respondFn({
+          type: 'anchor:reset:ack',
+          success: false,
+          error: error.message,
+          timestamp: Date.now(),
+        });
+      }
+      return true;
+    }
+
     if (typeof normalized.type === 'string' && normalized.type.startsWith('bluetooth:')) {
       return this._handleBluetoothCommand(normalized, respondFn);
     }
