@@ -6,6 +6,7 @@
  */
 
 import { AlertRules } from './alertRules.js';
+import { AnchorRules } from './anchorRules.js';
 
 // Import future rule domains here
 // import { NavigationRules } from './navigationRules.js';
@@ -17,8 +18,9 @@ import { AlertRules } from './alertRules.js';
  * for evaluating all rules across different domains
  */
 export const AllRules = [
-  ...AlertRules,  // Contains anchor alert rules (critical range, dragging, AIS proximity)
-  
+  ...AlertRules,
+  ...AnchorRules,
+
   // Add future rule domains here
   // ...NavigationRules,
   // ...WeatherRules,

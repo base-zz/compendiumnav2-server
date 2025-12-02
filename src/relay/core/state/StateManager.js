@@ -6,6 +6,7 @@ import storageService from "../../../bluetooth/services/storage/storageService.j
 import { RuleEngine2 } from "./ruleEngine2.js";
 import { getRules } from "./allRules2.js";
 import { AlertService } from "../services/AlertService.js";
+import { recomputeAnchorDerivedState } from "./anchorStateHelpers.js";
 import { getOrCreateAppUuid } from "../../../server/uniqueAppId.js";
 import { defaultProfile } from "../../../config/profiles.js";
 import { UNIT_PRESETS } from "../../../shared/unitPreferences.js";
@@ -426,6 +427,10 @@ export class StateManager extends EventEmitter {
       }
       sanitizedPatch = applySafely(currentState, sanitizedPatch);
 
+      // Run state helpers (e.g., anchor derived state) after the patch has been
+      // fully applied to appState, so helpers see the latest snapshot.
+      this._runStateHelpers(sanitizedPatch);
+
       // Convert patch to a change object and notify the rule engine
       const changes = this._convertPatchToStateChanges(
         sanitizedPatch,
@@ -611,6 +616,10 @@ export class StateManager extends EventEmitter {
   setFullState(data) {
     if (!data) return;
     this.appState = this._safeClone(data);
+
+    // Normalize any derived state after a full replacement
+    this._runStateHelpers(null);
+
     this.emit("state:full-update", {
       type: "state:full-update",
       data: this.appState,
@@ -763,8 +772,14 @@ export class StateManager extends EventEmitter {
     }
 
     try {
-      // Create a patch to update the anchor state
-      const patch = [{ op: "replace", path: "/anchor", value: anchorData }];
+      // Merge incoming anchor data into existing anchor state so that
+      // server-maintained fields (e.g., history, derived distances) are
+      // preserved and then recomputed by helpers.
+      const currentAnchor = this.appState?.anchor || {};
+      const mergedAnchor = this._deepMergeAnchor(currentAnchor, anchorData);
+
+      // Create a patch to update the anchor state with the merged result
+      const patch = [{ op: "replace", path: "/anchor", value: mergedAnchor }];
 
       // Apply the patch using our existing method
       this.applyPatchAndForward(patch);
@@ -780,6 +795,68 @@ export class StateManager extends EventEmitter {
       this.emit("error:anchor-update", { error, anchorData });
       return false;
     }
+  }
+
+  _runStateHelpers(patchOps) {
+    const hasPatchOps = Array.isArray(patchOps);
+
+    // Anchor helper: only run when relevant paths change, or always for
+    // full-state updates where patchOps is null.
+    const anchorRelevant = hasPatchOps
+      ? patchOps.some((op) =>
+          typeof op.path === "string" &&
+          (op.path.startsWith("/anchor") ||
+            op.path.startsWith("/position") ||
+            op.path.startsWith("/ais"))
+        )
+      : true;
+
+    if (anchorRelevant) {
+      logState(
+        `[StateManager][_runStateHelpers] Running anchor helper (hasPatchOps=${hasPatchOps})`
+      );
+      const updatedAnchor = recomputeAnchorDerivedState(this.appState);
+      if (updatedAnchor) {
+        logState(
+          "[StateManager][_runStateHelpers] Anchor helper produced updated anchor state"
+        );
+        this.appState.anchor = updatedAnchor;
+      } else {
+        logState(
+          "[StateManager][_runStateHelpers] Anchor helper made no changes to anchor state"
+        );
+      }
+    }
+  }
+
+  _deepMergeAnchor(target, source) {
+    if (!source || typeof source !== "object") {
+      return target || {};
+    }
+
+    const result = { ...(target || {}) };
+
+    Object.keys(source).forEach((key) => {
+      const sourceValue = source[key];
+      const targetValue = result[key];
+
+      if (
+        sourceValue &&
+        typeof sourceValue === "object" &&
+        !Array.isArray(sourceValue) &&
+        targetValue &&
+        typeof targetValue === "object" &&
+        !Array.isArray(targetValue)
+      ) {
+        // Recursively merge nested objects
+        result[key] = this._deepMergeAnchor(targetValue, sourceValue);
+      } else {
+        // Primitive values and arrays overwrite existing values
+        result[key] = sourceValue;
+      }
+    });
+
+    return result;
   }
 
   /**
