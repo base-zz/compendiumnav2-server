@@ -527,7 +527,6 @@ export class BluetoothService extends ContinuousService {
 
     if (this.btReader) {
       this.btReader.on("device", (device) => {
-        console.log("[BT] BluetoothService received normalized device:", device);
         this._handleNormalizedDevice(device).catch((error) => {
           this.log(`Error handling normalized device: ${error.message}`, "error");
         });
