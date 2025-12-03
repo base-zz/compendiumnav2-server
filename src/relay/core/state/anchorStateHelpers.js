@@ -253,15 +253,17 @@ export function recomputeAnchorDerivedState(appState) {
   }
 
   // --- AIS proximity status (aisWarning) ---
-  const aisTargets = appState.ais?.targets || [];
+  const aisTargetsArray = Array.isArray(appState.ais?.targets)
+    ? appState.ais.targets
+    : Object.values(appState.aisTargets || {});
 
-  if (warningRadius != null && Array.isArray(aisTargets) && aisTargets.length > 0) {
-    // Use anchor location as the reference for AIS proximity checks
-    const refLat = anchorLat != null ? anchorLat : dropLat;
-    const refLon = anchorLon != null ? anchorLon : dropLon;
+  if (warningRadius != null && Array.isArray(aisTargetsArray) && aisTargetsArray.length > 0) {
+    // Use boat position as the reference for AIS proximity checks
+    const refLat = boatLat;
+    const refLon = boatLon;
 
     if (refLat != null && refLon != null) {
-      const targetsInRange = aisTargets.filter((target) => {
+      const targetsInRange = aisTargetsArray.filter((target) => {
         const tPos = target?.position;
         if (!tPos) return false;
 

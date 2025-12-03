@@ -177,22 +177,24 @@ export const AnchorRules = [
         return false;
       }
 
-      const aisTargets = state.ais?.targets || [];
+      const aisTargetsArray = Array.isArray(state.ais?.targets)
+        ? state.ais.targets
+        : Object.values(state.aisTargets || {});
       const warningRadius = anchorState.warningRange?.r || 15;
-      const anchorPosition = anchorState.anchorLocation?.position;
+      const boatPosition = state.position || {};
 
-      if (!warningRadius || !anchorPosition || !aisTargets.length) {
+      if (!warningRadius || !boatPosition || !aisTargetsArray.length) {
         return false;
       }
 
-      const targetsInRange = aisTargets.filter((target) => {
+      const targetsInRange = aisTargetsArray.filter((target) => {
         if (!target.position) return false;
 
         const distance = calculateDistance(
           target.position.latitude,
           target.position.longitude,
-          anchorPosition.latitude,
-          anchorPosition.longitude
+          boatPosition.latitude,
+          boatPosition.longitude
         );
 
         return distance <= warningRadius;
@@ -202,26 +204,38 @@ export const AnchorRules = [
         (alert) => alert.trigger === 'ais_proximity' && !alert.acknowledged
       );
 
+      console.log('[AIS Proximity Detection] eval', {
+        anchorDeployed: !!anchorState.anchorDeployed,
+        warningRadius,
+        boatLat: boatPosition.latitude,
+        boatLon: boatPosition.longitude,
+        aisTargetsCount: aisTargetsArray.length,
+        targetsInRange: targetsInRange.length,
+        hasActiveAlert,
+      });
+
       return targetsInRange.length > 0 && !hasActiveAlert;
     },
     action: {
       type: 'CREATE_ALERT',
       alertData: (state) => {
         const anchorState = state.anchor || {};
-        const aisTargets = state.ais?.targets || [];
+        const aisTargetsArray = Array.isArray(state.ais?.targets)
+          ? state.ais.targets
+          : Object.values(state.aisTargets || {});
         const warningRadius = anchorState.warningRange?.r || 15;
-        const anchorPosition = anchorState.anchorLocation?.position;
+        const boatPosition = state.position || {};
         const isMetric = state.units?.distance === 'meters';
         const unitLabel = isMetric ? 'm' : 'ft';
 
-        const targetsInRange = aisTargets.filter((target) => {
+        const targetsInRange = aisTargetsArray.filter((target) => {
           if (!target.position) return false;
 
           const distance = calculateDistance(
             target.position.latitude,
             target.position.longitude,
-            anchorPosition.latitude,
-            anchorPosition.longitude
+            boatPosition.latitude,
+            boatPosition.longitude
           );
 
           return distance <= warningRadius;
@@ -313,20 +327,22 @@ export const AnchorRules = [
       );
 
       const anchorState = state.anchor || {};
-      const aisTargets = state.ais?.targets || [];
+      const aisTargetsArray = Array.isArray(state.ais?.targets)
+        ? state.ais.targets
+        : Object.values(state.aisTargets || {});
       const warningRadius = anchorState.warningRange?.r;
-      const anchorPosition = anchorState.anchorLocation?.position;
+      const boatPosition = state.position || {};
 
-      if (!hasActiveAlerts || !warningRadius || !anchorPosition || !aisTargets.length) {
+      if (!hasActiveAlerts || !warningRadius || !boatPosition || !aisTargetsArray.length) {
         return false;
       }
 
-      const targetsInRange = aisTargets.filter((target) => {
+      const targetsInRange = aisTargetsArray.filter((target) => {
         const distance = calculateDistance(
           target.position.latitude,
           target.position.longitude,
-          anchorPosition.latitude,
-          anchorPosition.longitude
+          boatPosition.latitude,
+          boatPosition.longitude
         );
 
         return distance <= warningRadius;
