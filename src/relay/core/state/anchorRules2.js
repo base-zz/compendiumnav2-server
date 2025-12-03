@@ -128,11 +128,19 @@ export const anchorRules = [
         return false;
       }
 
+      // dropPosition.latitude/longitude may be objects with .value or plain numbers
+      const dropLat = typeof dropPosition.latitude === 'object' ? dropPosition.latitude?.value : dropPosition.latitude;
+      const dropLon = typeof dropPosition.longitude === 'object' ? dropPosition.longitude?.value : dropPosition.longitude;
+
+      if (dropLat == null || dropLon == null) {
+        return false;
+      }
+
       const distance = calculateDistance(
         boatLat,
         boatLon,
-        dropPosition.latitude,
-        dropPosition.longitude
+        dropLat,
+        dropLon
       );
 
       console.log('[Rule][Critical Range Detection] evaluating', {
@@ -169,11 +177,14 @@ export const anchorRules = [
       const isMetric = state.units?.distance === 'meters';
       const unitLabel = isMetric ? 'm' : 'ft';
 
+      const dropLat = typeof dropPosition.latitude === 'object' ? dropPosition.latitude?.value : dropPosition.latitude;
+      const dropLon = typeof dropPosition.longitude === 'object' ? dropPosition.longitude?.value : dropPosition.longitude;
+
       const distance = calculateDistance(
         boatLat,
         boatLon,
-        dropPosition.latitude,
-        dropPosition.longitude
+        dropLat,
+        dropLon
       );
 
       return {
@@ -233,11 +244,18 @@ export const anchorRules = [
         return false;
       }
 
+      const dropLat = typeof dropPosition.latitude === 'object' ? dropPosition.latitude?.value : dropPosition.latitude;
+      const dropLon = typeof dropPosition.longitude === 'object' ? dropPosition.longitude?.value : dropPosition.longitude;
+
+      if (dropLat == null || dropLon == null) {
+        return false;
+      }
+
       const distance = calculateDistance(
         boatLat,
         boatLon,
-        dropPosition.latitude,
-        dropPosition.longitude
+        dropLat,
+        dropLon
       );
 
       const hasActiveAlert = state.alerts?.active?.some(
@@ -269,11 +287,14 @@ export const anchorRules = [
       const isMetric = state.units?.distance === 'meters';
       const unitLabel = isMetric ? 'm' : 'ft';
 
+      const dropLat = typeof dropPosition.latitude === 'object' ? dropPosition.latitude?.value : dropPosition.latitude;
+      const dropLon = typeof dropPosition.longitude === 'object' ? dropPosition.longitude?.value : dropPosition.longitude;
+
       const distance = calculateDistance(
         boatLat,
         boatLon,
-        dropPosition.latitude,
-        dropPosition.longitude
+        dropLat,
+        dropLon
       );
 
       return {
