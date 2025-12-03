@@ -167,8 +167,31 @@ export class RuleEngine2 extends EventEmitter {
     this.lastEvaluation = Date.now();
     this.stats.evaluations++;
 
-    // Get current state from cache
-    const state = Object.fromEntries(this.stateCache);
+    // Get current state from cache and reconstruct nested paths
+    const flatEntries = Array.from(this.stateCache.entries());
+    const state = {};
+
+    for (const [path, value] of flatEntries) {
+      if (typeof path !== 'string' || !path.length) {
+        continue;
+      }
+
+      const segments = path.split('.');
+      let cursor = state;
+
+      for (let i = 0; i < segments.length; i++) {
+        const key = segments[i];
+
+        if (i === segments.length - 1) {
+          cursor[key] = value;
+        } else {
+          if (!cursor[key] || typeof cursor[key] !== 'object') {
+            cursor[key] = {};
+          }
+          cursor = cursor[key];
+        }
+      }
+    }
     
     // Evaluate each rule
     const actions = [];
