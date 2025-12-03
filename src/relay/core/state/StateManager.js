@@ -738,6 +738,11 @@ export class StateManager extends EventEmitter {
       this.appState.bluetooth = currentBluetoothState;
     }
 
+    // Forward aisTargets to the rule engine so AIS proximity rules can evaluate
+    if (newStateData.aisTargets && Object.keys(newStateData.aisTargets).length > 0) {
+      this.ruleEngine.updateState({ aisTargets: newStateData.aisTargets });
+    }
+
     // Emit the updated state to clients. The emitFullState method itself will decide if it should run.
     this.emitFullState();
   }
