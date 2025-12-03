@@ -481,13 +481,6 @@ export const anchorRules = [
       const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
 
       if (!hasActiveAlerts || !warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
-        console.log('[Rule][AIS Proximity Resolution] guard failed', {
-          hasActiveAlerts,
-          warningRadius,
-          boatLat,
-          boatLon,
-          aisTargetCount: Array.isArray(aisTargetsArray) ? aisTargetsArray.length : 0,
-        });
         return false;
       }
 
