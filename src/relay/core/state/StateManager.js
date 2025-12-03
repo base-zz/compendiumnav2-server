@@ -987,10 +987,20 @@ export class StateManager extends EventEmitter {
         break;
       case "CREATE_ALERT":
         this.alertService.createAlert(action.data);
+        // Forward alerts state to rule engine so rules can check for active alerts
+        this._syncAlertsToRuleEngine();
         break;
       case "RESOLVE_ALERT":
         this.alertService.resolveAlertsByTrigger(action.trigger, action.data);
+        // Forward alerts state to rule engine so rules can check for active alerts
+        this._syncAlertsToRuleEngine();
         break;
+    }
+  }
+
+  _syncAlertsToRuleEngine() {
+    if (this.appState.alerts) {
+      this.ruleEngine.updateState({ alerts: this.appState.alerts });
     }
   }
 
