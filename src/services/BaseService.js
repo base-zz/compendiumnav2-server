@@ -65,6 +65,19 @@ class BaseService extends EventEmitter {
       this.emit(`service:${this.name}:starting`);
       this.log('Starting service');
 
+      // WARNING: For weather and tidal services, ensure StateManager listeners are set up BEFORE start
+      // These services emit initial data immediately (weather:update, tide:update)
+      if ((this.name === 'weather' || this.name === 'tidal') && this.serviceManager) {
+        const stateManager = this.serviceManager.getService('state');
+        if (stateManager && typeof stateManager.listenerCount === 'function') {
+          const listenerCount = stateManager.listenerCount('weather:update') + stateManager.listenerCount('tide:update');
+          if (listenerCount === 0) {
+            console.warn(`\n⚠️  WARNING: ${this.name} service starting but StateManager has no weather/tide listeners!`);
+            console.warn(`   Initial data will be missed. Ensure stateManager.listenToService() is called BEFORE service.start()\n`);
+          }
+        }
+      }
+
       // Wait for dependencies before starting
       if (this.serviceManager) {
         await this._waitForDependencies(this.serviceManager);

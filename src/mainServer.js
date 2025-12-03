@@ -243,8 +243,10 @@ async function startServer() {
     const bluetoothService = serviceManager.getService('bluetooth');
     const victronService = serviceManager.getService('victron-modbus');
 
-    // Set up StateManager listeners BEFORE starting services
-    console.log("[SERVER] Setting up StateManager listeners before starting services...");
+    // CRITICAL: Set up StateManager listeners BEFORE starting services
+    // Services emit initial data immediately on startup (weather:update, tide:update, etc.)
+    // If listeners are attached after service start, the initial data will be missed
+    console.log("[SERVER] Setting up StateManager listeners BEFORE starting services...");
     [positionService, tidalService, weatherService, bluetoothService, victronService]
       .filter(Boolean)
       .forEach((service) => {
