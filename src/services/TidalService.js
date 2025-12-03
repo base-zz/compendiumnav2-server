@@ -64,17 +64,7 @@ export class TidalService extends ScheduledService {
       const hasValidLat = typeof latitude === "number" && Number.isFinite(latitude);
       const hasValidLon = typeof longitude === "number" && Number.isFinite(longitude);
 
-      this.log(`TidalService: Seeding position from state`, {
-        hasState: !!state,
-        hasNavPosition: !!navPosition,
-        latitude,
-        longitude,
-        latitudeType: typeof latitude,
-        longitudeType: typeof longitude,
-        hasValidLat,
-        hasValidLon
-      });
-
+      
       if (hasValidLat && hasValidLon) {
         this.position = { latitude, longitude };
         this.debugLog("Seeded tidal position from state", this.position);
