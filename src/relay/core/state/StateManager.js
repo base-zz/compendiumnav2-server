@@ -987,21 +987,36 @@ export class StateManager extends EventEmitter {
         break;
       case "CREATE_ALERT":
         this.alertService.createAlert(action.data);
-        // Forward alerts state to rule engine so rules can check for active alerts
+        // Forward alerts state to rule engine and emit patch to clients
         this._syncAlertsToRuleEngine();
+        this._emitAlertsPatch();
         break;
       case "RESOLVE_ALERT":
         this.alertService.resolveAlertsByTrigger(action.trigger, action.data);
-        // Forward alerts state to rule engine so rules can check for active alerts
+        // Forward alerts state to rule engine and emit patch to clients
         this._syncAlertsToRuleEngine();
+        this._emitAlertsPatch();
         break;
     }
   }
 
   _syncAlertsToRuleEngine() {
-    if (this.appState.alerts) {
-      this.ruleEngine.updateState({ alerts: this.appState.alerts });
-    }
+    this.ruleEngine.updateState({ alerts: this.appState.alerts || {} });
+  }
+
+  _emitAlertsPatch() {
+    this.emit("state:patch", {
+      type: "state:patch",
+      data: [
+        {
+          op: "replace",
+          path: "/alerts",
+          value: this.appState.alerts
+        }
+      ],
+      boatId: this._boatId,
+      timestamp: Date.now(),
+    });
   }
 
   _getNestedValue(obj, pathSegments) {
