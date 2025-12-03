@@ -198,13 +198,8 @@ async function startSecondaryServices() {
     hasVictron: !!victronService,
   });
 
-  [positionService, tidalService, weatherService, bluetoothService, victronService]
-    .filter(Boolean)
-    .forEach((service) => {
-      stateManager.listenToService(service);
-    });
-
-  console.log("[SERVER] startSecondaryServices(): stateManager now listening to active services");
+  // Listeners already set up before services started
+  console.log("[SERVER] startSecondaryServices(): StateManager already listening to active services");
 
   if (bluetoothService) {
     stateManager.on(
@@ -240,6 +235,23 @@ async function startServer() {
     }
 
     console.log("[SERVER] Starting registered services...");
+    
+    // Get service references before starting them so we can set up listeners
+    const positionService = serviceManager.getService('position');
+    const tidalService = serviceManager.getService('tidal');
+    const weatherService = serviceManager.getService('weather');
+    const bluetoothService = serviceManager.getService('bluetooth');
+    const victronService = serviceManager.getService('victron-modbus');
+
+    // Set up StateManager listeners BEFORE starting services
+    console.log("[SERVER] Setting up StateManager listeners before starting services...");
+    [positionService, tidalService, weatherService, bluetoothService, victronService]
+      .filter(Boolean)
+      .forEach((service) => {
+        stateManager.listenToService(service);
+      });
+    console.log("[SERVER] StateManager now listening to active services");
+
     await startRegisteredServices();
     console.log("[SERVER] Registered services started, waiting for all ready...");
     await serviceManager.waitForAllReady();
