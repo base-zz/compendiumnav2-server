@@ -57,6 +57,7 @@ export class ClientSyncCoordinator {
 
   _handleTideUpdate(data) {
     try {
+      console.log('[ClientSyncCoordinator] Received tide update, forwarding to clients');
       this._publish({
         type: 'tide:update',
         data,
@@ -70,6 +71,7 @@ export class ClientSyncCoordinator {
 
   _handleWeatherUpdate(data) {
     try {
+      console.log('[ClientSyncCoordinator] Received weather update, forwarding to clients');
       this._publish({
         type: 'weather:update',
         data,
@@ -528,6 +530,7 @@ export class ClientSyncCoordinator {
   }
 
   _publish(payload) {
+    console.log(`[ClientSyncCoordinator] Publishing message type: ${payload.type} to ${this._transports.size} transports`);
     this._transports.forEach(({ send, shouldSend }, name) => {
       try {
         if (typeof shouldSend === 'function' && !shouldSend(payload)) {

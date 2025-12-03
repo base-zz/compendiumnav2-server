@@ -285,7 +285,11 @@ export class StateManager extends EventEmitter {
       // Set up tide:update listener
       this.log(`Setting up tide:update listener for service '${serviceName}'`);
       service.on("tide:update", (data) => {
+        console.log(`[StateManager] Received tide:update from '${serviceName}', forwarding.`);
         this.log(`Received tide:update from '${serviceName}', forwarding.`);
+        console.log(`[StateManager] Tide data details: type=${typeof data}, hasData=${!!data}, keys=${
+          data ? Object.keys(data).join(", ") : "none"
+        }`);
         this.setTideData(data);
       });
 
@@ -597,10 +601,22 @@ export class StateManager extends EventEmitter {
       return;
     }
 
+    console.log('[StateManager] setTideData called with data:', {
+      hasData: !!tideData,
+      type: typeof tideData,
+      keys: tideData ? Object.keys(tideData) : []
+    });
+
     // Update state
     this.tideData = tideData;
     this.appState.tides = tideData;
     this.ruleEngine?.updateState({ tides: tideData });
+
+    console.log('[StateManager] Tide data stored in appState.tides:', {
+      hasTides: !!this.appState.tides,
+      type: typeof this.appState.tides,
+      keys: this.appState.tides ? Object.keys(this.appState.tides) : []
+    });
 
     this.log(`[StateManager][setTideData] Emitting tide:update event`);
     const tideUpdatePayload = {
@@ -642,9 +658,21 @@ export class StateManager extends EventEmitter {
       return;
     }
 
+    console.log('[StateManager] setWeatherData called with data:', {
+      hasData: !!weatherData,
+      type: typeof weatherData,
+      keys: weatherData ? Object.keys(weatherData) : []
+    });
+
     log('Setting weather data in appState');
     this.weatherData = weatherData;
     this.appState.forecast = weatherData;
+
+    console.log('[StateManager] Weather data stored in appState.forecast:', {
+      hasForecast: !!this.appState.forecast,
+      type: typeof this.appState.forecast,
+      keys: this.appState.forecast ? Object.keys(this.appState.forecast) : []
+    });
 
     this.ruleEngine.updateState({ forecast: weatherData });
     log('Rule engine updated with weather data');
