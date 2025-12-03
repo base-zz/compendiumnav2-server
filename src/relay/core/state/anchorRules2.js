@@ -331,9 +331,10 @@ export const anchorRules = [
         return false;
       }
 
+      const aisTargetsObj = state.aisTargets || {};
       const aisTargetsArray = Array.isArray(state.ais?.targets)
         ? state.ais.targets
-        : Object.values(state.aisTargets || {});
+        : Object.values(aisTargetsObj);
       const warningRadius = anchorState.warningRange?.r || 15;
 
       const navLat = state.navigation?.position?.latitude?.value;
@@ -356,7 +357,8 @@ export const anchorRules = [
           warningRadius,
           boatLat,
           boatLon,
-          aisTargetCount: Array.isArray(aisTargetsArray) ? aisTargetsArray.length : 0,
+          aisTargetCount: aisTargetsArray.length,
+          aisTargetsObjKeys: Object.keys(aisTargetsObj).length,
         });
         return false;
       }
