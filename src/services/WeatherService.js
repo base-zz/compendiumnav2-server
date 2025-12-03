@@ -213,10 +213,10 @@ export class WeatherService extends ScheduledService {
     if (this.stateService && typeof this.stateService.getState === 'function') {
       try {
         const state = this.stateService.getState();
-        // Check if user has set unit preferences
-        if (state && state.userPreferences && state.userPreferences.units) {
+        // Check if user has set unit preferences (stored in userUnitPreferences)
+        if (state && state.userUnitPreferences) {
           // If preset is IMPERIAL, use imperial units
-          isMetric = state.userPreferences.units.preset !== 'IMPERIAL';
+          isMetric = state.userUnitPreferences.preset !== 'IMPERIAL';
         }
         this.debugLog(`Using ${isMetric ? 'metric' : 'imperial'} units based on user preferences`);
       } catch (err) {

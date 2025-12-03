@@ -248,13 +248,10 @@ export class TidalService extends ScheduledService {
    */
   async _getUnitPreferences() {
     try {
-      // Try to get preferences from state
+      // Try to get preferences from state (stored in userUnitPreferences)
       const state = this.stateService?.getState();
-      // Check both possible paths for unit preferences
-      if (state?.userPreferences?.units) {
-        return state.userPreferences.units;
-      } else if (state?.preferences?.units) {
-        return state.preferences.units;
+      if (state?.userUnitPreferences) {
+        return state.userUnitPreferences;
       }
       // Fall back to imperial defaults if no preferences found
       return UNIT_PRESETS.IMPERIAL;
