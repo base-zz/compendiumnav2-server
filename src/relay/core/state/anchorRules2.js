@@ -4,10 +4,10 @@
  */
 
 export const anchorRules = [
-  // Anchor Deployed Notification
+  // Legacy navigation-based notifications (kept for compatibility)
   {
     name: 'Anchor Deployed Notification',
-    description: 'Triggered when anchor is deployed',
+    description: 'Triggered when anchor is deployed (navigation domain)',
     priority: 'high',
     dependsOn: ['navigation.anchor.anchorDeployed', 'navigation.anchor.timestamp'],
     condition: (state) => {
@@ -26,11 +26,10 @@ export const anchorRules = [
       }
     })
   },
-  
-  // Anchor Retrieved Notification
+
   {
     name: 'Anchor Retrieved Notification',
-    description: 'Triggered when anchor is retrieved',
+    description: 'Triggered when anchor is retrieved (navigation domain)',
     priority: 'high',
     dependsOn: ['navigation.anchor.anchorDeployed', 'navigation.anchor.timestamp'],
     condition: (state, context) => {
@@ -38,7 +37,7 @@ export const anchorRules = [
       const currDeployed = state.navigation?.anchor?.anchorDeployed;
       return prevDeployed === true && currDeployed === false;
     },
-    action: (state) => ({
+    action: () => ({
       type: 'NOTIFICATION',
       category: 'anchor',
       severity: 'info',
@@ -46,11 +45,10 @@ export const anchorRules = [
       timestamp: new Date().toISOString()
     })
   },
-  
-  // Anchor Dragging Detection
+
   {
-    name: 'Anchor Dragging Detection',
-    description: 'Detects when the anchor is dragging',
+    name: 'Anchor Dragging Detection (navigation)',
+    description: 'Detects when the anchor is dragging based on navigation domain',
     priority: 'high',
     dependsOn: [
       'navigation.anchor.anchorDeployed',
@@ -60,19 +58,19 @@ export const anchorRules = [
     condition: (state) => {
       const anchor = state.navigation?.anchor;
       if (!anchor?.anchorDeployed) return false;
-      
+
       const position = state.navigation?.position;
       const anchorPos = anchor.anchorLocation?.position;
-      
+
       if (!position || !anchorPos) return false;
-      
-      // Simple distance calculation (in meters)
+
       const distance = calculateDistance(
-        position.latitude, position.longitude,
-        anchorPos.latitude, anchorPos.longitude
+        position.latitude,
+        position.longitude,
+        anchorPos.latitude,
+        anchorPos.longitude
       );
-      
-      // If we've moved more than 50m from the anchor position
+
       return distance > 50;
     },
     action: (state) => ({
@@ -87,7 +85,291 @@ export const anchorRules = [
         anchorPosition: state.navigation.anchor.anchorLocation?.position
       }
     })
-  }
+  },
+
+  // --- Anchor rules based on unified appState (anchor, position, aisTargets, alerts) ---
+
+  // Critical Range Detection (server-side alert via AlertService)
+  {
+    name: 'Critical Range Detection',
+    description: 'Creates a critical alert when boat exceeds critical anchor range',
+    priority: 'high',
+    dependsOn: ['anchor', 'position', 'alerts'],
+    condition: (state) => {
+      const anchorState = state.anchor || {};
+      if (!anchorState.anchorDeployed) {
+        return false;
+      }
+
+      const boatPosition = state.position || {};
+      const criticalRange = anchorState.criticalRange?.r;
+      const dropPosition = anchorState.anchorDropLocation?.position;
+
+      if (!criticalRange || !dropPosition || !boatPosition) {
+        return false;
+      }
+
+      const distance = calculateDistance(
+        boatPosition.latitude,
+        boatPosition.longitude,
+        dropPosition.latitude,
+        dropPosition.longitude
+      );
+
+      const hasActiveAlert = state.alerts?.active?.some(
+        (alert) => alert.trigger === 'critical_range' && !alert.acknowledged
+      );
+
+      return distance > criticalRange && !hasActiveAlert;
+    },
+    action: (state) => {
+      const anchorState = state.anchor || {};
+      const boatPosition = state.position || {};
+      const dropPosition = anchorState.anchorDropLocation?.position;
+      const criticalRange = anchorState.criticalRange?.r;
+      const isMetric = state.units?.distance === 'meters';
+      const unitLabel = isMetric ? 'm' : 'ft';
+
+      const distance = calculateDistance(
+        boatPosition.latitude,
+        boatPosition.longitude,
+        dropPosition.latitude,
+        dropPosition.longitude
+      );
+
+      return {
+        type: 'CREATE_ALERT',
+        data: {
+          type: 'system',
+          category: 'anchor',
+          source: 'anchor_monitor',
+          level: 'critical',
+          label: 'Critical Range Exceeded',
+          message: `Boat has exceeded critical range! Distance from anchor (${Math.round(
+            distance
+          )} ${unitLabel}) is beyond critical range (${criticalRange} ${unitLabel}).`,
+          trigger: 'critical_range',
+          data: {
+            distance: Math.round(distance),
+            criticalRange,
+            units: unitLabel,
+          },
+          autoResolvable: true,
+        },
+      };
+    },
+  },
+
+  // Anchor Dragging Detection (server-side alert via AlertService)
+  {
+    name: 'Anchor Dragging Detection',
+    description: 'Creates a critical alert when distance from drop exceeds critical range + buffer',
+    priority: 'high',
+    dependsOn: ['anchor', 'position', 'alerts'],
+    condition: (state) => {
+      const anchorState = state.anchor || {};
+      if (!anchorState.anchorDeployed) {
+        return false;
+      }
+
+      const boatPosition = state.position || {};
+      const dropPosition = anchorState.anchorDropLocation?.position;
+      const criticalRange = anchorState.criticalRange?.r || 0;
+      const anchorDragTriggerDistance = 5;
+
+      if (!criticalRange || !dropPosition || !boatPosition) {
+        return false;
+      }
+
+      const distance = calculateDistance(
+        boatPosition.latitude,
+        boatPosition.longitude,
+        dropPosition.latitude,
+        dropPosition.longitude
+      );
+
+      const hasActiveAlert = state.alerts?.active?.some(
+        (alert) => alert.trigger === 'anchor_dragging' && !alert.acknowledged
+      );
+
+      return distance > criticalRange + anchorDragTriggerDistance && !hasActiveAlert;
+    },
+    action: (state) => {
+      const anchorState = state.anchor || {};
+      const boatPosition = state.position || {};
+      const dropPosition = anchorState.anchorDropLocation?.position;
+      const criticalRange = anchorState.criticalRange?.r || 0;
+      const isMetric = state.units?.distance === 'meters';
+      const unitLabel = isMetric ? 'm' : 'ft';
+
+      const distance = calculateDistance(
+        boatPosition.latitude,
+        boatPosition.longitude,
+        dropPosition.latitude,
+        dropPosition.longitude
+      );
+
+      return {
+        type: 'CREATE_ALERT',
+        data: {
+          type: 'system',
+          category: 'anchor',
+          source: 'anchor_monitor',
+          level: 'critical',
+          label: 'Anchor Dragging',
+          message: `Anchor is dragging! Distance from drop point (${Math.round(
+            distance
+          )} ${unitLabel}) exceeds critical range (${criticalRange} ${unitLabel}).`,
+          trigger: 'anchor_dragging',
+          data: {
+            distance: Math.round(distance),
+            criticalRange,
+            units: unitLabel,
+          },
+          autoResolvable: false,
+        },
+      };
+    },
+  },
+
+  // AIS Proximity Detection (server-side AIS proximity alert)
+  {
+    name: 'AIS Proximity Detection',
+    description: 'Creates an alert when AIS targets are within warning radius of the boat',
+    priority: 'high',
+    dependsOn: ['anchor', 'position', 'aisTargets', 'alerts'],
+    condition: (state) => {
+      const anchorState = state.anchor || {};
+      if (!anchorState.anchorDeployed) {
+        return false;
+      }
+
+      const aisTargetsArray = Array.isArray(state.ais?.targets)
+        ? state.ais.targets
+        : Object.values(state.aisTargets || {});
+      const warningRadius = anchorState.warningRange?.r || 15;
+      const boatPosition = state.position || {};
+
+      if (!warningRadius || !boatPosition || !aisTargetsArray.length) {
+        return false;
+      }
+
+      const targetsInRange = aisTargetsArray.filter((target) => {
+        if (!target.position) return false;
+
+        const distance = calculateDistance(
+          target.position.latitude,
+          target.position.longitude,
+          boatPosition.latitude,
+          boatPosition.longitude
+        );
+
+        return distance <= warningRadius;
+      });
+
+      const hasActiveAlert = state.alerts?.active?.some(
+        (alert) => alert.trigger === 'ais_proximity' && !alert.acknowledged
+      );
+
+      return targetsInRange.length > 0 && !hasActiveAlert;
+    },
+    action: (state) => {
+      const anchorState = state.anchor || {};
+      const aisTargetsArray = Array.isArray(state.ais?.targets)
+        ? state.ais.targets
+        : Object.values(state.aisTargets || {});
+      const warningRadius = anchorState.warningRange?.r || 15;
+      const boatPosition = state.position || {};
+      const isMetric = state.units?.distance === 'meters';
+      const unitLabel = isMetric ? 'm' : 'ft';
+
+      const targetsInRange = aisTargetsArray.filter((target) => {
+        if (!target.position) return false;
+
+        const distance = calculateDistance(
+          target.position.latitude,
+          target.position.longitude,
+          boatPosition.latitude,
+          boatPosition.longitude
+        );
+
+        return distance <= warningRadius;
+      }).length;
+
+      return {
+        type: 'CREATE_ALERT',
+        data: {
+          type: 'system',
+          category: 'anchor',
+          source: 'ais_monitor',
+          level: 'warning',
+          label: 'AIS Proximity Warning',
+          message: `${targetsInRange} vessel(s) detected within warning radius of ${warningRadius} ${unitLabel}.`,
+          trigger: 'ais_proximity',
+          data: {
+            targetCount: targetsInRange,
+            warningRadius,
+            units: unitLabel,
+          },
+          autoResolvable: true,
+        },
+      };
+    },
+  },
+
+  // AIS Proximity Resolution
+  {
+    name: 'AIS Proximity Resolution',
+    description: 'Resolves AIS proximity alert when no targets are within warning radius',
+    priority: 'high',
+    dependsOn: ['anchor', 'position', 'aisTargets', 'alerts'],
+    condition: (state) => {
+      const hasActiveAlerts = state.alerts?.active?.some(
+        (alert) =>
+          alert.trigger === 'ais_proximity' &&
+          alert.autoResolvable === true &&
+          !alert.acknowledged
+      );
+
+      const anchorState = state.anchor || {};
+      const aisTargetsArray = Array.isArray(state.ais?.targets)
+        ? state.ais.targets
+        : Object.values(state.aisTargets || {});
+      const warningRadius = anchorState.warningRange?.r;
+      const boatPosition = state.position || {};
+
+      if (!hasActiveAlerts || !warningRadius || !boatPosition || !aisTargetsArray.length) {
+        return false;
+      }
+
+      const targetsInRange = aisTargetsArray.filter((target) => {
+        const distance = calculateDistance(
+          target.position.latitude,
+          target.position.longitude,
+          boatPosition.latitude,
+          boatPosition.longitude
+        );
+
+        return distance <= warningRadius;
+      });
+
+      return targetsInRange.length === 0;
+    },
+    action: (state) => {
+      const anchorState = state.anchor || {};
+      const warningRadius = anchorState.warningRange?.r;
+      const isMetric = state.units?.distance === 'meters';
+
+      return {
+        type: 'RESOLVE_ALERT',
+        trigger: 'ais_proximity',
+        data: {
+          warningRadius,
+          units: isMetric ? 'm' : 'ft',
+        },
+      };
+    },
+  },
 ];
 
 // Helper function to calculate distance between two coordinates (Haversine formula)
