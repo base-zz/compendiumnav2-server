@@ -183,6 +183,13 @@ export const AnchorRules = [
       const warningRadius = anchorState.warningRange?.r || 15;
       const boatPosition = state.position || {};
 
+      console.log('[AIS Proximity Detection] pre-check', {
+        anchorDeployed: !!anchorState.anchorDeployed,
+        warningRadius,
+        hasBoatPosition: !!boatPosition && boatPosition.latitude != null && boatPosition.longitude != null,
+        aisTargetsCount: aisTargetsArray.length,
+      });
+
       if (!warningRadius || !boatPosition || !aisTargetsArray.length) {
         return false;
       }
