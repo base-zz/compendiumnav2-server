@@ -321,6 +321,13 @@ class NewStateService extends ContinuousService {
         ]);
 
         this.selfMmsi = selfData?.replace("vessels.", "");
+        
+        // Extract self vessel info from SignalK data
+        const selfVessel = vesselsData[this.selfMmsi];
+        if (selfVessel) {
+          this._extractVesselInfo(selfVessel);
+        }
+        
         const aisTargets = extractAISTargetsFromSignalK(
           vesselsData,
           this.selfMmsi
@@ -863,6 +870,53 @@ class NewStateService extends ContinuousService {
         this._processSignalKValue(value.path, value.value, source);
       }
     }
+  }
+
+  /**
+   * Extract vessel info from SignalK vessel data and populate stateData
+   * @param {Object} vesselData - SignalK vessel data object
+   */
+  _extractVesselInfo(vesselData) {
+    if (!vesselData) return;
+    
+    // Extract basic info
+    if (vesselData.name) {
+      stateData.vessel.info.name = vesselData.name;
+    }
+    if (vesselData.mmsi) {
+      stateData.vessel.info.mmsi = vesselData.mmsi;
+    }
+    if (vesselData.communication?.callsignVhf) {
+      stateData.vessel.info.callsign = vesselData.communication.callsignVhf;
+    }
+    
+    // Extract design info
+    if (vesselData.design) {
+      if (vesselData.design.aisShipType?.value?.name) {
+        stateData.vessel.info.type = vesselData.design.aisShipType.value.name;
+      }
+      if (vesselData.design.length?.value?.overall) {
+        stateData.vessel.info.dimensions.length.value = vesselData.design.length.value.overall;
+      }
+      if (vesselData.design.beam?.value) {
+        stateData.vessel.info.dimensions.beam.value = vesselData.design.beam.value;
+      }
+      if (vesselData.design.draft?.value?.maximum) {
+        stateData.vessel.info.dimensions.draft.value = vesselData.design.draft.value.maximum;
+      } else if (vesselData.design.draft?.value?.current) {
+        stateData.vessel.info.dimensions.draft.value = vesselData.design.draft.value.current;
+      }
+    }
+    
+    console.log('[StateService] Extracted vessel info:', {
+      name: stateData.vessel.info.name,
+      mmsi: stateData.vessel.info.mmsi,
+      callsign: stateData.vessel.info.callsign,
+      type: stateData.vessel.info.type,
+      length: stateData.vessel.info.dimensions.length.value,
+      beam: stateData.vessel.info.dimensions.beam.value,
+      draft: stateData.vessel.info.dimensions.draft.value
+    });
   }
 
   /**
