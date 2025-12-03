@@ -530,7 +530,9 @@ export class ClientSyncCoordinator {
   }
 
   _publish(payload) {
-    console.log(`[ClientSyncCoordinator] Publishing message type: ${payload.type} to ${this._transports.size} transports`);
+    if (payload.type === 'weather:update' || payload.type === 'tide:update') {
+      console.log(`[ClientSyncCoordinator] Publishing message type: ${payload.type} to ${this._transports.size} transports`);
+    }
     this._transports.forEach(({ send, shouldSend }, name) => {
       try {
         if (typeof shouldSend === 'function' && !shouldSend(payload)) {
