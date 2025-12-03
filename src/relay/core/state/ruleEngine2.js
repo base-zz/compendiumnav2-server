@@ -56,7 +56,7 @@ export class RuleEngine2 extends EventEmitter {
    * @param {Object} rule - The rule to add
    * @param {Function} rule.condition - Function that evaluates to true/false
    * @param {Function} rule.action - Function to execute if condition is true
-   * @param {string[]} rule.dependsOn - Array of state paths this rule depends on
+   * @param {string[]} [rule.dependsOn] - Array of state paths this rule depends on (optional; if missing, rule runs on every change)
    * @param {string} [rule.name] - Optional name for debugging
    * @param {string} [rule.priority='normal'] - Priority: 'high', 'normal', 'low'
    */

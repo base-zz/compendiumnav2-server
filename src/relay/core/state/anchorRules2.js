@@ -100,19 +100,23 @@ export const anchorRules = [
         return false;
       }
 
+      const navLat = state.navigation?.position?.latitude?.value;
+      const navLon = state.navigation?.position?.longitude?.value;
+
       const positionRoot =
         state.position && typeof state.position === 'object'
           ? state.position
           : {};
-      const boatPosition =
+      const boatPositionFromPosition =
         positionRoot.signalk && typeof positionRoot.signalk === 'object'
           ? positionRoot.signalk
           : positionRoot;
+
+      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
+      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+
       const criticalRange = anchorState.criticalRange?.r;
       const dropPosition = anchorState.anchorDropLocation?.position;
-
-      const boatLat = boatPosition?.latitude;
-      const boatLon = boatPosition?.longitude;
 
       if (!criticalRange || !dropPosition || boatLat == null || boatLon == null) {
         console.log('[Rule][Critical Range Detection] guard failed', {
@@ -144,21 +148,26 @@ export const anchorRules = [
     },
     action: (state) => {
       const anchorState = state.anchor || {};
+
+      const navLat = state.navigation?.position?.latitude?.value;
+      const navLon = state.navigation?.position?.longitude?.value;
+
       const positionRoot =
         state.position && typeof state.position === 'object'
           ? state.position
           : {};
-      const boatPosition =
+      const boatPositionFromPosition =
         positionRoot.signalk && typeof positionRoot.signalk === 'object'
           ? positionRoot.signalk
           : positionRoot;
+
+      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
+      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+
       const dropPosition = anchorState.anchorDropLocation?.position;
       const criticalRange = anchorState.criticalRange?.r;
       const isMetric = state.units?.distance === 'meters';
       const unitLabel = isMetric ? 'm' : 'ft';
-
-      const boatLat = boatPosition?.latitude;
-      const boatLon = boatPosition?.longitude;
 
       const distance = calculateDistance(
         boatLat,
@@ -201,20 +210,24 @@ export const anchorRules = [
         return false;
       }
 
+      const navLat = state.navigation?.position?.latitude?.value;
+      const navLon = state.navigation?.position?.longitude?.value;
+
       const positionRoot =
         state.position && typeof state.position === 'object'
           ? state.position
           : {};
-      const boatPosition =
+      const boatPositionFromPosition =
         positionRoot.signalk && typeof positionRoot.signalk === 'object'
           ? positionRoot.signalk
           : positionRoot;
+
+      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
+      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+
       const dropPosition = anchorState.anchorDropLocation?.position;
       const criticalRange = anchorState.criticalRange?.r || 0;
       const anchorDragTriggerDistance = 5;
-
-      const boatLat = boatPosition?.latitude;
-      const boatLon = boatPosition?.longitude;
 
       if (!criticalRange || !dropPosition || boatLat == null || boatLon == null) {
         return false;
@@ -235,21 +248,26 @@ export const anchorRules = [
     },
     action: (state) => {
       const anchorState = state.anchor || {};
+
+      const navLat = state.navigation?.position?.latitude?.value;
+      const navLon = state.navigation?.position?.longitude?.value;
+
       const positionRoot =
         state.position && typeof state.position === 'object'
           ? state.position
           : {};
-      const boatPosition =
+      const boatPositionFromPosition =
         positionRoot.signalk && typeof positionRoot.signalk === 'object'
           ? positionRoot.signalk
           : positionRoot;
+
+      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
+      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+
       const dropPosition = anchorState.anchorDropLocation?.position;
       const criticalRange = anchorState.criticalRange?.r || 0;
       const isMetric = state.units?.distance === 'meters';
       const unitLabel = isMetric ? 'm' : 'ft';
-
-      const boatLat = boatPosition?.latitude;
-      const boatLon = boatPosition?.longitude;
 
       const distance = calculateDistance(
         boatLat,
@@ -296,17 +314,21 @@ export const anchorRules = [
         ? state.ais.targets
         : Object.values(state.aisTargets || {});
       const warningRadius = anchorState.warningRange?.r || 15;
+
+      const navLat = state.navigation?.position?.latitude?.value;
+      const navLon = state.navigation?.position?.longitude?.value;
+
       const positionRoot =
         state.position && typeof state.position === 'object'
           ? state.position
           : {};
-      const boatPosition =
+      const boatPositionFromPosition =
         positionRoot.signalk && typeof positionRoot.signalk === 'object'
           ? positionRoot.signalk
           : positionRoot;
 
-      const boatLat = boatPosition?.latitude;
-      const boatLon = boatPosition?.longitude;
+      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
+      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
 
       if (!warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
         console.log('[Rule][AIS Proximity Detection] guard failed', {
@@ -348,19 +370,24 @@ export const anchorRules = [
         ? state.ais.targets
         : Object.values(state.aisTargets || {});
       const warningRadius = anchorState.warningRange?.r || 15;
+
+      const navLat = state.navigation?.position?.latitude?.value;
+      const navLon = state.navigation?.position?.longitude?.value;
+
       const positionRoot =
         state.position && typeof state.position === 'object'
           ? state.position
           : {};
-      const boatPosition =
+      const boatPositionFromPosition =
         positionRoot.signalk && typeof positionRoot.signalk === 'object'
           ? positionRoot.signalk
           : positionRoot;
+
+      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
+      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+
       const isMetric = state.units?.distance === 'meters';
       const unitLabel = isMetric ? 'm' : 'ft';
-
-      const boatLat = boatPosition?.latitude;
-      const boatLon = boatPosition?.longitude;
 
       const targetsInRange = aisTargetsArray.filter((target) => {
         if (!target.position) return false;
@@ -414,17 +441,21 @@ export const anchorRules = [
         ? state.ais.targets
         : Object.values(state.aisTargets || {});
       const warningRadius = anchorState.warningRange?.r;
+
+      const navLat = state.navigation?.position?.latitude?.value;
+      const navLon = state.navigation?.position?.longitude?.value;
+
       const positionRoot =
         state.position && typeof state.position === 'object'
           ? state.position
           : {};
-      const boatPosition =
+      const boatPositionFromPosition =
         positionRoot.signalk && typeof positionRoot.signalk === 'object'
           ? positionRoot.signalk
           : positionRoot;
 
-      const boatLat = boatPosition?.latitude;
-      const boatLon = boatPosition?.longitude;
+      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
+      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
 
       if (!hasActiveAlerts || !warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
         console.log('[Rule][AIS Proximity Resolution] guard failed', {
