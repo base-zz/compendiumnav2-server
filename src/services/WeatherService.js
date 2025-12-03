@@ -42,16 +42,22 @@ export class WeatherService extends ScheduledService {
       const latitude = navPosition?.latitude?.value ?? navPosition?.latitude ?? null;
       const longitude = navPosition?.longitude?.value ?? navPosition?.longitude ?? null;
 
+      // Check if we have actual values (not null)
+      const hasValidLat = typeof latitude === 'number' && Number.isFinite(latitude);
+      const hasValidLon = typeof longitude === 'number' && Number.isFinite(longitude);
+
       this.log(`WeatherService: Seeding position from state`, {
         hasState: !!state,
         hasNavPosition: !!navPosition,
         latitude,
         longitude,
         latitudeType: typeof latitude,
-        longitudeType: typeof longitude
+        longitudeType: typeof longitude,
+        hasValidLat,
+        hasValidLon
       });
 
-      if (typeof latitude === 'number' && typeof longitude === 'number') {
+      if (hasValidLat && hasValidLon) {
         this.position = { latitude, longitude };
         return true;
       }
