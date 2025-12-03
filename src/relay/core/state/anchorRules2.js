@@ -115,6 +115,12 @@ export const anchorRules = [
       const boatLon = boatPosition?.longitude;
 
       if (!criticalRange || !dropPosition || boatLat == null || boatLon == null) {
+        console.log('[Rule][Critical Range Detection] guard failed', {
+          criticalRange,
+          hasDropPosition: !!dropPosition,
+          boatLat,
+          boatLon,
+        });
         return false;
       }
 
@@ -124,6 +130,11 @@ export const anchorRules = [
         dropPosition.latitude,
         dropPosition.longitude
       );
+
+      console.log('[Rule][Critical Range Detection] evaluating', {
+        distance,
+        criticalRange,
+      });
 
       const hasActiveAlert = state.alerts?.active?.some(
         (alert) => alert.trigger === 'critical_range' && !alert.acknowledged
@@ -298,6 +309,12 @@ export const anchorRules = [
       const boatLon = boatPosition?.longitude;
 
       if (!warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
+        console.log('[Rule][AIS Proximity Detection] guard failed', {
+          warningRadius,
+          boatLat,
+          boatLon,
+          aisTargetCount: Array.isArray(aisTargetsArray) ? aisTargetsArray.length : 0,
+        });
         return false;
       }
 
@@ -312,6 +329,11 @@ export const anchorRules = [
         );
 
         return distance <= warningRadius;
+      });
+
+      console.log('[Rule][AIS Proximity Detection] evaluating', {
+        targetsInRange: targetsInRange.length,
+        warningRadius,
       });
 
       const hasActiveAlert = state.alerts?.active?.some(
@@ -405,6 +427,13 @@ export const anchorRules = [
       const boatLon = boatPosition?.longitude;
 
       if (!hasActiveAlerts || !warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
+        console.log('[Rule][AIS Proximity Resolution] guard failed', {
+          hasActiveAlerts,
+          warningRadius,
+          boatLat,
+          boatLon,
+          aisTargetCount: Array.isArray(aisTargetsArray) ? aisTargetsArray.length : 0,
+        });
         return false;
       }
 
@@ -417,6 +446,11 @@ export const anchorRules = [
         );
 
         return distance <= warningRadius;
+      });
+
+      console.log('[Rule][AIS Proximity Resolution] evaluating', {
+        targetsInRange: targetsInRange.length,
+        warningRadius,
       });
 
       return targetsInRange.length === 0;
