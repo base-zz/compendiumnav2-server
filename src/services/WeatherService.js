@@ -32,6 +32,7 @@ export class WeatherService extends ScheduledService {
 
   _seedPositionFromState() {
     if (!this.stateService || typeof this.stateService.getState !== 'function') {
+      this.logError('WeatherService: stateService not available or missing getState');
       return false;
     }
 
@@ -40,6 +41,15 @@ export class WeatherService extends ScheduledService {
       const navPosition = state?.navigation?.position;
       const latitude = navPosition?.latitude?.value ?? navPosition?.latitude ?? null;
       const longitude = navPosition?.longitude?.value ?? navPosition?.longitude ?? null;
+
+      this.log(`WeatherService: Seeding position from state`, {
+        hasState: !!state,
+        hasNavPosition: !!navPosition,
+        latitude,
+        longitude,
+        latitudeType: typeof latitude,
+        longitudeType: typeof longitude
+      });
 
       if (typeof latitude === 'number' && typeof longitude === 'number') {
         this.position = { latitude, longitude };
