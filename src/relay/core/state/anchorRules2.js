@@ -100,17 +100,27 @@ export const anchorRules = [
         return false;
       }
 
-      const boatPosition = state.position || {};
+      const positionRoot =
+        state.position && typeof state.position === 'object'
+          ? state.position
+          : {};
+      const boatPosition =
+        positionRoot.signalk && typeof positionRoot.signalk === 'object'
+          ? positionRoot.signalk
+          : positionRoot;
       const criticalRange = anchorState.criticalRange?.r;
       const dropPosition = anchorState.anchorDropLocation?.position;
 
-      if (!criticalRange || !dropPosition || !boatPosition) {
+      const boatLat = boatPosition?.latitude;
+      const boatLon = boatPosition?.longitude;
+
+      if (!criticalRange || !dropPosition || boatLat == null || boatLon == null) {
         return false;
       }
 
       const distance = calculateDistance(
-        boatPosition.latitude,
-        boatPosition.longitude,
+        boatLat,
+        boatLon,
         dropPosition.latitude,
         dropPosition.longitude
       );
@@ -123,15 +133,25 @@ export const anchorRules = [
     },
     action: (state) => {
       const anchorState = state.anchor || {};
-      const boatPosition = state.position || {};
+      const positionRoot =
+        state.position && typeof state.position === 'object'
+          ? state.position
+          : {};
+      const boatPosition =
+        positionRoot.signalk && typeof positionRoot.signalk === 'object'
+          ? positionRoot.signalk
+          : positionRoot;
       const dropPosition = anchorState.anchorDropLocation?.position;
       const criticalRange = anchorState.criticalRange?.r;
       const isMetric = state.units?.distance === 'meters';
       const unitLabel = isMetric ? 'm' : 'ft';
 
+      const boatLat = boatPosition?.latitude;
+      const boatLon = boatPosition?.longitude;
+
       const distance = calculateDistance(
-        boatPosition.latitude,
-        boatPosition.longitude,
+        boatLat,
+        boatLon,
         dropPosition.latitude,
         dropPosition.longitude
       );
@@ -170,18 +190,28 @@ export const anchorRules = [
         return false;
       }
 
-      const boatPosition = state.position || {};
+      const positionRoot =
+        state.position && typeof state.position === 'object'
+          ? state.position
+          : {};
+      const boatPosition =
+        positionRoot.signalk && typeof positionRoot.signalk === 'object'
+          ? positionRoot.signalk
+          : positionRoot;
       const dropPosition = anchorState.anchorDropLocation?.position;
       const criticalRange = anchorState.criticalRange?.r || 0;
       const anchorDragTriggerDistance = 5;
 
-      if (!criticalRange || !dropPosition || !boatPosition) {
+      const boatLat = boatPosition?.latitude;
+      const boatLon = boatPosition?.longitude;
+
+      if (!criticalRange || !dropPosition || boatLat == null || boatLon == null) {
         return false;
       }
 
       const distance = calculateDistance(
-        boatPosition.latitude,
-        boatPosition.longitude,
+        boatLat,
+        boatLon,
         dropPosition.latitude,
         dropPosition.longitude
       );
@@ -194,15 +224,25 @@ export const anchorRules = [
     },
     action: (state) => {
       const anchorState = state.anchor || {};
-      const boatPosition = state.position || {};
+      const positionRoot =
+        state.position && typeof state.position === 'object'
+          ? state.position
+          : {};
+      const boatPosition =
+        positionRoot.signalk && typeof positionRoot.signalk === 'object'
+          ? positionRoot.signalk
+          : positionRoot;
       const dropPosition = anchorState.anchorDropLocation?.position;
       const criticalRange = anchorState.criticalRange?.r || 0;
       const isMetric = state.units?.distance === 'meters';
       const unitLabel = isMetric ? 'm' : 'ft';
 
+      const boatLat = boatPosition?.latitude;
+      const boatLon = boatPosition?.longitude;
+
       const distance = calculateDistance(
-        boatPosition.latitude,
-        boatPosition.longitude,
+        boatLat,
+        boatLon,
         dropPosition.latitude,
         dropPosition.longitude
       );
@@ -245,9 +285,19 @@ export const anchorRules = [
         ? state.ais.targets
         : Object.values(state.aisTargets || {});
       const warningRadius = anchorState.warningRange?.r || 15;
-      const boatPosition = state.position || {};
+      const positionRoot =
+        state.position && typeof state.position === 'object'
+          ? state.position
+          : {};
+      const boatPosition =
+        positionRoot.signalk && typeof positionRoot.signalk === 'object'
+          ? positionRoot.signalk
+          : positionRoot;
 
-      if (!warningRadius || !boatPosition || !aisTargetsArray.length) {
+      const boatLat = boatPosition?.latitude;
+      const boatLon = boatPosition?.longitude;
+
+      if (!warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
         return false;
       }
 
@@ -257,8 +307,8 @@ export const anchorRules = [
         const distance = calculateDistance(
           target.position.latitude,
           target.position.longitude,
-          boatPosition.latitude,
-          boatPosition.longitude
+          boatLat,
+          boatLon
         );
 
         return distance <= warningRadius;
@@ -276,9 +326,19 @@ export const anchorRules = [
         ? state.ais.targets
         : Object.values(state.aisTargets || {});
       const warningRadius = anchorState.warningRange?.r || 15;
-      const boatPosition = state.position || {};
+      const positionRoot =
+        state.position && typeof state.position === 'object'
+          ? state.position
+          : {};
+      const boatPosition =
+        positionRoot.signalk && typeof positionRoot.signalk === 'object'
+          ? positionRoot.signalk
+          : positionRoot;
       const isMetric = state.units?.distance === 'meters';
       const unitLabel = isMetric ? 'm' : 'ft';
+
+      const boatLat = boatPosition?.latitude;
+      const boatLon = boatPosition?.longitude;
 
       const targetsInRange = aisTargetsArray.filter((target) => {
         if (!target.position) return false;
@@ -286,8 +346,8 @@ export const anchorRules = [
         const distance = calculateDistance(
           target.position.latitude,
           target.position.longitude,
-          boatPosition.latitude,
-          boatPosition.longitude
+          boatLat,
+          boatLon
         );
 
         return distance <= warningRadius;
@@ -332,9 +392,19 @@ export const anchorRules = [
         ? state.ais.targets
         : Object.values(state.aisTargets || {});
       const warningRadius = anchorState.warningRange?.r;
-      const boatPosition = state.position || {};
+      const positionRoot =
+        state.position && typeof state.position === 'object'
+          ? state.position
+          : {};
+      const boatPosition =
+        positionRoot.signalk && typeof positionRoot.signalk === 'object'
+          ? positionRoot.signalk
+          : positionRoot;
 
-      if (!hasActiveAlerts || !warningRadius || !boatPosition || !aisTargetsArray.length) {
+      const boatLat = boatPosition?.latitude;
+      const boatLon = boatPosition?.longitude;
+
+      if (!hasActiveAlerts || !warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
         return false;
       }
 
@@ -342,8 +412,8 @@ export const anchorRules = [
         const distance = calculateDistance(
           target.position.latitude,
           target.position.longitude,
-          boatPosition.latitude,
-          boatPosition.longitude
+          boatLat,
+          boatLon
         );
 
         return distance <= warningRadius;
