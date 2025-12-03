@@ -94,7 +94,6 @@ export const anchorRules = [
     name: 'Critical Range Detection',
     description: 'Creates a critical alert when boat exceeds critical anchor range',
     priority: 'high',
-    dependsOn: ['anchor', 'position', 'alerts'],
     condition: (state) => {
       const anchorState = state.anchor || {};
       if (!anchorState.anchorDeployed) {
@@ -165,7 +164,6 @@ export const anchorRules = [
     name: 'Anchor Dragging Detection',
     description: 'Creates a critical alert when distance from drop exceeds critical range + buffer',
     priority: 'high',
-    dependsOn: ['anchor', 'position', 'alerts'],
     condition: (state) => {
       const anchorState = state.anchor || {};
       if (!anchorState.anchorDeployed) {
@@ -237,7 +235,6 @@ export const anchorRules = [
     name: 'AIS Proximity Detection',
     description: 'Creates an alert when AIS targets are within warning radius of the boat',
     priority: 'high',
-    dependsOn: ['anchor', 'position', 'aisTargets', 'alerts'],
     condition: (state) => {
       const anchorState = state.anchor || {};
       if (!anchorState.anchorDeployed) {
@@ -322,7 +319,6 @@ export const anchorRules = [
     name: 'AIS Proximity Resolution',
     description: 'Resolves AIS proximity alert when no targets are within warning radius',
     priority: 'high',
-    dependsOn: ['anchor', 'position', 'aisTargets', 'alerts'],
     condition: (state) => {
       const hasActiveAlerts = state.alerts?.active?.some(
         (alert) =>
