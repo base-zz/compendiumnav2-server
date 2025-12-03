@@ -440,6 +440,11 @@ export class StateManager extends EventEmitter {
         sanitizedPatch,
         stateBeforePatch
       );
+
+      console.log('[StateManager] ruleEngine.updateState called with changes keys', {
+        keys: changes && typeof changes === 'object' ? Object.keys(changes) : null,
+      });
+
       this.ruleEngine.updateState(changes);
 
       // Always emit patch events for direct server

@@ -186,6 +186,7 @@ export class RuleEngine2 extends EventEmitter {
         
         if (conditionMet) {
           this.stats.rulesTriggered++;
+          log(`Rule condition met: ${rule.name || rule.id}`);
           const result = await Promise.resolve(rule.action(state, context));
           if (result) {
             actions.push({
