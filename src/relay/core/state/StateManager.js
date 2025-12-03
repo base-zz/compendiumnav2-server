@@ -163,15 +163,19 @@ export class StateManager extends EventEmitter {
     this.log(`Finished adding rules.`);
     console.log('[StateManager] constructor: finished adding rules');
 
-    // Listen for rule triggers and process their actions
-    this.ruleEngine.on("rule-triggered", ({ rule, actionResult }) => {
-      if (actionResult) {
+    // Listen for rule engine actions and process them via AlertService/etc.
+    this.ruleEngine.on("actions", (actions) => {
+      if (!Array.isArray(actions) || actions.length === 0) return;
+
+      actions.forEach((actionResult) => {
+        if (!actionResult || typeof actionResult !== "object") return;
+
         this.log(
-          `Rule triggered: ${rule.name}, Action:`,
+          `RuleEngine2 action:`,
           JSON.stringify(actionResult)
         );
         this._processRuleAction(actionResult);
-      }
+      });
     });
 
     // Initialize the alert service
