@@ -363,9 +363,9 @@ export class PositionService extends ContinuousService {
     let filteredScatter = null;
     if (this._scatterWindow.length > 0) {
       const sortedScatter = [...this._scatterWindow].sort((a, b) => a - b);
-      const idxScatter = Math.min(
-        sortedScatter.length - 1,
-        Math.floor(sortedScatter.length * 0.99),
+      const idxScatter = Math.max(
+        0,
+        Math.floor(sortedScatter.length * 0.99) - 1,
       );
       scatterThresholdMeters = sortedScatter[idxScatter];
       filteredScatter = this._scatterWindow.filter(
@@ -378,23 +378,23 @@ export class PositionService extends ContinuousService {
         ? this._computeWindowStats(filteredScatter)
         : null;
 
-    console.log('[PositionService] drift diagnostics', {
-      windowSize: this._driftWindow.length,
-      driftWindow: windowDrift,
-      driftWindowFiltered: filteredDriftStats,
-      teleportThresholdMeters,
-      teleportCount:
-        teleportThresholdMeters == null
-          ? 0
-          : this._driftWindow.length - (filteredDrift ? filteredDrift.length : 0),
-      scatterWindow: windowScatter,
-      scatterWindowFiltered: filteredScatterStats,
-      scatterThresholdMeters,
-      center: {
-        latitude: this._centerLat,
-        longitude: this._centerLon,
-      },
-    });
+    // console.log('[PositionService] drift diagnostics', {
+    //   windowSize: this._driftWindow.length,
+    //   driftWindow: windowDrift,
+    //   driftWindowFiltered: filteredDriftStats,
+    //   teleportThresholdMeters,
+    //   teleportCount:
+    //     teleportThresholdMeters == null
+    //       ? 0
+    //       : this._driftWindow.length - (filteredDrift ? filteredDrift.length : 0),
+    //   scatterWindow: windowScatter,
+    //   scatterWindowFiltered: filteredScatterStats,
+    //   scatterThresholdMeters,
+    //   center: {
+    //     latitude: this._centerLat,
+    //     longitude: this._centerLon,
+    //   },
+    // });
 
     // Emit a state patch with a high-level positionStability object (read-only diagnostics)
     if (windowScatter && Number.isFinite(windowScatter.mean)) {
