@@ -743,6 +743,12 @@ export class StateManager extends EventEmitter {
    * @param {Object} anchorData - The anchor data from the client
    */
   updateAnchorState(anchorData) {
+    console.log('[StateManager] anchor:update received', {
+      hasData: !!anchorData,
+      keys: anchorData && typeof anchorData === 'object' ? Object.keys(anchorData) : null,
+      anchorDeployed: anchorData?.anchorDeployed,
+    });
+
     this.log(
       "[StateManager][updateAnchorState] called. Stack:",
       new Error().stack
@@ -808,6 +814,8 @@ export class StateManager extends EventEmitter {
    * of truth for all anchor-derived fields again.
    */
   resetAnchorState() {
+    console.log('[StateManager] anchor:reset received');
+
     try {
       const freshModel = createStateDataModel(UNIT_PRESETS.IMPERIAL);
       const freshAnchor = this._safeClone(freshModel.anchor);
