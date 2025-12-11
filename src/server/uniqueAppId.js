@@ -56,25 +56,27 @@ export function getBoatInfo(stateService) {
     // Only try to get state if stateService is available
     if (stateService && typeof stateService.getState === 'function') {
       const state = stateService.getState() || {};
-      
-      // Update boat info with SignalK data if available
-      boatInfo.name = state?.vessel?.name?.value || boatInfo.name;
-      boatInfo.mmsi = state?.vessel?.mmsi?.value || boatInfo.mmsi;
-      boatInfo.callsign = state?.vessel?.callsign?.value || boatInfo.callsign;
-      
-      if (state?.vessel?.dimensions) {
+
+      // Vessel info is stored under vessel.info in the canonical state model
+      const vesselInfo = state?.vessel?.info;
+
+      boatInfo.name = vesselInfo?.name ?? boatInfo.name;
+      boatInfo.mmsi = vesselInfo?.mmsi ?? boatInfo.mmsi;
+      boatInfo.callsign = vesselInfo?.callsign ?? boatInfo.callsign;
+
+      if (vesselInfo?.dimensions) {
         boatInfo.dimensions = {
-          length: state.vessel.dimensions.length?.value || boatInfo.dimensions.length,
-          beam: state.vessel.dimensions.beam?.value || boatInfo.dimensions.beam,
-          draft: state.vessel.dimensions.draft?.value || boatInfo.dimensions.draft,
+          length: vesselInfo.dimensions.length?.value ?? boatInfo.dimensions.length,
+          beam: vesselInfo.dimensions.beam?.value ?? boatInfo.dimensions.beam,
+          draft: vesselInfo.dimensions.draft?.value ?? boatInfo.dimensions.draft,
         };
       }
-      
+
       boatInfo.position = state?.navigation?.position || boatInfo.position;
       boatInfo.status = 'online';
       boatInfo.signalK = {
         connected: true,
-        lastUpdate: state?.navigation?.position?.timestamp || null
+        lastUpdate: state?.navigation?.position?.timestamp || null,
       };
     }
   } catch (error) {
