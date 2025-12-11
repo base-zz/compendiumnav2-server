@@ -321,9 +321,12 @@ class NewStateService extends ContinuousService {
         ]);
 
         this.selfMmsi = selfData?.replace("vessels.", "");
-        
+
         // Extract self vessel info from SignalK data
-        const selfVessel = vesselsData[this.selfMmsi];
+        // SignalK /vessels returns an object with a top-level 'vessels' map,
+        // so look up the self vessel inside vesselsData.vessels
+        const vesselsMap = vesselsData?.vessels || vesselsData;
+        const selfVessel = vesselsMap?.[this.selfMmsi];
         if (selfVessel) {
           this._extractVesselInfo(selfVessel);
         }
