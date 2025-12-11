@@ -57,6 +57,14 @@ export function getBoatInfo(stateService) {
     if (stateService && typeof stateService.getState === 'function') {
       const state = stateService.getState() || {};
 
+      console.log('[BoatInfo] getBoatInfo received state snapshot:', {
+        hasVessel: !!state.vessel,
+        hasVesselInfo: !!state.vessel?.info,
+        vesselInfo: state.vessel?.info,
+        hasNavigation: !!state.navigation,
+        navigationPosition: state.navigation?.position,
+      });
+
       // Vessel info is stored under vessel.info in the canonical state model
       const vesselInfo = state?.vessel?.info;
 
