@@ -54,8 +54,8 @@ export function getBoatInfo(stateService) {
 
   try {
     // Only try to get state if stateService is available
-    if (stateService && typeof stateService.state === 'function') {
-      const state = stateService.state() || {};
+    if (stateService && typeof stateService.getState === 'function') {
+      const state = stateService.getState() || {};
       
       // Update boat info with SignalK data if available
       boatInfo.name = state?.vessel?.name?.value || boatInfo.name;
