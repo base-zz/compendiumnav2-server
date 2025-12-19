@@ -89,6 +89,9 @@ export class TidalService extends ScheduledService {
     const hasInitialPosition = this._seedPositionFromState();
     if (hasInitialPosition) {
       this._hasScheduled = true;
+      this.log(
+        `Initial tidal fetch scheduled with position latitude=${this.position.latitude}, longitude=${this.position.longitude}`
+      );
       try {
         await this.run();
         this.log("TidalService initial fetch complete.");
@@ -158,6 +161,9 @@ export class TidalService extends ScheduledService {
       this.debugLog(`No valid position available for deferred tidal fetch after ${source}`);
       return;
     }
+    this.log(
+      `Deferred tidal fetch scheduled (${source}) with position latitude=${this.position.latitude}, longitude=${this.position.longitude}`
+    );
     this._hasScheduled = true;
     try {
       await this.run();
@@ -217,6 +223,9 @@ export class TidalService extends ScheduledService {
 
         if (!this._hasScheduled) {
           this._hasScheduled = true;
+          this.log(
+            `Initial tidal fetch scheduled from PositionService with position latitude=${position.latitude}, longitude=${position.longitude}`
+          );
           try {
             await this.run();
           } catch (err) {
