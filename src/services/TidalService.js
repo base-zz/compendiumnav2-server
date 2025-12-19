@@ -378,6 +378,10 @@ export class TidalService extends ScheduledService {
             timeformat: "iso8601",
           };
 
+          this.log(
+            `Fetching tidal data for position latitude=${latitude}, longitude=${longitude}`
+          );
+
           // Make the API request using openmeteo's fetchWeatherApi
           const responses = await fetchWeatherApi(this.baseUrl, params);
 
