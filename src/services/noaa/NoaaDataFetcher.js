@@ -7,18 +7,27 @@ export async function fetchNoaaTidePredictions(stationId, options = {}) {
     rangeHours = 72,
     datum = "MLLW",
     units = "english",
-    timeZone = "lst_ldt",
     interval = "hilo",
   } = options;
+
+  // Use explicit begin_date and end_date to ensure forward-looking predictions
+  // Start from 6 hours ago (to have some past context) and extend rangeHours into the future
+  const now = new Date();
+  const beginDate = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+  const endDate = new Date(now.getTime() + rangeHours * 60 * 60 * 1000);
+
+  const formatDate = (d) =>
+    `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
 
   const params = new URLSearchParams({
     station: stationId,
     product: "predictions",
     datum,
-    time_zone: timeZone,
+    time_zone: "gmt",
     units,
     interval,
-    range: String(rangeHours),
+    begin_date: formatDate(beginDate),
+    end_date: formatDate(endDate),
     format: "json",
     application: "CompendiumNav",
   });
@@ -41,7 +50,7 @@ export async function fetchNoaaTidePredictions(stationId, options = {}) {
   }
 
   return data.predictions.map((p) => ({
-    time: parseNoaaTime(p.t, timeZone),
+    time: parseNoaaTime(p.t),
     height: parseFloat(p.v),
     type: p.type || null,
   }));
@@ -91,7 +100,7 @@ export async function fetchNoaaCurrentPredictions(stationId, options = {}) {
   const predictions = data.current_predictions || data.predictions || [];
 
   return predictions.map((p) => ({
-    time: parseNoaaTime(p.Time || p.t, timeZone),
+    time: parseNoaaTime(p.Time || p.t),
     velocity: p.Velocity_Major !== undefined ? parseFloat(p.Velocity_Major) : (p.v !== undefined ? parseFloat(p.v) : null),
     type: p.Type || p.type || null,
     meanFloodDir: p.meanFloodDir !== undefined ? parseFloat(p.meanFloodDir) : null,
@@ -99,25 +108,30 @@ export async function fetchNoaaCurrentPredictions(stationId, options = {}) {
   }));
 }
 
-function parseNoaaTime(timeStr, timeZone) {
+function parseNoaaTime(timeStr) {
   if (!timeStr) return null;
-  const cleaned = timeStr.replace(" ", "T");
+  // NOAA returns times in format "YYYY-MM-DD HH:MM" in GMT when time_zone=gmt
+  const cleaned = timeStr.replace(" ", "T") + "Z";
   return new Date(cleaned).toISOString();
 }
 
-export function interpolateHourlyTides(hiloData, hoursToGenerate = 72) {
+export function interpolateHourlyTides(hiloData, hoursToGenerate = 72, options = {}) {
   if (!hiloData || hiloData.length < 2) {
     return [];
   }
 
   const sorted = [...hiloData].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
-  const startTime = new Date(sorted[0].time);
+  // Start from 6 hours before now (for past context) and extend hoursToGenerate into the future
+  const now = new Date();
+  const pastHours = options.pastHours !== undefined ? options.pastHours : 6;
+  const startTime = new Date(now.getTime() - pastHours * 60 * 60 * 1000);
   startTime.setMinutes(0, 0, 0);
 
   const hourlyData = [];
+  const totalHours = pastHours + hoursToGenerate;
 
-  for (let h = 0; h < hoursToGenerate; h++) {
+  for (let h = 0; h < totalHours; h++) {
     const targetTime = new Date(startTime.getTime() + h * 60 * 60 * 1000);
 
     let before = null;
