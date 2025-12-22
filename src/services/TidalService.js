@@ -389,15 +389,16 @@ export class TidalService extends ScheduledService {
           // Fetch NOAA tide predictions if station available
           let hiloData = null;
           let hourlyTideData = null;
+          const forecastHours = 120; // 5 days
           if (tideStation) {
             try {
               hiloData = await fetchNoaaTidePredictions(tideStation.id, {
-                rangeHours: 72,
+                rangeHours: forecastHours,
                 units: noaaUnits,
               });
               this.log(`Fetched ${hiloData.length} NOAA tide predictions`);
 
-              hourlyTideData = interpolateHourlyTides(hiloData, 72);
+              hourlyTideData = interpolateHourlyTides(hiloData, forecastHours);
               this.log(`Interpolated ${hourlyTideData.length} hourly tide values`);
             } catch (err) {
               this.logError("Failed to fetch NOAA tide predictions:", err);
@@ -409,7 +410,7 @@ export class TidalService extends ScheduledService {
           if (currentStation) {
             try {
               currentData = await fetchNoaaCurrentPredictions(currentStation.id, {
-                rangeHours: 72,
+                rangeHours: forecastHours,
                 units: noaaUnits,
                 bin: currentStation.bin,
               });
