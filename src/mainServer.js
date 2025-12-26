@@ -318,7 +318,7 @@ async function startServer() {
               parsedOrigin.hostname.endsWith("compendium.local") ||
               allowedOrigins.includes(origin) ||
               (parsedOrigin.protocol === "capacitor:" &&
-                parsedOrigin.hostname === "localhost")
+                (parsedOrigin.hostname === "localhost" || parsedOrigin.hostname === "compendiumnav.com"))
             ) {
               return callback(null, true);
             }
