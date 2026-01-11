@@ -203,31 +203,39 @@ export function recomputeAnchorDerivedState(appState) {
   }
 
   const anchor = appState.anchor;
-  const boatPosition = appState.position;
-
+  
   if (!anchor || typeof anchor !== "object") {
     return null;
   }
+  
+  // Extract boat position using the same logic as anchorRules2.js
+  const navLat = appState.navigation?.position?.latitude?.value;
+  const navLon = appState.navigation?.position?.longitude?.value;
+
+  const positionRoot =
+    appState.position && typeof appState.position === 'object'
+      ? appState.position
+      : {};
+  const boatPositionFromPosition =
+    positionRoot.signalk && typeof positionRoot.signalk === 'object'
+      ? positionRoot.signalk
+      : positionRoot;
+
+  const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
+  const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
 
   // We only recompute when anchor is deployed and we have a boat position
-  if (!anchor.anchorDeployed || !boatPosition) {
-    return null;
-  }
-
-  const boatLat = boatPosition.latitude;
-  const boatLon = boatPosition.longitude;
-
-  if (boatLat == null || boatLon == null) {
+  if (!anchor.anchorDeployed || boatLat == null || boatLon == null) {
     return null;
   }
 
   const dropPos = anchor.anchorDropLocation?.position || null;
   const anchorPos = anchor.anchorLocation?.position || null;
 
-  const dropLat = dropPos?.latitude ?? null;
-  const dropLon = dropPos?.longitude ?? null;
-  const anchorLat = anchorPos?.latitude ?? null;
-  const anchorLon = anchorPos?.longitude ?? null;
+  const dropLat = typeof dropPos?.latitude === 'object' ? dropPos.latitude?.value : dropPos?.latitude;
+  const dropLon = typeof dropPos?.longitude === 'object' ? dropPos.longitude?.value : dropPos?.longitude;
+  const anchorLat = typeof anchorPos?.latitude === 'object' ? anchorPos.latitude?.value : anchorPos?.latitude;
+  const anchorLon = typeof anchorPos?.longitude === 'object' ? anchorPos.longitude?.value : anchorPos?.longitude;
 
   const criticalRange = anchor.criticalRange?.r ?? null;
   const warningRadius = anchor.warningRange?.r ?? null;
