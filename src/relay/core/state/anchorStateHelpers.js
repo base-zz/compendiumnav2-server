@@ -198,21 +198,20 @@ function projectNewAnchorPosition(boatPos, currentAnchorPos, rodeLengthMeters) {
  * @returns {Object|null} updated anchor object or null if unchanged
  */
 export function recomputeAnchorDerivedState(appState) {
-  console.log('[Anchor Debug] recomputeAnchorDerivedState called');
+  // Simple test - increment counter to see if this function is called
+  if (!this._anchorCallCount) this._anchorCallCount = 0;
+  this._anchorCallCount++;
+  console.log(`[Anchor] recomputeAnchorDerivedState called ${this._anchorCallCount} times`);
   
   if (!appState || typeof appState !== "object") {
-    console.log('[Anchor Debug] Early return: appState invalid');
     return null;
   }
 
   const anchor = appState.anchor;
   
   if (!anchor || typeof anchor !== "object") {
-    console.log('[Anchor Debug] Early return: anchor invalid');
     return null;
   }
-  
-  console.log('[Anchor Debug] anchor.anchorDeployed:', anchor.anchorDeployed);
   
   // Extract boat position using the same logic as anchorRules2.js
   const navLat = appState.navigation?.position?.latitude?.value;
@@ -230,11 +229,9 @@ export function recomputeAnchorDerivedState(appState) {
   const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
   const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
 
-  console.log('[Anchor Debug] boat position:', { boatLat, boatLon, navLat, navLon, posLat: boatPositionFromPosition?.latitude, posLon: boatPositionFromPosition?.longitude });
-
   // We only recompute when anchor is deployed and we have a boat position
   if (!anchor.anchorDeployed || boatLat == null || boatLon == null) {
-    console.log('[Anchor Debug] Early return: anchor not deployed or no boat position');
+    console.log('[Anchor] Early exit - anchor not deployed or no position');
     return null;
   }
 
@@ -425,27 +422,36 @@ export function recomputeAnchorDerivedState(appState) {
   }
 
   // --- History (breadcrumbs) ---
-  console.log('[Anchor Debug] About to add history entry');
+  const now = Date.now();
+  const lastEntry = Array.isArray(updatedAnchor.history) && updatedAnchor.history.length > 0
+    ? updatedAnchor.history[updatedAnchor.history.length - 1]
+    : null;
+  
+  // Only add breadcrumb if at least 30 seconds have passed since last one
+  const MIN_BREADCRUMB_INTERVAL_MS = 30000; // 30 seconds
+  
+  if (lastEntry && (now - lastEntry.time) < MIN_BREADCRUMB_INTERVAL_MS) {
+    // Skip adding breadcrumb - not enough time has passed
+    return changed ? updatedAnchor : null;
+  }
+  
   const historyEntry = {
     position: {
       latitude: boatLat,
       longitude: boatLon,
     },
-    time: Date.now(),
+    time: now,
   };
-  
-  console.log('[Anchor Debug] History entry:', historyEntry);
 
   const existingHistory = Array.isArray(updatedAnchor.history)
     ? updatedAnchor.history
     : [];
-    
-  console.log('[Anchor Debug] Existing history length:', existingHistory.length);
 
   const newHistory = existingHistory.concat(historyEntry);
 
-  // Enforce maximum of 100 entries, dropping oldest first
-  const MAX_HISTORY_ENTRIES = 100;
+  // Enforce maximum of 1000 entries, dropping oldest first
+  // At 10-second intervals = ~2.78 hours of history
+  const MAX_HISTORY_ENTRIES = 1000;
   const trimmedHistory =
     newHistory.length > MAX_HISTORY_ENTRIES
       ? newHistory.slice(newHistory.length - MAX_HISTORY_ENTRIES)
@@ -454,9 +460,7 @@ export function recomputeAnchorDerivedState(appState) {
   if (trimmedHistory !== existingHistory) {
     updatedAnchor.history = trimmedHistory;
     changed = true;
-    console.log('[Anchor Debug] History updated, new length:', trimmedHistory.length);
-  } else {
-    console.log('[Anchor Debug] History not changed');
+    console.log(`[Anchor] History updated - now has ${trimmedHistory.length} entries`);
   }
 
   // --- AIS proximity status (aisWarning) ---
