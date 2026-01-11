@@ -231,9 +231,16 @@ export function recomputeAnchorDerivedState(appState) {
 
   // We only recompute when anchor is deployed and we have a boat position
   if (!anchor.anchorDeployed || boatLat == null || boatLon == null) {
-    console.log('[Anchor] Early exit - anchor not deployed or no position');
+    if (!anchor.anchorDeployed) {
+      console.log('[Anchor] Early exit - anchor not deployed');
+    }
+    if (boatLat == null || boatLon == null) {
+      console.log('[Anchor] Early exit - no boat position', { boatLat, boatLon });
+    }
     return null;
   }
+  
+  console.log('[Anchor] Processing anchor - deployed:', anchor.anchorDeployed, 'position:', { boatLat, boatLon });
 
   const dropPos = anchor.anchorDropLocation?.position || null;
   const anchorPos = anchor.anchorLocation?.position || null;
@@ -422,6 +429,7 @@ export function recomputeAnchorDerivedState(appState) {
   }
 
   // --- History (breadcrumbs) ---
+  console.log('[Anchor] History section - checking if should add breadcrumb');
   const now = Date.now();
   const lastEntry = Array.isArray(updatedAnchor.history) && updatedAnchor.history.length > 0
     ? updatedAnchor.history[updatedAnchor.history.length - 1]
@@ -430,9 +438,16 @@ export function recomputeAnchorDerivedState(appState) {
   // Only add breadcrumb if at least 30 seconds have passed since last one
   const MIN_BREADCRUMB_INTERVAL_MS = 30000; // 30 seconds
   
-  if (lastEntry && (now - lastEntry.time) < MIN_BREADCRUMB_INTERVAL_MS) {
-    // Skip adding breadcrumb - not enough time has passed
-    return changed ? updatedAnchor : null;
+  if (lastEntry) {
+    const timeSinceLast = now - lastEntry.time;
+    console.log(`[Anchor] Last breadcrumb was ${timeSinceLast/1000}s ago`);
+    if (timeSinceLast < MIN_BREADCRUMB_INTERVAL_MS) {
+      console.log('[Anchor] Skipping breadcrumb - not enough time passed');
+      // Skip adding breadcrumb - not enough time has passed
+      return changed ? updatedAnchor : null;
+    }
+  } else {
+    console.log('[Anchor] No previous breadcrumbs - will add first one');
   }
   
   const historyEntry = {
@@ -450,7 +465,7 @@ export function recomputeAnchorDerivedState(appState) {
   const newHistory = existingHistory.concat(historyEntry);
 
   // Enforce maximum of 1000 entries, dropping oldest first
-  // At 10-second intervals = ~2.78 hours of history
+  // At 30-second intervals = ~8.33 hours of history
   const MAX_HISTORY_ENTRIES = 1000;
   const trimmedHistory =
     newHistory.length > MAX_HISTORY_ENTRIES
