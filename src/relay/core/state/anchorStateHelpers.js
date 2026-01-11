@@ -198,11 +198,6 @@ function projectNewAnchorPosition(boatPos, currentAnchorPos, rodeLengthMeters) {
  * @returns {Object|null} updated anchor object or null if unchanged
  */
 export function recomputeAnchorDerivedState(appState) {
-  // Simple test - increment counter to see if this function is called
-  if (!this._anchorCallCount) this._anchorCallCount = 0;
-  this._anchorCallCount++;
-  console.log(`[Anchor] recomputeAnchorDerivedState called ${this._anchorCallCount} times`);
-  
   if (!appState || typeof appState !== "object") {
     return null;
   }
@@ -231,16 +226,8 @@ export function recomputeAnchorDerivedState(appState) {
 
   // We only recompute when anchor is deployed and we have a boat position
   if (!anchor.anchorDeployed || boatLat == null || boatLon == null) {
-    if (!anchor.anchorDeployed) {
-      console.log('[Anchor] Early exit - anchor not deployed');
-    }
-    if (boatLat == null || boatLon == null) {
-      console.log('[Anchor] Early exit - no boat position', { boatLat, boatLon });
-    }
     return null;
   }
-  
-  console.log('[Anchor] Processing anchor - deployed:', anchor.anchorDeployed, 'position:', { boatLat, boatLon });
 
   const dropPos = anchor.anchorDropLocation?.position || null;
   const anchorPos = anchor.anchorLocation?.position || null;
@@ -429,25 +416,21 @@ export function recomputeAnchorDerivedState(appState) {
   }
 
   // --- History (breadcrumbs) ---
-  console.log('[Anchor] History section - checking if should add breadcrumb');
   const now = Date.now();
-  const lastEntry = Array.isArray(updatedAnchor.history) && updatedAnchor.history.length > 0
-    ? updatedAnchor.history[updatedAnchor.history.length - 1]
-    : null;
+  const existingHistory = Array.isArray(updatedAnchor.history)
+    ? updatedAnchor.history
+    : [];
   
   // Only add breadcrumb if at least 30 seconds have passed since last one
   const MIN_BREADCRUMB_INTERVAL_MS = 30000; // 30 seconds
   
-  if (lastEntry) {
-    const timeSinceLast = now - lastEntry.time;
-    console.log(`[Anchor] Last breadcrumb was ${timeSinceLast/1000}s ago`);
-    if (timeSinceLast < MIN_BREADCRUMB_INTERVAL_MS) {
-      console.log('[Anchor] Skipping breadcrumb - not enough time passed');
-      // Skip adding breadcrumb - not enough time has passed
-      return changed ? updatedAnchor : null;
-    }
-  } else {
-    console.log('[Anchor] No previous breadcrumbs - will add first one');
+  const lastEntry = existingHistory.length > 0
+    ? existingHistory[existingHistory.length - 1]
+    : null;
+  
+  if (lastEntry && (now - lastEntry.time) < MIN_BREADCRUMB_INTERVAL_MS) {
+    // Skip adding breadcrumb - not enough time has passed
+    return changed ? updatedAnchor : null;
   }
   
   const historyEntry = {
@@ -457,10 +440,6 @@ export function recomputeAnchorDerivedState(appState) {
     },
     time: now,
   };
-
-  const existingHistory = Array.isArray(updatedAnchor.history)
-    ? updatedAnchor.history
-    : [];
 
   const newHistory = existingHistory.concat(historyEntry);
 

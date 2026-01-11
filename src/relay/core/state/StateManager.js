@@ -866,13 +866,7 @@ export class StateManager extends EventEmitter {
   }
 
   _runStateHelpers(patchOps) {
-    console.log('[StateManager] _runStateHelpers called with:', patchOps ? patchOps.length + ' ops' : 'null');
     const hasPatchOps = Array.isArray(patchOps);
-    
-    // Log all patch ops for debugging
-    if (hasPatchOps) {
-      console.log('[StateManager] Patch operations received:', patchOps.map(op => op.path));
-    }
 
     // Anchor helper: only run when relevant paths change, or always for
     // full-state updates where patchOps is null.
@@ -885,8 +879,6 @@ export class StateManager extends EventEmitter {
             op.path.startsWith("/ais"))
         )
       : true;
-    
-    console.log('[StateManager] Anchor helper relevant?', anchorRelevant);
 
     // For quick troubleshooting without DEBUG noise, log when anchor-related
     // patches are processed. This avoids logging for high-frequency
@@ -898,9 +890,6 @@ export class StateManager extends EventEmitter {
       : false;
 
     if (anchorRelevant) {
-      console.log(
-        `[StateManager][_runStateHelpers] Running anchor helper (hasPatchOps=${hasPatchOps})`
-      );
       const updatedAnchor = recomputeAnchorDerivedState(this.appState);
       if (updatedAnchor) {
         if (hasAnchorPatch) {
