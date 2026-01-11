@@ -898,7 +898,7 @@ export class StateManager extends EventEmitter {
       : false;
 
     if (anchorRelevant) {
-      logState(
+      console.log(
         `[StateManager][_runStateHelpers] Running anchor helper (hasPatchOps=${hasPatchOps})`
       );
       const updatedAnchor = recomputeAnchorDerivedState(this.appState);
