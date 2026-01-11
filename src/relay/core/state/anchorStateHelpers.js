@@ -198,15 +198,21 @@ function projectNewAnchorPosition(boatPos, currentAnchorPos, rodeLengthMeters) {
  * @returns {Object|null} updated anchor object or null if unchanged
  */
 export function recomputeAnchorDerivedState(appState) {
+  console.log('[Anchor Debug] recomputeAnchorDerivedState called');
+  
   if (!appState || typeof appState !== "object") {
+    console.log('[Anchor Debug] Early return: appState invalid');
     return null;
   }
 
   const anchor = appState.anchor;
   
   if (!anchor || typeof anchor !== "object") {
+    console.log('[Anchor Debug] Early return: anchor invalid');
     return null;
   }
+  
+  console.log('[Anchor Debug] anchor.anchorDeployed:', anchor.anchorDeployed);
   
   // Extract boat position using the same logic as anchorRules2.js
   const navLat = appState.navigation?.position?.latitude?.value;
@@ -224,8 +230,11 @@ export function recomputeAnchorDerivedState(appState) {
   const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
   const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
 
+  console.log('[Anchor Debug] boat position:', { boatLat, boatLon, navLat, navLon, posLat: boatPositionFromPosition?.latitude, posLon: boatPositionFromPosition?.longitude });
+
   // We only recompute when anchor is deployed and we have a boat position
   if (!anchor.anchorDeployed || boatLat == null || boatLon == null) {
+    console.log('[Anchor Debug] Early return: anchor not deployed or no boat position');
     return null;
   }
 
@@ -416,6 +425,7 @@ export function recomputeAnchorDerivedState(appState) {
   }
 
   // --- History (breadcrumbs) ---
+  console.log('[Anchor Debug] About to add history entry');
   const historyEntry = {
     position: {
       latitude: boatLat,
@@ -423,10 +433,14 @@ export function recomputeAnchorDerivedState(appState) {
     },
     time: Date.now(),
   };
+  
+  console.log('[Anchor Debug] History entry:', historyEntry);
 
   const existingHistory = Array.isArray(updatedAnchor.history)
     ? updatedAnchor.history
     : [];
+    
+  console.log('[Anchor Debug] Existing history length:', existingHistory.length);
 
   const newHistory = existingHistory.concat(historyEntry);
 
@@ -440,6 +454,9 @@ export function recomputeAnchorDerivedState(appState) {
   if (trimmedHistory !== existingHistory) {
     updatedAnchor.history = trimmedHistory;
     changed = true;
+    console.log('[Anchor Debug] History updated, new length:', trimmedHistory.length);
+  } else {
+    console.log('[Anchor Debug] History not changed');
   }
 
   // --- AIS proximity status (aisWarning) ---
