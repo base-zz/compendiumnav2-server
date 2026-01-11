@@ -422,8 +422,8 @@ export function recomputeAnchorDerivedState(appState) {
 
   const newHistory = existingHistory.concat(historyEntry);
 
-  // Enforce maximum of 50 entries, dropping oldest first
-  const MAX_HISTORY_ENTRIES = 50;
+  // Enforce maximum of 100 entries, dropping oldest first
+  const MAX_HISTORY_ENTRIES = 100;
   const trimmedHistory =
     newHistory.length > MAX_HISTORY_ENTRIES
       ? newHistory.slice(newHistory.length - MAX_HISTORY_ENTRIES)
