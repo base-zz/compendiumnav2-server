@@ -236,33 +236,32 @@ export const anchorRules = [
       const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
       const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
 
-      const dropPosition = anchorState.anchorDropLocation?.position;
+      const anchorPosition = anchorState.anchorLocation?.position;
       const criticalRange = anchorState.criticalRange?.r || 0;
-      const anchorDragTriggerDistance = 5;
 
-      if (!criticalRange || !dropPosition || boatLat == null || boatLon == null) {
+      if (!criticalRange || !anchorPosition || boatLat == null || boatLon == null) {
         return false;
       }
 
-      const dropLat = typeof dropPosition.latitude === 'object' ? dropPosition.latitude?.value : dropPosition.latitude;
-      const dropLon = typeof dropPosition.longitude === 'object' ? dropPosition.longitude?.value : dropPosition.longitude;
+      const anchorLat = typeof anchorPosition.latitude === 'object' ? anchorPosition.latitude?.value : anchorPosition.latitude;
+      const anchorLon = typeof anchorPosition.longitude === 'object' ? anchorPosition.longitude?.value : anchorPosition.longitude;
 
-      if (dropLat == null || dropLon == null) {
+      if (anchorLat == null || anchorLon == null) {
         return false;
       }
 
       const distance = calculateDistance(
         boatLat,
         boatLon,
-        dropLat,
-        dropLon
+        anchorLat,
+        anchorLon
       );
 
       const hasActiveAlert = state.alerts?.active?.some(
         (alert) => alert.trigger === 'anchor_dragging' && !alert.acknowledged
       );
 
-      return distance > criticalRange + anchorDragTriggerDistance && !hasActiveAlert;
+      return distance > criticalRange && !hasActiveAlert;
     },
     action: (state) => {
       const anchorState = state.anchor || {};
@@ -282,19 +281,19 @@ export const anchorRules = [
       const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
       const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
 
-      const dropPosition = anchorState.anchorDropLocation?.position;
+      const anchorPosition = anchorState.anchorLocation?.position;
       const criticalRange = anchorState.criticalRange?.r || 0;
       const isMetric = state.units?.distance === 'meters';
       const unitLabel = isMetric ? 'm' : 'ft';
 
-      const dropLat = typeof dropPosition.latitude === 'object' ? dropPosition.latitude?.value : dropPosition.latitude;
-      const dropLon = typeof dropPosition.longitude === 'object' ? dropPosition.longitude?.value : dropPosition.longitude;
+      const anchorLat = typeof anchorPosition.latitude === 'object' ? anchorPosition.latitude?.value : anchorPosition.latitude;
+      const anchorLon = typeof anchorPosition.longitude === 'object' ? anchorPosition.longitude?.value : anchorPosition.longitude;
 
       const distance = calculateDistance(
         boatLat,
         boatLon,
-        dropLat,
-        dropLon
+        anchorLat,
+        anchorLon
       );
 
       return {
@@ -305,7 +304,7 @@ export const anchorRules = [
           source: 'anchor_monitor',
           level: 'critical',
           label: 'Anchor Dragging',
-          message: `Anchor is dragging! Distance from drop point (${Math.round(
+          message: `Anchor is dragging! Distance from anchor (${Math.round(
             distance
           )} ${unitLabel}) exceeds critical range (${criticalRange} ${unitLabel}).`,
           trigger: 'anchor_dragging',

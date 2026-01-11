@@ -76,6 +76,110 @@ function calculateBearing(lat1, lon1, lat2, lon2) {
 }
 
 /**
+ * Extract rode length in meters from anchor rode field
+ * Handles both amount/units and value/unit shapes
+ * @param {Object} anchor - Anchor state object
+ * @returns {number} rode length in meters, or null if not available
+ */
+function extractRodeLengthMeters(anchor) {
+  if (!anchor?.rode) return null;
+  
+  const rode = anchor.rode;
+  const amount = rode.amount ?? rode.value;
+  const units = rode.units ?? rode.unit;
+  
+  if (amount == null || units == null) return null;
+  
+  // Convert to meters based on unit
+  switch (units.toLowerCase()) {
+    case 'm':
+    case 'meters':
+    case 'meter':
+      return amount;
+    case 'ft':
+    case 'feet':
+    case 'foot':
+      return amount * 0.3048;
+    default:
+      console.warn(`[Anchor] Unknown rode unit: ${units}, assuming meters`);
+      return amount;
+  }
+}
+
+/**
+ * Calculate GPS error margin based on HDOP
+ * @param {Object} navigationPosition - Navigation position object
+ * @returns {number} margin in meters
+ */
+function calculateHDOPMargin(navigationPosition) {
+  const hdop = navigationPosition?.gnss?.hdop?.value;
+  
+  if (hdop == null || !Number.isFinite(hdop)) {
+    console.warn('[Anchor] HDOP not available, using default margin of 5m');
+    return 5; // Default margin
+  }
+  
+  // Conservative estimate: HDOP * 5 meters + 1m for rode sag
+  const margin = (hdop * 5) + 1;
+  console.log(`[Anchor] HDOP-based margin: HDOP=${hdop}, margin=${margin.toFixed(1)}m`);
+  return margin;
+}
+
+/**
+ * Project new anchor position using direct projection method
+ * Places anchor at rodeLength distance from boat along bearing from anchor to boat
+ * @param {Object} boatPos - Boat position {latitude, longitude}
+ * @param {Object} currentAnchorPos - Current anchor position {latitude, longitude}
+ * @param {number} rodeLengthMeters - Rode length in meters
+ * @returns {Object} new anchor position {latitude, longitude}
+ */
+function projectNewAnchorPosition(boatPos, currentAnchorPos, rodeLengthMeters) {
+  // Calculate bearing from anchor to boat
+  const bearing = calculateBearing(
+    currentAnchorPos.latitude,
+    currentAnchorPos.longitude,
+    boatPos.latitude,
+    boatPos.longitude
+  );
+  
+  // Project new anchor position rodeLength meters from boat in opposite direction
+  const oppositeBearing = (bearing + 180) % 360;
+  
+  const toRad = (value) => (value * Math.PI) / 180;
+  const toDeg = (value) => (value * 180) / Math.PI;
+  const R = 6371e3; // Earth radius in meters
+  
+  const lat1 = toRad(boatPos.latitude);
+  const lon1 = toRad(boatPos.longitude);
+  const angularDistance = rodeLengthMeters / R;
+  const bearingRad = toRad(oppositeBearing);
+  
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(angularDistance) +
+    Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(bearingRad)
+  );
+  
+  const lon2 = lon1 + Math.atan2(
+    Math.sin(bearingRad) * Math.sin(angularDistance) * Math.cos(lat1),
+    Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2)
+  );
+  
+  const newAnchorPos = {
+    latitude: toDeg(lat2),
+    longitude: toDeg(lon2)
+  };
+  
+  console.log(`[Anchor] Projected new anchor position:`, {
+    from: currentAnchorPos,
+    to: newAnchorPos,
+    bearing: bearing.toFixed(1),
+    rodeLength: rodeLengthMeters
+  });
+  
+  return newAnchorPos;
+}
+
+/**
  * Recompute derived anchor fields based on the current application state.
  *
  * This function is pure: it does not mutate the input state. It returns
@@ -158,15 +262,93 @@ export function recomputeAnchorDerivedState(appState) {
     };
     changed = true;
 
-    // Update dragging flag based on same semantics as Anchor Dragging Detection rule
-    if (criticalRange != null && Number.isFinite(criticalRange)) {
-      const anchorDragTriggerDistance = 5; // meters, matches rule buffer
-      const isDragging =
-        distanceBoatFromDrop > criticalRange + anchorDragTriggerDistance;
-
-      if (updatedAnchor.dragging !== isDragging) {
-        updatedAnchor.dragging = isDragging;
-        changed = true;
+    // --- Anchor dragging detection based on rode length ---
+    if (anchorLat != null && anchorLon != null) {
+      const rodeLengthMeters = extractRodeLengthMeters(anchor);
+      const hdopMargin = calculateHDOPMargin(appState.navigation?.position);
+      
+      if (rodeLengthMeters != null && hdopMargin != null) {
+        const distanceBoatFromAnchor = calculateDistance(
+          boatLat,
+          boatLon,
+          anchorLat,
+          anchorLon
+        );
+        
+        const isOutsideRodeCircle = distanceBoatFromAnchor > rodeLengthMeters + hdopMargin;
+        
+        console.log(`[Anchor] Dragging check:`, {
+          distanceFromAnchor: distanceBoatFromAnchor.toFixed(1),
+          rodeLength: rodeLengthMeters,
+          margin: hdopMargin,
+          threshold: (rodeLengthMeters + hdopMargin).toFixed(1),
+          isOutside: isOutsideRodeCircle
+        });
+        
+        // Hybrid persistence logic (3 updates AND 5 seconds)
+        let draggingStart = updatedAnchor._draggingStart || null;
+        let draggingCount = updatedAnchor._draggingCount || 0;
+        
+        if (isOutsideRodeCircle) {
+          if (!draggingStart) {
+            draggingStart = Date.now();
+            draggingCount = 1;
+            console.log('[Anchor] Dragging violation started');
+          } else {
+            draggingCount++;
+            const timeSinceStart = Date.now() - draggingStart;
+            console.log(`[Anchor] Dragging violation: count=${draggingCount}, time=${timeSinceStart}ms`);
+            
+            // Update anchor location if we have enough persistence
+            if (draggingCount >= 3 && timeSinceStart > 5000) {
+              console.log('[Anchor] Dragging confirmed - updating anchor location');
+              
+              // Calculate new anchor position using direct projection
+              const newAnchorPos = projectNewAnchorPosition(
+                { latitude: boatLat, longitude: boatLon },
+                { latitude: anchorLat, longitude: anchorLon },
+                rodeLengthMeters
+              );
+              
+              // Update anchor location
+              updatedAnchor.anchorLocation = {
+                ...updatedAnchor.anchorLocation,
+                position: newAnchorPos,
+                time: Date.now()
+              };
+              
+              // Reset persistence tracking
+              draggingStart = null;
+              draggingCount = 0;
+              changed = true;
+            }
+          }
+        } else {
+          // Reset if boat comes back inside rode-length circle
+          if (draggingStart) {
+            console.log('[Anchor] Boat returned inside rode circle - resetting drag tracking');
+            draggingStart = null;
+            draggingCount = 0;
+            changed = true;
+          }
+        }
+        
+        // Update persistence tracking fields
+        updatedAnchor._draggingStart = draggingStart;
+        updatedAnchor._draggingCount = draggingCount;
+        
+        // Update dragging flag based on critical range (for alerts)
+        if (criticalRange != null && Number.isFinite(criticalRange)) {
+          const isDragging = distanceBoatFromAnchor > criticalRange;
+          
+          if (updatedAnchor.dragging !== isDragging) {
+            console.log(`[Anchor] Dragging flag changed: ${updatedAnchor.dragging} -> ${isDragging}`);
+            updatedAnchor.dragging = isDragging;
+            changed = true;
+          }
+        }
+      } else {
+        console.warn('[Anchor] Missing rode length or HDOP data - skipping drag detection');
       }
     }
   }
