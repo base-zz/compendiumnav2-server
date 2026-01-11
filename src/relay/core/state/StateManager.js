@@ -866,6 +866,7 @@ export class StateManager extends EventEmitter {
   }
 
   _runStateHelpers(patchOps) {
+    console.log('[StateManager] _runStateHelpers called with:', patchOps ? patchOps.length + ' ops' : 'null');
     const hasPatchOps = Array.isArray(patchOps);
     
     // Log all patch ops for debugging
@@ -884,6 +885,8 @@ export class StateManager extends EventEmitter {
             op.path.startsWith("/ais"))
         )
       : true;
+    
+    console.log('[StateManager] Anchor helper relevant?', anchorRelevant);
 
     // For quick troubleshooting without DEBUG noise, log when anchor-related
     // patches are processed. This avoids logging for high-frequency
