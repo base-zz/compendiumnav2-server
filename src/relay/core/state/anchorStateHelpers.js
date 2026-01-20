@@ -108,20 +108,17 @@ function extractRodeLengthMeters(anchor) {
 
 /**
  * Calculate GPS error margin based on HDOP
- * @param {Object} navigationPosition - Navigation position object
+ * @param {Object} position - Navigation position object
  * @returns {number} margin in meters
  */
-function calculateHDOPMargin(navigationPosition) {
-  const hdop = navigationPosition?.gnss?.hdop?.value;
+function calculateHDOPMargin(position) {
+  const hdop = position?.gnss?.hdop?.value;
   
   if (hdop == null || !Number.isFinite(hdop)) {
-    console.warn('[Anchor] HDOP not available, using default margin of 5m');
-    return 5; // Default margin
+    return 5; // Default 5m margin when HDOP unavailable
   }
   
-  // Conservative estimate: HDOP * 5 meters + 1m for rode sag
-  const margin = (hdop * 5) + 1;
-  console.log(`[Anchor] HDOP-based margin: HDOP=${hdop}, margin=${margin.toFixed(1)}m`);
+  const margin = (hdop * 5) + 1; // 5x HDOP + 1m base
   return margin;
 }
 

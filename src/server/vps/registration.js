@@ -20,7 +20,7 @@ async function registerWithVPS({ vpsUrl, boatId, boatInfo }) {
     try {
       // Extract the hostname and protocol from the VPS URL
       const url = new URL(vpsUrl);
-      const isHttps = url.protocol === 'https:';
+      const isHttps = url.protocol === 'https:' || url.protocol === 'wss:';
       const port = url.port || (isHttps ? 443 : 80);
       
       const postData = JSON.stringify({
