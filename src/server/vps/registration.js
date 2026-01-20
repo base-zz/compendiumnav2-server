@@ -15,7 +15,7 @@ const log = debug('server:vps:registration');
  * @param {Object} boatInfo - Additional boat information to register
  * @returns {Promise<Object>} The registration response
  */
-async function registerWithVPS({ vpsUrl, boatId, boatInfo }) {
+async function registerWithVPS({ vpsUrl, boatId, boatInfo, authorization }) {
   return new Promise((resolve, reject) => {
     try {
       // Extract the hostname and protocol from the VPS URL
@@ -32,11 +32,12 @@ async function registerWithVPS({ vpsUrl, boatId, boatInfo }) {
       const options = {
         hostname: url.hostname,
         port: port,
-        path: '/api/boats/register',
+        path: '/api/boat/register',
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(postData)
+          'Content-Length': Buffer.byteLength(postData),
+          ...(authorization ? { Authorization: authorization } : {})
         },
         rejectUnauthorized: process.env.NODE_ENV === 'production' // Only validate cert in production
       };
@@ -65,7 +66,10 @@ async function registerWithVPS({ vpsUrl, boatId, boatInfo }) {
             }
           } catch (error) {
             log('Error parsing VPS registration response:', error);
-            reject(new Error('Invalid response from VPS'));
+            const err = new Error('Invalid response from VPS');
+            err.statusCode = res.statusCode;
+            err.rawBody = data;
+            reject(err);
           }
         });
       });
@@ -123,6 +127,14 @@ export function registerVpsRoutes(app, { vpsUrl }) {
    */
   app.post('/api/vps/register', async (req, res) => {
     try {
+      const authorization = req.headers.authorization;
+      if (!authorization) {
+        return res.status(401).json({
+          success: false,
+          message: 'Authorization header is required'
+        });
+      }
+
       // Get current boat info
       const boatInfo = getBoatInfo();
       
@@ -139,13 +151,14 @@ export function registerVpsRoutes(app, { vpsUrl }) {
       const response = await registerWithVPS({
         vpsUrl,
         boatId: boatInfo.boatId,
+        authorization,
         boatInfo: {
-          name: boatInfo.name,
-          mmsi: boatInfo.mmsi,
-          callsign: boatInfo.callsign,
-          dimensions: boatInfo.dimensions,
-          position: boatInfo.position,
-          signalKStatus: boatInfo.signalK
+          boatName: boatInfo.name,
+          boatType: boatInfo.type,
+          loa: boatInfo.dimensions?.length,
+          beam: boatInfo.dimensions?.beam,
+          draft: boatInfo.dimensions?.draft,
+          mmsi: boatInfo.mmsi
         }
       });
 
