@@ -13,6 +13,9 @@ dist/
 # Database
 /src/signalk_dev.db
 
+# Local device DB (generated at runtime)
+/data/devices*
+
 # Keys and sensitive files
 .private-key
 .public-key
