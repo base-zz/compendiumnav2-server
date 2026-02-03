@@ -49,6 +49,8 @@ class PiBluetoothReaderPlugin extends EventEmitter {
     this.child = child;
     this.stdoutBuffer = "";
 
+    this.emit("scanStart");
+
     if (child.stdout) {
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (chunk) => {
@@ -75,14 +77,19 @@ class PiBluetoothReaderPlugin extends EventEmitter {
 
     if (child.stderr) {
       child.stderr.setEncoding("utf8");
-      child.stderr.on("data", () => {
-        // Ignore stderr output here; the helper already logs there.
+      child.stderr.on("data", (chunk) => {
+        const message = typeof chunk === "string" ? chunk.trim() : "";
+        if (!message) {
+          return;
+        }
+        this.emit("error", new Error(message));
       });
     }
 
     child.on("close", () => {
       this.child = null;
       this.stdoutBuffer = "";
+      this.emit("scanStop");
     });
   }
 
@@ -99,6 +106,8 @@ class PiBluetoothReaderPlugin extends EventEmitter {
     } catch {
       // Ignore errors on kill
     }
+
+    this.emit("scanStop");
   }
 
   _handleJsonLine(line) {
@@ -536,6 +545,19 @@ export class BluetoothService extends ContinuousService {
         this._handleNormalizedDevice(device).catch((error) => {
           this.log(`Error handling normalized device: ${error.message}`, "error");
         });
+      });
+
+      this.btReader.on("scanStart", () => {
+        this.emit("scanStart");
+        this._handleScanStart();
+      });
+
+      this.btReader.on("scanStop", () => {
+        this._handleScanStop();
+      });
+
+      this.btReader.on("error", (error) => {
+        this.emit("error", error);
       });
     }
 
