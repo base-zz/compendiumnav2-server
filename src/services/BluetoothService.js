@@ -114,10 +114,17 @@ class PiBluetoothReaderPlugin extends EventEmitter {
       return;
     }
 
-    const id = typeof parsed.id === "string" ? parsed.id : "";
+    let id = typeof parsed.id === "string" ? parsed.id : "";
     const address = typeof parsed.address === "string" ? parsed.address : "";
     const name = typeof parsed.name === "string" ? parsed.name : "";
     const rssi = typeof parsed.rssi === "number" ? parsed.rssi : null;
+
+    if (!address && id && id.includes("/")) {
+      const leaf = id.split("/").filter(Boolean).pop();
+      if (leaf) {
+        id = leaf;
+      }
+    }
 
     const mdata = parsed.manufacturerData && typeof parsed.manufacturerData === "object"
       ? parsed.manufacturerData
