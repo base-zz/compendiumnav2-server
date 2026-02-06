@@ -1185,6 +1185,58 @@ class NewStateService extends ContinuousService {
           state.navigation.wind.apparent.direction.units = 'deg';
         }
       },
+
+      "environment.wind.speedTrue": (value, state, queueUpdate) => {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          if (state.navigation?.wind?.true?.speed?.source === "signalk") {
+            delete state.navigation.wind.true.speed.source;
+          }
+          return;
+        }
+
+        queueUpdate("navigation.wind.true.speed.value", value);
+        state.navigation.wind.true.speed.value = value;
+        state.navigation.wind.true.speed.source = "signalk";
+      },
+
+      "environment.wind.directionTrue": (value, state, queueUpdate) => {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          if (state.navigation?.wind?.true?.direction?.source === "signalk") {
+            delete state.navigation.wind.true.direction.source;
+          }
+          return;
+        }
+
+        let directionDegrees = ((value % 360) + 360) % 360;
+        directionDegrees = Math.round(directionDegrees * 10) / 10;
+
+        queueUpdate("navigation.wind.true.direction.value", directionDegrees);
+        state.navigation.wind.true.direction.value = directionDegrees;
+        state.navigation.wind.true.direction.units = "deg";
+        state.navigation.wind.true.direction.source = "signalk";
+      },
+
+      "environment.wind.angleTrueWater": (value, state, queueUpdate) => {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          if (state.navigation?.wind?.true?.angle?.source === "signalk") {
+            delete state.navigation.wind.true.angle.source;
+          }
+          return;
+        }
+
+        let windAngleDegrees = ((value % 360) + 360) % 360;
+        if (windAngleDegrees > 180) {
+          windAngleDegrees = windAngleDegrees - 360;
+        }
+
+        windAngleDegrees = Math.round(windAngleDegrees * 10) / 10;
+
+        queueUpdate("navigation.wind.true.angle.value", windAngleDegrees);
+        state.navigation.wind.true.angle.value = windAngleDegrees;
+        state.navigation.wind.true.angle.units = "deg";
+        state.navigation.wind.true.angle.side = windAngleDegrees >= 0 ? "starboard" : "port";
+        state.navigation.wind.true.angle.source = "signalk";
+      },
     };
 
     return specialTransforms[path];

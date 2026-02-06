@@ -347,6 +347,40 @@ export const stateData = {
         wind.apparent.speed.knots = null;
       }
 
+      // True wind derived display values (always update these, but don't overwrite
+      // instrument-provided true wind values).
+      if (wind.true?.speed?.value !== undefined && wind.true.speed.value !== null) {
+        wind.true.speed.knots = UnitConversion.convert(
+          wind.true.speed.value,
+          trueSpeedUnits,
+          'kts'
+        );
+      } else if (wind.true?.speed) {
+        wind.true.speed.knots = null;
+      }
+
+      if (wind.true?.angle?.value !== undefined && wind.true.angle.value !== null) {
+        const trueAngleBase = convertToBase(wind.true.angle.value, trueAngleUnits);
+        wind.true.angle.degrees = trueAngleBase !== null
+          ? convertFromBase(trueAngleBase, 'deg')
+          : null;
+        wind.true.angle.side = trueAngleBase !== null
+          ? (trueAngleBase >= 0 ? "starboard" : "port")
+          : null;
+      } else if (wind.true?.angle) {
+        wind.true.angle.degrees = null;
+        wind.true.angle.side = null;
+      }
+
+      if (wind.true?.direction?.value !== undefined && wind.true.direction.value !== null) {
+        const trueDirectionBase = convertToBase(wind.true.direction.value, trueDirectionUnits);
+        wind.true.direction.degrees = trueDirectionBase !== null
+          ? convertFromBase(UnitConversion.normalizeRadians(trueDirectionBase), 'deg')
+          : null;
+      } else if (wind.true?.direction) {
+        wind.true.direction.degrees = null;
+      }
+
       // Only recalculate true wind if inputs have changed
       if (!inputsChanged) {
         return;
@@ -419,7 +453,7 @@ export const stateData = {
         //   trueWindDirectionBase
         // });
 
-        if (wind.true?.speed) {
+        if (wind.true?.speed && wind.true.speed.source !== 'signalk') {
           const trueWindSpeedValue = convertFromBase(trueWindSpeedBase, trueSpeedUnits);
           wind.true.speed.value = trueWindSpeedValue;
           wind.true.speed.knots = trueWindSpeedValue !== null
@@ -427,27 +461,27 @@ export const stateData = {
             : null;
         }
 
-        if (wind.true?.angle) {
+        if (wind.true?.angle && wind.true.angle.source !== 'signalk') {
           wind.true.angle.value = convertFromBase(trueWindAngleBase, trueAngleUnits);
           wind.true.angle.degrees = convertFromBase(trueWindAngleBase, 'deg');
           wind.true.angle.side = trueWindAngleBase >= 0 ? "starboard" : "port";
         }
 
-        if (wind.true?.direction) {
+        if (wind.true?.direction && wind.true.direction.source !== 'signalk') {
           wind.true.direction.value = convertFromBase(trueWindDirectionBase, trueDirectionUnits);
           wind.true.direction.degrees = convertFromBase(trueWindDirectionBase, 'deg');
         }
       } else {
-        if (wind.true?.speed) {
+        if (wind.true?.speed && wind.true.speed.source !== 'signalk') {
           wind.true.speed.value = null;
           wind.true.speed.knots = null;
         }
-        if (wind.true?.angle) {
+        if (wind.true?.angle && wind.true.angle.source !== 'signalk') {
           wind.true.angle.value = null;
           wind.true.angle.degrees = null;
           wind.true.angle.side = null;
         }
-        if (wind.true?.direction) {
+        if (wind.true?.direction && wind.true.direction.source !== 'signalk') {
           wind.true.direction.value = null;
           wind.true.direction.degrees = null;
         }
