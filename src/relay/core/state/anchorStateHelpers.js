@@ -282,14 +282,6 @@ export function recomputeAnchorDerivedState(appState) {
         
         const isOutsideRodeCircle = distanceBoatFromAnchor > rodeLengthMeters + hdopMargin;
         
-        console.log(`[Anchor] Dragging check:`, {
-          distanceFromAnchor: distanceBoatFromAnchor.toFixed(1),
-          rodeLength: rodeLengthMeters,
-          margin: hdopMargin,
-          threshold: (rodeLengthMeters + hdopMargin).toFixed(1),
-          isOutside: isOutsideRodeCircle
-        });
-        
         // Hybrid persistence logic (3 updates AND 5 seconds)
         let draggingStart = updatedAnchor._draggingStart || null;
         let draggingCount = updatedAnchor._draggingCount || 0;
