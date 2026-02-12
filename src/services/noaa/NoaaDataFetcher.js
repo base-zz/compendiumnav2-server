@@ -115,6 +115,59 @@ function parseNoaaTime(timeStr) {
   return new Date(cleaned).toISOString();
 }
 
+/**
+ * Build imputed current data from Open-Meteo ocean current data
+ * Converts hourly velocity/direction into prediction format for comparison with NOAA
+ * @param {Object} openMeteoHourly - Open-Meteo hourly data with time and values
+ * @returns {Array} Array of current predictions in NOAA-compatible format
+ */
+export function buildImputedCurrentData(openMeteoHourly) {
+  if (!openMeteoHourly?.time || !openMeteoHourly?.values) {
+    return null;
+  }
+
+  const times = openMeteoHourly.time;
+  const velocities = openMeteoHourly.values.oceanCurrentVelocity || [];
+  const directions = openMeteoHourly.values.oceanCurrentDirection || [];
+
+  if (!times.length || !velocities.length) {
+    return null;
+  }
+
+  const predictions = [];
+
+  for (let i = 0; i < times.length; i++) {
+    const velocity = velocities[i];
+    const direction = directions[i];
+
+    if (velocity === null || velocity === undefined || direction === null || direction === undefined) {
+      continue;
+    }
+
+    // Infer type from velocity magnitude (Open-Meteo uses signed velocity)
+    // Positive = one direction, negative = opposite
+    let type = "slack";
+    const absVelocity = Math.abs(velocity);
+    if (absVelocity > 0.2) {
+      // Direction interpretation: arbitrary - we'll use the actual direction
+      // For consistency with NOAA, we call it "flood" when moving in recorded direction
+      type = "flood";
+    }
+
+    predictions.push({
+      time: times[i],
+      velocity: absVelocity,
+      direction: direction,
+      type: type,
+      meanFloodDir: direction,
+      meanEbbDir: (direction + 180) % 360,
+      source: "openmeteo"
+    });
+  }
+
+  return predictions;
+}
+
 export function interpolateHourlyTides(hiloData, hoursToGenerate = 72, options = {}) {
   if (!hiloData || hiloData.length < 2) {
     return [];
@@ -184,6 +237,7 @@ export function buildTidePayload(options) {
     hiloData,
     hourlyData,
     currentData,
+    imputedCurrentData,
     tideStation,
     currentStation,
     buoyStation,
@@ -283,6 +337,12 @@ export function buildTidePayload(options) {
     currentEvents: currentData
       ? {
           predictions: currentData,
+        }
+      : null,
+    imputedCurrent: imputedCurrentData
+      ? {
+          predictions: imputedCurrentData,
+          source: "openmeteo",
         }
       : null,
     buoyObservations: ndbcData

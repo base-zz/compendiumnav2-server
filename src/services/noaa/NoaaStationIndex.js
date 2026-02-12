@@ -38,6 +38,7 @@ async function loadTideStations(stationFile = DEFAULT_TIDE_STATION_FILE) {
           state: station.state || null,
           timezoneOffset: station.timezonecorr ?? null,
           type: station.type || null,
+          referenceId: station.reference_id || null,
         }));
     } else {
       tideStationCache = [];

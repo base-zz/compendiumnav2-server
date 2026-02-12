@@ -267,85 +267,31 @@ export function recomputeAnchorDerivedState(appState) {
     };
     changed = true;
 
-    // --- Anchor dragging detection based on rode length ---
-    if (anchorLat != null && anchorLon != null) {
+    // --- Anchor dragging detection: simple circle check against DROP location ---
+    // If boat center is outside rode-length circle from where anchor was dropped, it's dragging
+    if (dropLat != null && dropLon != null) {
       const rodeLengthMeters = extractRodeLengthMeters(anchor);
-      const hdopMargin = calculateHDOPMargin(appState.navigation?.position);
       
-      if (rodeLengthMeters != null && hdopMargin != null) {
-        const distanceBoatFromAnchor = calculateDistance(
+      if (rodeLengthMeters != null) {
+        const distanceBoatFromDrop = calculateDistance(
           boatLat,
           boatLon,
-          anchorLat,
-          anchorLon
+          dropLat,
+          dropLon
         );
         
-        const isOutsideRodeCircle = distanceBoatFromAnchor > rodeLengthMeters + hdopMargin;
+        // Simple: boat center outside rode circle from drop point = dragging
+        const isDragging = distanceBoatFromDrop > rodeLengthMeters;
         
-        // Hybrid persistence logic (3 updates AND 5 seconds)
-        let draggingStart = updatedAnchor._draggingStart || null;
-        let draggingCount = updatedAnchor._draggingCount || 0;
-        
-        if (isOutsideRodeCircle) {
-          if (!draggingStart) {
-            draggingStart = Date.now();
-            draggingCount = 1;
-            console.log('[Anchor] Dragging violation started');
+        if (updatedAnchor.dragging !== isDragging) {
+          updatedAnchor.dragging = isDragging;
+          changed = true;
+          if (isDragging) {
+            console.log(`[Anchor] Dragging detected: distance from drop=${distanceBoatFromDrop.toFixed(1)}m, rode=${rodeLengthMeters.toFixed(1)}m`);
           } else {
-            draggingCount++;
-            const timeSinceStart = Date.now() - draggingStart;
-            console.log(`[Anchor] Dragging violation: count=${draggingCount}, time=${timeSinceStart}ms`);
-            
-            // Update anchor location if we have enough persistence
-            if (draggingCount >= 3 && timeSinceStart > 5000) {
-              console.log('[Anchor] Dragging confirmed - updating anchor location');
-              
-              // Calculate new anchor position using direct projection
-              const newAnchorPos = projectNewAnchorPosition(
-                { latitude: boatLat, longitude: boatLon },
-                { latitude: anchorLat, longitude: anchorLon },
-                rodeLengthMeters
-              );
-              
-              // Update anchor location
-              updatedAnchor.anchorLocation = {
-                ...updatedAnchor.anchorLocation,
-                position: newAnchorPos,
-                time: Date.now()
-              };
-              
-              // Reset persistence tracking
-              draggingStart = null;
-              draggingCount = 0;
-              changed = true;
-            }
-          }
-        } else {
-          // Reset if boat comes back inside rode-length circle
-          if (draggingStart) {
-            console.log('[Anchor] Boat returned inside rode circle - resetting drag tracking');
-            draggingStart = null;
-            draggingCount = 0;
-            changed = true;
+            console.log('[Anchor] Dragging cleared - boat back inside rode circle');
           }
         }
-        
-        // Update persistence tracking fields
-        updatedAnchor._draggingStart = draggingStart;
-        updatedAnchor._draggingCount = draggingCount;
-        
-        // Update dragging flag based on critical range (for alerts)
-        if (criticalRange != null && Number.isFinite(criticalRange)) {
-          const isDragging = distanceBoatFromAnchor > criticalRange;
-          
-          if (updatedAnchor.dragging !== isDragging) {
-            console.log(`[Anchor] Dragging flag changed: ${updatedAnchor.dragging} -> ${isDragging}`);
-            updatedAnchor.dragging = isDragging;
-            changed = true;
-          }
-        }
-      } else {
-        console.warn('[Anchor] Missing rode length or HDOP data - skipping drag detection');
       }
     }
   }

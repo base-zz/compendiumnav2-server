@@ -8,6 +8,7 @@ import {
   fetchNoaaCurrentPredictions,
   interpolateHourlyTides,
   buildTidePayload,
+  buildImputedCurrentData,
 } from "./noaa/NoaaDataFetcher.js";
 import {
   findNearestBuoyStation,
@@ -392,7 +393,12 @@ export class TidalService extends ScheduledService {
           const forecastHours = 120; // 5 days
           if (tideStation) {
             try {
-              hiloData = await fetchNoaaTidePredictions(tideStation.id, {
+              // Use referenceId for TEC subordinate stations, otherwise use station id
+              const predictionStationId = tideStation.referenceId || tideStation.id;
+              this.log(
+                `Fetching tide predictions using station ${predictionStationId} (selected: ${tideStation.id}${tideStation.referenceId ? ', subordinate of ' + tideStation.referenceId : ''})`
+              );
+              hiloData = await fetchNoaaTidePredictions(predictionStationId, {
                 rangeHours: forecastHours,
                 units: noaaUnits,
               });
@@ -427,6 +433,19 @@ export class TidalService extends ScheduledService {
             this.log("Fetched Open-Meteo wave/SST data");
           } catch (err) {
             this.logError("Failed to fetch Open-Meteo data:", err);
+          }
+
+          // Build imputed current data from Open-Meteo (always available globally)
+          let imputedCurrentData = null;
+          if (openMeteoData?.hourly) {
+            try {
+              imputedCurrentData = buildImputedCurrentData(openMeteoData.hourly);
+              if (imputedCurrentData?.length) {
+                this.log(`Built ${imputedCurrentData.length} imputed current predictions from Open-Meteo`);
+              }
+            } catch (err) {
+              this.logError("Failed to build imputed current data:", err);
+            }
           }
 
           // Fetch NDBC buoy observations if station available
@@ -509,6 +528,7 @@ export class TidalService extends ScheduledService {
             hiloData,
             hourlyData: hourlyTideData,
             currentData,
+            imputedCurrentData,
             tideStation,
             currentStation,
             buoyStation,
