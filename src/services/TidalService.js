@@ -439,7 +439,7 @@ export class TidalService extends ScheduledService {
           let imputedCurrentData = null;
           if (openMeteoData?.hourly) {
             try {
-              imputedCurrentData = buildImputedCurrentData(openMeteoData.hourly);
+              imputedCurrentData = buildImputedCurrentData(openMeteoData.hourly, hourlyTideData);
               if (imputedCurrentData?.length) {
                 this.log(`Built ${imputedCurrentData.length} imputed current predictions from Open-Meteo`);
               }

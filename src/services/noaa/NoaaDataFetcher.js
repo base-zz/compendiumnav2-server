@@ -117,11 +117,12 @@ function parseNoaaTime(timeStr) {
 
 /**
  * Build imputed current data from Open-Meteo ocean current data
- * Converts hourly velocity/direction into prediction format for comparison with NOAA
+ * Uses tide height rate-of-change to determine flood vs ebb
  * @param {Object} openMeteoHourly - Open-Meteo hourly data with time and values
+ * @param {Array} tideHourly - Hourly tide height data for rate-of-change calculation
  * @returns {Array} Array of current predictions in NOAA-compatible format
  */
-export function buildImputedCurrentData(openMeteoHourly) {
+export function buildImputedCurrentData(openMeteoHourly, tideHourly) {
   if (!openMeteoHourly?.time || !openMeteoHourly?.values) {
     return null;
   }
@@ -134,6 +135,14 @@ export function buildImputedCurrentData(openMeteoHourly) {
     return null;
   }
 
+  // Build a map of tide heights by time for rate-of-change calculation
+  const tideHeightMap = new Map();
+  if (tideHourly?.length) {
+    for (const tide of tideHourly) {
+      tideHeightMap.set(tide.time, tide.height);
+    }
+  }
+
   const predictions = [];
 
   for (let i = 0; i < times.length; i++) {
@@ -144,23 +153,48 @@ export function buildImputedCurrentData(openMeteoHourly) {
       continue;
     }
 
-    // Infer type from velocity magnitude (Open-Meteo uses signed velocity)
-    // Positive = one direction, negative = opposite
-    let type = "slack";
     const absVelocity = Math.abs(velocity);
+    const currentTime = times[i];
+    
+    // Calculate tide rate of change to determine flood vs ebb
+    let tideRate = 0;
+    const currentHeight = tideHeightMap.get(currentTime);
+    const prevTime = i > 0 ? times[i - 1] : null;
+    const prevHeight = prevTime ? tideHeightMap.get(prevTime) : null;
+    
+    if (currentHeight != null && prevHeight != null) {
+      // Rate in meters per hour
+      tideRate = currentHeight - prevHeight;
+    }
+
+    // Determine type based on tide rate and velocity magnitude
+    let type = "slack";
+    let signedVelocity = absVelocity;
+    
     if (absVelocity > 0.2) {
-      // Direction interpretation: arbitrary - we'll use the actual direction
-      // For consistency with NOAA, we call it "flood" when moving in recorded direction
-      type = "flood";
+      if (tideRate > 0.05) {
+        // Rising tide = flood (inflow)
+        type = "flood";
+        signedVelocity = absVelocity; // Positive
+      } else if (tideRate < -0.05) {
+        // Falling tide = ebb (outflow)  
+        type = "ebb";
+        signedVelocity = -absVelocity; // Negative
+      } else {
+        // Near slack tide but still moving
+        type = "slack";
+        signedVelocity = absVelocity > 0.3 ? absVelocity : absVelocity * 0.5; // Small positive
+      }
     }
 
     predictions.push({
-      time: times[i],
-      velocity: absVelocity,
+      time: currentTime,
+      velocity: signedVelocity,
       direction: direction,
       type: type,
-      meanFloodDir: direction,
-      meanEbbDir: (direction + 180) % 360,
+      meanFloodDir: tideRate > 0 ? direction : (direction + 180) % 360,
+      meanEbbDir: tideRate < 0 ? direction : (direction + 180) % 360,
+      tideRate: tideRate, // Include for debugging
       source: "openmeteo"
     });
   }
