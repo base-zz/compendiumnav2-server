@@ -135,7 +135,7 @@ export function buildImputedCurrentData(openMeteoHourly, tideHourly) {
     return null;
   }
 
-  // Build a map of tide heights by time for rate-of-change calculation
+  // Build a map of tide heights by time
   const tideHeightMap = new Map();
   if (tideHourly?.length) {
     for (const tide of tideHourly) {
@@ -143,58 +143,59 @@ export function buildImputedCurrentData(openMeteoHourly, tideHourly) {
     }
   }
 
+  // First pass: calculate all tide rates and find max rate for normalization
+  const tideRates = [];
+  let maxTideRate = 0.05; // Minimum to avoid division issues
+
+  for (let i = 0; i < times.length; i++) {
+    const currentTime = times[i];
+    const currentHeight = tideHeightMap.get(currentTime);
+    const prevTime = i > 0 ? times[i - 1] : null;
+    const prevHeight = prevTime ? tideHeightMap.get(prevTime) : null;
+    
+    let tideRate = 0;
+    if (currentHeight != null && prevHeight != null) {
+      tideRate = currentHeight - prevHeight; // meters per hour
+    }
+    tideRates.push(tideRate);
+    maxTideRate = Math.max(maxTideRate, Math.abs(tideRate));
+  }
+
+  // Second pass: build predictions with smooth velocity scaling
   const predictions = [];
 
   for (let i = 0; i < times.length; i++) {
     const velocity = velocities[i];
     const direction = directions[i];
+    const tideRate = tideRates[i];
 
     if (velocity === null || velocity === undefined || direction === null || direction === undefined) {
       continue;
     }
 
     const absVelocity = Math.abs(velocity);
-    const currentTime = times[i];
     
-    // Calculate tide rate of change to determine flood vs ebb
-    let tideRate = 0;
-    const currentHeight = tideHeightMap.get(currentTime);
-    const prevTime = i > 0 ? times[i - 1] : null;
-    const prevHeight = prevTime ? tideHeightMap.get(prevTime) : null;
+    // Smooth scaling: velocity scales with tide rate
+    // At max flood/ebb: full velocity
+    // At slack: near zero velocity
+    const normalizedRate = tideRate / maxTideRate; // -1.0 to +1.0
+    const signedVelocity = absVelocity * normalizedRate;
     
-    if (currentHeight != null && prevHeight != null) {
-      // Rate in meters per hour
-      tideRate = currentHeight - prevHeight;
-    }
-
-    // Determine type based on tide rate and velocity magnitude
+    // Determine type based on scaled velocity
     let type = "slack";
-    let signedVelocity = absVelocity;
-    
-    if (absVelocity > 0.2) {
-      if (tideRate > 0.05) {
-        // Rising tide = flood (inflow)
-        type = "flood";
-        signedVelocity = absVelocity; // Positive
-      } else if (tideRate < -0.05) {
-        // Falling tide = ebb (outflow)  
-        type = "ebb";
-        signedVelocity = -absVelocity; // Negative
-      } else {
-        // Near slack tide but still moving
-        type = "slack";
-        signedVelocity = absVelocity > 0.3 ? absVelocity : absVelocity * 0.5; // Small positive
-      }
+    if (Math.abs(signedVelocity) > 0.1) {
+      type = signedVelocity > 0 ? "flood" : "ebb";
     }
 
     predictions.push({
-      time: currentTime,
+      time: times[i],
       velocity: signedVelocity,
       direction: direction,
       type: type,
-      meanFloodDir: tideRate > 0 ? direction : (direction + 180) % 360,
-      meanEbbDir: tideRate < 0 ? direction : (direction + 180) % 360,
-      tideRate: tideRate, // Include for debugging
+      meanFloodDir: normalizedRate > 0 ? direction : (direction + 180) % 360,
+      meanEbbDir: normalizedRate < 0 ? direction : (direction + 180) % 360,
+      tideRate: tideRate,
+      maxRate: maxTideRate,
       source: "openmeteo"
     });
   }
