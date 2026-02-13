@@ -268,7 +268,7 @@ export function recomputeAnchorDerivedState(appState) {
     changed = true;
 
     // --- Anchor dragging detection: simple circle check against DROP location ---
-    // If boat center is outside rode-length circle from where anchor was dropped, it's dragging
+    // If boat center is outside rode-length circle from where anchor was dropped, check if anchor moved
     if (dropLat != null && dropLon != null) {
       const rodeLengthMeters = extractRodeLengthMeters(anchor);
       
@@ -280,16 +280,43 @@ export function recomputeAnchorDerivedState(appState) {
           dropLon
         );
         
-        // Simple: boat center outside rode circle from drop point = dragging
-        const isDragging = distanceBoatFromDrop > rodeLengthMeters;
+        // Check how far anchor has moved from drop point (if anchor position known)
+        let distanceAnchorFromDrop = 0;
+        if (anchorLat != null && anchorLon != null) {
+          distanceAnchorFromDrop = calculateDistance(
+            dropLat,
+            dropLon,
+            anchorLat,
+            anchorLon
+          );
+        }
+        
+        const ANCHOR_MOVED_THRESHOLD = 5; // meters - anchor considered "moved" if >5m from drop
+        const rodeCircleViolated = distanceBoatFromDrop > rodeLengthMeters;
+        const anchorHasMoved = distanceAnchorFromDrop > ANCHOR_MOVED_THRESHOLD;
+        
+        // Dragging only if rode circle violated AND anchor has moved significantly
+        const isDragging = rodeCircleViolated && anchorHasMoved;
+        
+        // Configuration mismatch: rode circle violated but anchor hasn't moved
+        // This suggests rode length in app doesn't match deployed rode
+        const isRodeMismatch = rodeCircleViolated && !anchorHasMoved;
         
         if (updatedAnchor.dragging !== isDragging) {
           updatedAnchor.dragging = isDragging;
           changed = true;
           if (isDragging) {
-            console.log(`[Anchor] Dragging detected: distance from drop=${distanceBoatFromDrop.toFixed(1)}m, rode=${rodeLengthMeters.toFixed(1)}m`);
+            console.log(`[Anchor] Dragging detected: distance from drop=${distanceBoatFromDrop.toFixed(1)}m, rode=${rodeLengthMeters.toFixed(1)}m, anchor moved=${distanceAnchorFromDrop.toFixed(1)}m`);
           } else {
             console.log('[Anchor] Dragging cleared - boat back inside rode circle');
+          }
+        }
+        
+        if (updatedAnchor.rodeCircleViolation !== isRodeMismatch) {
+          updatedAnchor.rodeCircleViolation = isRodeMismatch;
+          changed = true;
+          if (isRodeMismatch) {
+            console.log(`[Anchor] Rode circle violated but anchor hasn't moved - check rode length config: distance=${distanceBoatFromDrop.toFixed(1)}m, rode=${rodeLengthMeters.toFixed(1)}m`);
           }
         }
       }
