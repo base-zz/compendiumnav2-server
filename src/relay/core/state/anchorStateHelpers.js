@@ -2,6 +2,186 @@
 // These functions recompute derived anchor fields based on current
 // boat position, anchor configuration, and AIS targets.
 
+// Fence distance history constants
+const FENCE_HISTORY_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
+const FENCE_HISTORY_MIN_INTERVAL_MS = 15 * 1000; // 15 seconds
+
+/**
+ * Convert distance to fence units (m or ft)
+ * @param {number} distanceMeters - Distance in meters
+ * @param {string} targetUnits - Target units ('m' or 'ft')
+ * @returns {number} distance in target units
+ */
+function convertDistanceToFenceUnits(distanceMeters, targetUnits) {
+  if (targetUnits === 'ft') {
+    return distanceMeters * 3.28084; // meters to feet
+  }
+  return distanceMeters; // default to meters
+}
+
+/**
+ * Append distance to fence history with 15-second sampling logic
+ * @param {Object} fence - Fence object to update
+ * @param {number} distance - Distance value in fence units
+ * @param {number} nowMs - Current timestamp in milliseconds
+ */
+function appendDistanceHistory(fence, distance, nowMs) {
+  if (!Array.isArray(fence.distanceHistory)) {
+    fence.distanceHistory = [];
+  }
+  
+  // Prune old entries outside the 2-hour window
+  const cutoff = nowMs - FENCE_HISTORY_WINDOW_MS;
+  fence.distanceHistory = fence.distanceHistory.filter(entry => entry.t >= cutoff);
+  
+  const lastEntry = fence.distanceHistory[fence.distanceHistory.length - 1];
+  
+  // Minimum delta to record: 0.5m or 1.5ft
+  const minDelta = fence.units === 'ft' ? 1.5 : 0.5;
+  
+  // Should append if: no last entry, 15s passed, or significant change
+  const shouldAppend = !lastEntry 
+    || (nowMs - lastEntry.t) >= FENCE_HISTORY_MIN_INTERVAL_MS
+    || Math.abs(distance - lastEntry.v) >= minDelta;
+    
+  if (shouldAppend) {
+    fence.distanceHistory.push({ t: nowMs, v: distance });
+  }
+}
+
+/**
+ * Update minimum distance tracking for a fence
+ * @param {Object} fence - Fence object to update
+ * @param {number} distance - Current distance in fence units
+ * @param {number} nowMs - Current timestamp in milliseconds
+ */
+function updateMinimumDistance(fence, distance, nowMs) {
+  if (fence.minimumDistance == null || distance < fence.minimumDistance) {
+    fence.minimumDistance = distance;
+    fence.minimumDistanceUnits = fence.units;
+    fence.minimumDistanceUpdatedAt = nowMs;
+  }
+}
+
+/**
+ * Update fence distance and related fields
+ * Called every navigation position update (max 1Hz)
+ * @param {Object} fence - Fence object to update
+ * @param {Object} boatPosition - Boat position {latitude, longitude}
+ * @param {Object} anchorDropLocation - Anchor drop position {latitude, longitude}
+ * @returns {boolean} true if fence was modified
+ */
+function updateFenceDistance(fence, boatPosition, anchorDropLocation) {
+  if (!fence.enabled) return false;
+  if (!boatPosition?.latitude || !boatPosition?.longitude) return false;
+  
+  // Determine reference position based on fence type
+  let referenceLat, referenceLon;
+  
+  if (fence.referenceType === 'anchor_drop') {
+    if (!anchorDropLocation?.latitude || !anchorDropLocation?.longitude) return false;
+    referenceLat = anchorDropLocation.latitude;
+    referenceLon = anchorDropLocation.longitude;
+  } else {
+    // Default to boat position as reference
+    referenceLat = boatPosition.latitude;
+    referenceLon = boatPosition.longitude;
+  }
+  
+  // Calculate distance from reference to target
+  let targetLat, targetLon;
+  
+  if (fence.targetType === 'ais' && fence.targetMmsi) {
+    // For AIS targets, we'd need to look up the target position from AIS data
+    // This would require passing AIS state - handled by caller
+    return false; // Not implemented in this function
+  } else if (fence.targetPosition) {
+    targetLat = fence.targetPosition.latitude;
+    targetLon = fence.targetPosition.longitude;
+  } else {
+    return false;
+  }
+  
+  if (targetLat == null || targetLon == null) return false;
+  
+  // Calculate distance in meters
+  const distanceMeters = calculateDistance(referenceLat, referenceLon, targetLat, targetLon);
+  
+  // Convert to fence units
+  const distanceInUnits = convertDistanceToFenceUnits(distanceMeters, fence.units);
+  
+  const nowMs = Date.now();
+  let modified = false;
+  
+  // Update current distance
+  if (fence.currentDistance !== distanceInUnits) {
+    fence.currentDistance = distanceInUnits;
+    fence.currentDistanceUnits = fence.units;
+    modified = true;
+  }
+  
+  // Append to history
+  const historyLengthBefore = fence.distanceHistory?.length || 0;
+  appendDistanceHistory(fence, distanceInUnits, nowMs);
+  if (fence.distanceHistory?.length !== historyLengthBefore) {
+    modified = true;
+  }
+  
+  // Update minimum distance
+  const prevMin = fence.minimumDistance;
+  updateMinimumDistance(fence, distanceInUnits, nowMs);
+  if (fence.minimumDistance !== prevMin) {
+    modified = true;
+  }
+  
+  // Check alert condition
+  const alertRange = fence.alertRange ?? 0;
+  const inAlert = distanceInUnits <= alertRange;
+  if (fence.inAlert !== inAlert) {
+    fence.inAlert = inAlert;
+    modified = true;
+    if (inAlert) {
+      console.log(`[Fence] Alert triggered: ${fence.id || 'unknown'} at ${distanceInUnits.toFixed(1)}${fence.units} (limit: ${alertRange}${fence.units})`);
+    }
+  }
+  
+  return modified;
+}
+
+/**
+ * Update all fences for anchor state
+ * @param {Array} fences - Array of fence objects
+ * @param {Object} boatPosition - Current boat position
+ * @param {Object} anchorDropLocation - Anchor drop location
+ * @param {Object} aisTargets - AIS targets object (mmsi -> target)
+ * @returns {Array|null} Updated fences array or null if unchanged
+ */
+function updateAllFences(fences, boatPosition, anchorDropLocation, aisTargets) {
+  if (!Array.isArray(fences) || fences.length === 0) return null;
+  if (!boatPosition?.latitude || !boatPosition?.longitude) return null;
+  
+  let anyModified = false;
+  const updatedFences = fences.map(fence => {
+    // For AIS targets, inject target position from aisTargets
+    let fenceWithTarget = fence;
+    if (fence.targetType === 'ais' && fence.targetMmsi && aisTargets?.[fence.targetMmsi]) {
+      const aisTarget = aisTargets[fence.targetMmsi];
+      if (aisTarget?.position) {
+        fenceWithTarget = {
+          ...fence,
+          targetPosition: aisTarget.position
+        };
+      }
+    }
+    
+    const modified = updateFenceDistance(fenceWithTarget, boatPosition, anchorDropLocation);
+    if (modified) anyModified = true;
+    return fenceWithTarget;
+  });
+  
+  return anyModified ? updatedFences : null;
+}
+
 /**
  * Calculate distance between two points in meters (Haversine formula)
  * @param {number} lat1
@@ -447,6 +627,36 @@ export function recomputeAnchorDerivedState(appState) {
         updatedAnchor.aisWarning = hasWarning;
         changed = true;
       }
+    }
+  }
+
+  // --- Fence distance updates ---
+  if (boatLat != null && boatLon != null && updatedAnchor.fences?.length > 0) {
+    // Build AIS targets map for fence lookups
+    const aisTargetsMap = {};
+    const aisTargetsArray = Array.isArray(appState.ais?.targets)
+      ? appState.ais.targets
+      : Object.values(appState.aisTargets || {});
+    
+    for (const target of aisTargetsArray) {
+      if (target?.mmsi) {
+        aisTargetsMap[target.mmsi] = target;
+      }
+    }
+    
+    const boatPosition = { latitude: boatLat, longitude: boatLon };
+    const dropLocation = updatedAnchor.anchorDropLocation?.position;
+    
+    const updatedFences = updateAllFences(
+      updatedAnchor.fences,
+      boatPosition,
+      dropLocation,
+      aisTargetsMap
+    );
+    
+    if (updatedFences) {
+      updatedAnchor.fences = updatedFences;
+      changed = true;
     }
   }
 
