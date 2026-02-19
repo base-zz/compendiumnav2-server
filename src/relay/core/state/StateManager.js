@@ -901,6 +901,20 @@ export class StateManager extends EventEmitter {
           "[StateManager][_runStateHelpers] Anchor helper produced updated anchor state"
         );
         this.appState.anchor = updatedAnchor;
+        
+        // Emit patch for anchor state changes (e.g., fence distance updates)
+        this.emit("state:patch", {
+          type: "state:patch",
+          data: [
+            {
+              op: "replace",
+              path: "/anchor",
+              value: updatedAnchor,
+            },
+          ],
+          boatId: this._boatId,
+          timestamp: Date.now(),
+        });
       } else {
         logState(
           "[StateManager][_runStateHelpers] Anchor helper made no changes to anchor state"
