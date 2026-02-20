@@ -113,6 +113,9 @@ function updateFenceDistance(fence, boatPosition, anchorDropLocation) {
   } else if (fence.targetPosition) {
     targetLat = fence.targetPosition.latitude;
     targetLon = fence.targetPosition.longitude;
+  } else if (fence.targetType === 'point' && fence.targetRef) {
+    targetLat = fence.targetRef.latitude;
+    targetLon = fence.targetRef.longitude;
   } else {
     console.log(`[Fence][${fence.id || 'unknown'}] Returning false: no targetPosition`);
     return false;
