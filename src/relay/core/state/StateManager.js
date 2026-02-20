@@ -890,8 +890,10 @@ export class StateManager extends EventEmitter {
       : false;
 
     if (anchorRelevant) {
-      const updatedAnchor = recomputeAnchorDerivedState(this.appState);
-      if (updatedAnchor) {
+      const helperResult = recomputeAnchorDerivedState(this.appState);
+      if (helperResult) {
+        const { anchor: updatedAnchor, changedPaths } = helperResult;
+        
         if (hasAnchorPatch) {
           console.log(
             "[StateManager][_runStateHelpers] Anchor helper updated anchor state after anchor patch"
@@ -902,19 +904,20 @@ export class StateManager extends EventEmitter {
         );
         this.appState.anchor = updatedAnchor;
         
-        // Emit patch for anchor state changes (e.g., fence distance updates)
+        // Emit granular patches for each changed path - never emit full anchor
+        const patches = changedPaths.map(({ path, value }) => ({
+          op: "replace",
+          path,
+          value,
+        }));
+        
         this.emit("state:patch", {
           type: "state:patch",
-          data: [
-            {
-              op: "replace",
-              path: "/anchor",
-              value: updatedAnchor,
-            },
-          ],
+          data: patches,
           boatId: this._boatId,
           timestamp: Date.now(),
         });
+        logState(`[StateManager][_runStateHelpers] Emitted ${patches.length} granular anchor patches`);
       } else {
         logState(
           "[StateManager][_runStateHelpers] Anchor helper made no changes to anchor state"

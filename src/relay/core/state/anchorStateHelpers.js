@@ -418,7 +418,12 @@ export function recomputeAnchorDerivedState(appState) {
   const warningRadius = anchor.warningRange?.r ?? null;
 
   let updatedAnchor = { ...anchor };
-  let changed = false;
+  const changedPaths = [];
+
+  // Helper to track changes
+  const trackChange = (path, value) => {
+    changedPaths.push({ path, value });
+  };
 
   // --- Distances and bearings relative to DROP location ---
   if (dropLat != null && dropLon != null) {
@@ -445,7 +450,7 @@ export function recomputeAnchorDerivedState(appState) {
       ...updatedAnchor,
       anchorDropLocation: updatedDropLocation,
     };
-    changed = true;
+    trackChange("/anchor/anchorDropLocation", updatedDropLocation);
 
     // --- Anchor dragging detection: simple circle check against DROP location ---
     // If boat center is outside rode-length circle from where anchor was dropped, check if anchor moved
@@ -484,7 +489,7 @@ export function recomputeAnchorDerivedState(appState) {
         
         if (updatedAnchor.dragging !== isDragging) {
           updatedAnchor.dragging = isDragging;
-          changed = true;
+          trackChange("/anchor/dragging", isDragging);
           if (isDragging) {
             console.log(`[Anchor] Dragging detected: distance from drop=${distanceBoatFromDrop.toFixed(1)}m, rode=${rodeLengthMeters.toFixed(1)}m, anchor moved=${distanceAnchorFromDrop.toFixed(1)}m`);
           } else {
@@ -494,7 +499,7 @@ export function recomputeAnchorDerivedState(appState) {
         
         if (updatedAnchor.rodeCircleViolation !== isRodeMismatch) {
           updatedAnchor.rodeCircleViolation = isRodeMismatch;
-          changed = true;
+          trackChange("/anchor/rodeCircleViolation", isRodeMismatch);
           if (isRodeMismatch) {
             console.log(`[Anchor] Rode circle violated but anchor hasn't moved - check rode length config: distance=${distanceBoatFromDrop.toFixed(1)}m, rode=${rodeLengthMeters.toFixed(1)}m`);
           }
@@ -554,7 +559,7 @@ export function recomputeAnchorDerivedState(appState) {
       ...updatedAnchor,
       anchorLocation: updatedAnchorLocation,
     };
-    changed = true;
+    trackChange("/anchor/anchorLocation", updatedAnchorLocation);
 
     // --- History (breadcrumbs) ---
     const now = Date.now();
@@ -592,7 +597,7 @@ export function recomputeAnchorDerivedState(appState) {
 
       if (trimmedHistory !== existingHistory) {
         updatedAnchor.history = trimmedHistory;
-        changed = true;
+        trackChange("/anchor/history", trimmedHistory);
         console.log(`[Anchor] History updated - now has ${trimmedHistory.length} entries`);
       }
     }
@@ -625,7 +630,7 @@ export function recomputeAnchorDerivedState(appState) {
 
       if (updatedAnchor.aisWarning !== hasWarning) {
         updatedAnchor.aisWarning = hasWarning;
-        changed = true;
+        trackChange("/anchor/aisWarning", hasWarning);
       }
     }
   }
@@ -656,9 +661,9 @@ export function recomputeAnchorDerivedState(appState) {
     
     if (updatedFences) {
       updatedAnchor.fences = updatedFences;
-      changed = true;
+      trackChange("/anchor/fences", updatedFences);
     }
   }
 
-  return changed ? updatedAnchor : null;
+  return changedPaths.length > 0 ? { anchor: updatedAnchor, changedPaths } : null;
 }
