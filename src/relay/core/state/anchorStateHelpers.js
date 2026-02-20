@@ -598,7 +598,6 @@ export function recomputeAnchorDerivedState(appState) {
       if (trimmedHistory !== existingHistory) {
         updatedAnchor.history = trimmedHistory;
         trackChange("/anchor/history", trimmedHistory);
-        console.log(`[Anchor] History updated - now has ${trimmedHistory.length} entries`);
       }
     }
   }

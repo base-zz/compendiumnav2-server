@@ -119,12 +119,6 @@ export const anchorRules = [
       const dropPosition = anchorState.anchorDropLocation?.position;
 
       if (!criticalRange || !dropPosition || boatLat == null || boatLon == null) {
-        console.log('[Rule][Critical Range Detection] guard failed', {
-          criticalRange,
-          hasDropPosition: !!dropPosition,
-          boatLat,
-          boatLon,
-        });
         return false;
       }
 
@@ -142,11 +136,6 @@ export const anchorRules = [
         dropLat,
         dropLon
       );
-
-      console.log('[Rule][Critical Range Detection] evaluating', {
-        distance,
-        criticalRange,
-      });
 
       const hasActiveAlert = state.alerts?.active?.some(
         (alert) => alert.trigger === 'critical_range' && !alert.acknowledged
@@ -352,13 +341,6 @@ export const anchorRules = [
       const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
 
       if (!warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
-        console.log('[Rule][AIS Proximity Detection] guard failed', {
-          warningRadius,
-          boatLat,
-          boatLon,
-          aisTargetCount: aisTargetsArray.length,
-          aisTargetsObjKeys: Object.keys(aisTargetsObj).length,
-        });
         return false;
       }
 
@@ -373,11 +355,6 @@ export const anchorRules = [
         );
 
         return distance <= warningRadius;
-      });
-
-      console.log('[Rule][AIS Proximity Detection] evaluating', {
-        targetsInRange: targetsInRange.length,
-        warningRadius,
       });
 
       const hasActiveAlert = state.alerts?.active?.some(
@@ -492,11 +469,6 @@ export const anchorRules = [
         );
 
         return distance <= warningRadius;
-      });
-
-      console.log('[Rule][AIS Proximity Resolution] evaluating', {
-        targetsInRange: targetsInRange.length,
-        warningRadius,
       });
 
       return targetsInRange.length === 0;
