@@ -4,7 +4,7 @@
 
 // Fence distance history constants
 const FENCE_HISTORY_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
-const FENCE_HISTORY_MIN_INTERVAL_MS = 15 * 1000; // 15 seconds
+const FENCE_HISTORY_INTERVAL_MS = 30 * 1000; // 30 seconds - consistent time-series
 
 /**
  * Convert distance to fence units (m or ft)
@@ -32,21 +32,27 @@ function appendDistanceHistory(fence, distance, nowMs) {
   
   // Prune old entries outside the 2-hour window
   const cutoff = nowMs - FENCE_HISTORY_WINDOW_MS;
+  const beforePrune = fence.distanceHistory.length;
   fence.distanceHistory = fence.distanceHistory.filter(entry => entry.t >= cutoff);
+  if (fence.distanceHistory.length !== beforePrune) {
+    console.log(`[Fence][${fence.id || 'unknown'}] Pruned ${beforePrune - fence.distanceHistory.length} old entries`);
+  }
   
   const lastEntry = fence.distanceHistory[fence.distanceHistory.length - 1];
   
-  // Minimum delta to record: 0.5m or 1.5ft
-  const minDelta = fence.units === 'ft' ? 1.5 : 0.5;
+  // Append every 30 seconds for consistent time-series data
+  const FENCE_HISTORY_INTERVAL_MS = 30 * 1000; // 30 seconds
   
-  // Should append if: no last entry, 15s passed, or significant change
-  const shouldAppend = !lastEntry 
-    || (nowMs - lastEntry.t) >= FENCE_HISTORY_MIN_INTERVAL_MS
-    || Math.abs(distance - lastEntry.v) >= minDelta;
+  const shouldAppend = !lastEntry || (nowMs - lastEntry.t) >= FENCE_HISTORY_INTERVAL_MS;
+  
+  console.log(`[Fence][${fence.id || 'unknown'}] appendDistanceHistory: lastEntry=${lastEntry ? new Date(lastEntry.t).toISOString() : 'none'}, now=${new Date(nowMs).toISOString()}, shouldAppend=${shouldAppend}, currentHistoryLength=${fence.distanceHistory.length}`);
     
   if (shouldAppend) {
     fence.distanceHistory.push({ t: nowMs, v: distance });
+    console.log(`[Fence][${fence.id || 'unknown'}] Appended history entry: t=${nowMs}, v=${distance}, newLength=${fence.distanceHistory.length}`);
   }
+  
+  return shouldAppend;
 }
 
 /**
@@ -122,9 +128,11 @@ function updateFenceDistance(fence, boatPosition, anchorDropLocation) {
   
   // Append to history
   const historyLengthBefore = fence.distanceHistory?.length || 0;
-  appendDistanceHistory(fence, distanceInUnits, nowMs);
-  if (fence.distanceHistory?.length !== historyLengthBefore) {
+  const historyAppended = appendDistanceHistory(fence, distanceInUnits, nowMs);
+  const historyLengthAfter = fence.distanceHistory?.length || 0;
+  if (historyLengthAfter !== historyLengthBefore) {
     modified = true;
+    console.log(`[Fence][${fence.id || 'unknown'}] History updated: ${historyLengthBefore} -> ${historyLengthAfter} entries, appended=${historyAppended}`);
   }
   
   // Update minimum distance
@@ -175,6 +183,7 @@ function updateAllFences(fences, boatPosition, anchorDropLocation, aisTargets) {
     }
     
     const modified = updateFenceDistance(fenceWithTarget, boatPosition, anchorDropLocation);
+    console.log(`[Fence][${fenceWithTarget.id || 'unknown'}] updateFenceDistance returned modified=${modified}`);
     if (modified) anyModified = true;
     return fenceWithTarget;
   });
@@ -661,6 +670,11 @@ export function recomputeAnchorDerivedState(appState) {
     if (updatedFences) {
       updatedAnchor.fences = updatedFences;
       trackChange("/anchor/fences", updatedFences);
+      // Diagnostic: Log fence history sizes
+      updatedFences.forEach(fence => {
+        const historyLen = fence.distanceHistory?.length || 0;
+        console.log(`[Fence][${fence.id || 'unknown'}] distanceHistory has ${historyLen} entries, currentDistance=${fence.currentDistance?.toFixed(1) || 'N/A'}${fence.units || 'm'}`);
+      });
     }
   }
 
