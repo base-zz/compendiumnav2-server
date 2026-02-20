@@ -78,8 +78,16 @@ function updateMinimumDistance(fence, distance, nowMs) {
  * @returns {boolean} true if fence was modified
  */
 function updateFenceDistance(fence, boatPosition, anchorDropLocation) {
-  if (!fence.enabled) return false;
-  if (!boatPosition?.latitude || !boatPosition?.longitude) return false;
+  console.log(`[Fence][${fence.id || 'unknown'}] updateFenceDistance called: enabled=${fence.enabled}, targetType=${fence.targetType}, hasTargetPos=${!!fence.targetPosition}, hasTargetMmsi=${!!fence.targetMmsi}`);
+  
+  if (!fence.enabled) {
+    console.log(`[Fence][${fence.id || 'unknown'}] Returning false: fence not enabled`);
+    return false;
+  }
+  if (!boatPosition?.latitude || !boatPosition?.longitude) {
+    console.log(`[Fence][${fence.id || 'unknown'}] Returning false: no boat position`);
+    return false;
+  }
   
   // Determine reference position based on fence type
   let referenceLat, referenceLon;
@@ -100,15 +108,20 @@ function updateFenceDistance(fence, boatPosition, anchorDropLocation) {
   if (fence.targetType === 'ais' && fence.targetMmsi) {
     // For AIS targets, we'd need to look up the target position from AIS data
     // This would require passing AIS state - handled by caller
+    console.log(`[Fence][${fence.id || 'unknown'}] Returning false: AIS target not implemented in this function`);
     return false; // Not implemented in this function
   } else if (fence.targetPosition) {
     targetLat = fence.targetPosition.latitude;
     targetLon = fence.targetPosition.longitude;
   } else {
+    console.log(`[Fence][${fence.id || 'unknown'}] Returning false: no targetPosition`);
     return false;
   }
   
-  if (targetLat == null || targetLon == null) return false;
+  if (targetLat == null || targetLon == null) {
+    console.log(`[Fence][${fence.id || 'unknown'}] Returning false: targetLat or targetLon is null`);
+    return false;
+  }
   
   // Calculate distance in meters
   const distanceMeters = calculateDistance(referenceLat, referenceLon, targetLat, targetLon);
