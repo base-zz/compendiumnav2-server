@@ -32,11 +32,7 @@ function appendDistanceHistory(fence, distance, nowMs) {
   
   // Prune old entries outside the 2-hour window
   const cutoff = nowMs - FENCE_HISTORY_WINDOW_MS;
-  const beforePrune = fence.distanceHistory.length;
   fence.distanceHistory = fence.distanceHistory.filter(entry => entry.t >= cutoff);
-  if (fence.distanceHistory.length !== beforePrune) {
-    console.log(`[Fence][${fence.id || 'unknown'}] Pruned ${beforePrune - fence.distanceHistory.length} old entries`);
-  }
   
   const lastEntry = fence.distanceHistory[fence.distanceHistory.length - 1];
   
@@ -45,8 +41,6 @@ function appendDistanceHistory(fence, distance, nowMs) {
   
   const shouldAppend = !lastEntry || (nowMs - lastEntry.t) >= FENCE_HISTORY_INTERVAL_MS;
   
-  console.log(`[Fence][${fence.id || 'unknown'}] appendDistanceHistory: lastEntry=${lastEntry ? new Date(lastEntry.t).toISOString() : 'none'}, now=${new Date(nowMs).toISOString()}, shouldAppend=${shouldAppend}, currentHistoryLength=${fence.distanceHistory.length}`);
-    
   if (shouldAppend) {
     fence.distanceHistory.push({ t: nowMs, v: distance });
     console.log(`[Fence][${fence.id || 'unknown'}] Appended history entry: t=${nowMs}, v=${distance}, newLength=${fence.distanceHistory.length}`);
@@ -78,16 +72,8 @@ function updateMinimumDistance(fence, distance, nowMs) {
  * @returns {boolean} true if fence was modified
  */
 function updateFenceDistance(fence, boatPosition, anchorDropLocation) {
-  console.log(`[Fence][${fence.id || 'unknown'}] updateFenceDistance called: enabled=${fence.enabled}, targetType=${fence.targetType}, hasTargetPos=${!!fence.targetPosition}, hasTargetMmsi=${!!fence.targetMmsi}`);
-  
-  if (!fence.enabled) {
-    console.log(`[Fence][${fence.id || 'unknown'}] Returning false: fence not enabled`);
-    return false;
-  }
-  if (!boatPosition?.latitude || !boatPosition?.longitude) {
-    console.log(`[Fence][${fence.id || 'unknown'}] Returning false: no boat position`);
-    return false;
-  }
+  if (!fence.enabled) return false;
+  if (!boatPosition?.latitude || !boatPosition?.longitude) return false;
   
   // Determine reference position based on fence type
   let referenceLat, referenceLon;
@@ -108,7 +94,6 @@ function updateFenceDistance(fence, boatPosition, anchorDropLocation) {
   if (fence.targetType === 'ais' && fence.targetMmsi) {
     // For AIS targets, we'd need to look up the target position from AIS data
     // This would require passing AIS state - handled by caller
-    console.log(`[Fence][${fence.id || 'unknown'}] Returning false: AIS target not implemented in this function`);
     return false; // Not implemented in this function
   } else if (fence.targetPosition) {
     targetLat = fence.targetPosition.latitude;
@@ -117,14 +102,10 @@ function updateFenceDistance(fence, boatPosition, anchorDropLocation) {
     targetLat = fence.targetRef.latitude;
     targetLon = fence.targetRef.longitude;
   } else {
-    console.log(`[Fence][${fence.id || 'unknown'}] Returning false: no targetPosition`);
     return false;
   }
   
-  if (targetLat == null || targetLon == null) {
-    console.log(`[Fence][${fence.id || 'unknown'}] Returning false: targetLat or targetLon is null`);
-    return false;
-  }
+  if (targetLat == null || targetLon == null) return false;
   
   // Calculate distance in meters
   const distanceMeters = calculateDistance(referenceLat, referenceLon, targetLat, targetLon);
@@ -148,7 +129,6 @@ function updateFenceDistance(fence, boatPosition, anchorDropLocation) {
   const historyLengthAfter = fence.distanceHistory?.length || 0;
   if (historyLengthAfter !== historyLengthBefore) {
     modified = true;
-    console.log(`[Fence][${fence.id || 'unknown'}] History updated: ${historyLengthBefore} -> ${historyLengthAfter} entries, appended=${historyAppended}`);
   }
   
   // Update minimum distance
@@ -199,7 +179,6 @@ function updateAllFences(fences, boatPosition, anchorDropLocation, aisTargets) {
     }
     
     const modified = updateFenceDistance(fenceWithTarget, boatPosition, anchorDropLocation);
-    console.log(`[Fence][${fenceWithTarget.id || 'unknown'}] updateFenceDistance returned modified=${modified}`);
     if (modified) anyModified = true;
     return fenceWithTarget;
   });

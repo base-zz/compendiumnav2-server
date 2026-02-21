@@ -298,7 +298,7 @@ async function startDirectServer({ coordinator } = {}, options = {}) {
         logWarn(`Connection timeout for ${clientId}, terminating`);
         ws.terminate();
       }
-    }, 45000); // 45 seconds (longer than 2x the heartbeat interval)
+    }, 180000); // 180 seconds (longer than 2x the heartbeat interval)
     
     ws.once('pong', () => {
       clearTimeout(connectionTimeout);
