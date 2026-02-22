@@ -46,6 +46,19 @@ console.log("Loading .env");
 dotenv.config({ path: ".env" });
 console.log("[SERVER] TOP: after dotenv.config, before CLI flag parsing");
 
+// Periodic memory usage logging to diagnose heap growth
+setInterval(() => {
+  const memory = process.memoryUsage();
+  const formatMb = (value) => `${(value / 1024 / 1024).toFixed(1)}MB`;
+  console.log("[SERVER] Memory usage", {
+    rss: formatMb(memory.rss),
+    heapTotal: formatMb(memory.heapTotal),
+    heapUsed: formatMb(memory.heapUsed),
+    external: formatMb(memory.external),
+    arrayBuffers: formatMb(memory.arrayBuffers || 0),
+  });
+}, 60000);
+
 // --- CLI flag parsing ---
 console.log("[SERVER] Parsing CLI flags...");
 const recordFlag = process.argv.includes('--record');

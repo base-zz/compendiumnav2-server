@@ -665,11 +665,6 @@ export function recomputeAnchorDerivedState(appState) {
     if (updatedFences) {
       updatedAnchor.fences = updatedFences;
       trackChange("/anchor/fences", updatedFences);
-      // Diagnostic: Log fence history sizes
-      updatedFences.forEach(fence => {
-        const historyLen = fence.distanceHistory?.length || 0;
-        console.log(`[Fence][${fence.id || 'unknown'}] distanceHistory has ${historyLen} entries, currentDistance=${fence.currentDistance?.toFixed(1) || 'N/A'}${fence.units || 'm'}`);
-      });
     }
   }
 
