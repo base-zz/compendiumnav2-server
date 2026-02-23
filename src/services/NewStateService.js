@@ -1483,6 +1483,8 @@ class NewStateService extends ContinuousService {
   
   _processBatchUpdates() {
     if (this.updateQueue.size === 0) return;
+
+    this.log(`[StateService] Processing batch of ${this.updateQueue.size} updates`);
   
     // console.log('[StateService] Processing batch updates'); // DEBUG
 
