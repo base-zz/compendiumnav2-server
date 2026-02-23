@@ -144,8 +144,9 @@ class NewStateService extends ContinuousService {
       await this.initialize(config);
 
       // Set up batch processing if not already set up
-      if (!this._batchTimer) {
+      if (!this.updateTimer) {
         this._setupBatchProcessing();
+        this.log('[StateService] Batch processing initialized');
       }
 
       // Connect to SignalK if not already connected
@@ -189,9 +190,9 @@ class NewStateService extends ContinuousService {
       this.log('Stopping state service');
   
       // Clear any pending batch processing
-      if (this._batchTimer) {
-        clearTimeout(this._batchTimer);
-        this._batchTimer = null;
+      if (this.updateTimer) {
+        clearInterval(this.updateTimer);
+        this.updateTimer = null;
       }
   
       // Clear AIS refresh interval
@@ -1464,6 +1465,7 @@ class NewStateService extends ContinuousService {
 
   _queueUpdate(path, value, source) {
     this.updateQueue.set(path, { value, source });
+    this.log(`[StateService] Queued update: ${path} = ${JSON.stringify(value).slice(0, 50)}... (queue size: ${this.updateQueue.size})`);
     if (value !== null && value !== undefined && !this.hasLoggedFirstData) {
       console.log(
         `[StateService] RECEIVED FIRST DATA from SignalK: ${path} =`,
