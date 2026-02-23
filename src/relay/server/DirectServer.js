@@ -369,12 +369,21 @@ async function startDirectServer({ coordinator } = {}, options = {}) {
     let sentCount = 0;
     let closedCount = 0;
     
+    const maxBufferedAmountBytes = 25 * 1024 * 1024; // 25MB
+
     clients.forEach((/** @type {WebSocket & ExtendedWebSocket} */ client) => {
       // Check if client is an ExtendedWebSocket with clientId
       const clientId = client.clientId || 'unknown';
       
       if (client.readyState === 1) { // 1 = OPEN
         try {
+          if (typeof client.bufferedAmount === 'number' && client.bufferedAmount > maxBufferedAmountBytes) {
+            logWarn(
+              `Terminating client ${clientId} - bufferedAmount ${(client.bufferedAmount / 1024 / 1024).toFixed(1)}MB exceeds 25MB`
+            );
+            client.terminate();
+            return;
+          }
           client.send(messageString);
           sentCount++;
           logState(`Sent to client ${clientId}`);
