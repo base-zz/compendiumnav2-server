@@ -822,6 +822,25 @@ export class StateManager extends EventEmitter {
       const currentAnchor = this.appState?.anchor || {};
       const mergedAnchor = this._deepMergeAnchor(currentAnchor, anchorData);
 
+      if (Array.isArray(currentAnchor.fences) && Array.isArray(mergedAnchor.fences)) {
+        const fencesById = new Map(currentAnchor.fences.map((fence) => [fence?.id, fence]));
+        mergedAnchor.fences = mergedAnchor.fences.map((fence) => {
+          const existingFence = fence?.id ? fencesById.get(fence.id) : null;
+          if (!existingFence) {
+            return fence;
+          }
+
+          const nextFence = { ...fence };
+          if (nextFence.minimumDistance == null && existingFence.minimumDistance != null) {
+            nextFence.minimumDistance = existingFence.minimumDistance;
+            nextFence.minimumDistanceUnits = existingFence.minimumDistanceUnits;
+            nextFence.minimumDistanceUpdatedAt = existingFence.minimumDistanceUpdatedAt;
+          }
+
+          return nextFence;
+        });
+      }
+
       // Create a patch to update the anchor state with the merged result
       const patch = [{ op: "replace", path: "/anchor", value: mergedAnchor }];
 
@@ -890,7 +909,9 @@ export class StateManager extends EventEmitter {
       : false;
 
     if (anchorRelevant) {
-      const helperResult = recomputeAnchorDerivedState(this.appState);
+      const helperResult = recomputeAnchorDerivedState(this.appState, {
+        skipHistory: hasAnchorPatch,
+      });
       if (helperResult) {
         const { anchor: updatedAnchor, changedPaths } = helperResult;
         
@@ -955,62 +976,7 @@ export class StateManager extends EventEmitter {
 
     return result;
   }
-
-  /**
-   * Merge a domain update (e.g., from StateData/SignalK) into the unified appState.
-   * Emits 'state-updated' after merging.
-   * @param {Object} update - Partial state update (e.g., { signalK: ... })
-   */
-
-  applyDomainUpdate(update) {
-    if (!update || typeof update !== "object") {
-      this.log("[StateManager] Invalid update received:", update);
-      return;
-    }
-
-    // Apply updates directly to our state
-    try {
-      // Apply each update in the batch
-      Object.entries(update).forEach(([path, value]) => {
-        const pathParts = path.split(".");
-        let current = this.appState;
-
-        // Navigate to the parent of the target property
-        for (let i = 0; i < pathParts.length - 1; i++) {
-          const part = pathParts[i];
-          if (!current[part]) {
-            current[part] = {};
-          }
-          current = current[part];
-        }
-
-        // Set the final property
-        current[pathParts[pathParts.length - 1]] = value;
-      });
-
-      // Clone to ensure immutability
-      this.appState = this._safeClone(this.appState);
-    } catch (error) {
-      this.logError("Failed to apply batch update:", error);
-      return;
-    }
-
-    if (!this.appState.anchor) {
-      this.log("[StateManager] Anchor missing after update!");
-    }
-
-    // Pass the update to the rule engine for evaluation
-    this.ruleEngine.updateState(update);
-
-    // Always emit state updates regardless of client count
-    this.emit("state:full-update", {
-      type: "state:full-update",
-      data: this.appState,
-      boatId: this._boatId,
-      role: "boat-server",
-      timestamp: Date.now(),
-    });
-  }
+ 
 
   _sendCrewAlert(message) {
     this.emit("crew-alert", { message });

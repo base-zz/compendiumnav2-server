@@ -378,7 +378,8 @@ function projectNewAnchorPosition(boatPos, currentAnchorPos, rodeLengthMeters) {
  * @param {Object} appState - Full application state from StateManager
  * @returns {Object|null} updated anchor object or null if unchanged
  */
-export function recomputeAnchorDerivedState(appState) {
+export function recomputeAnchorDerivedState(appState, options = {}) {
+  const skipHistory = options.skipHistory === true;
   if (!appState || typeof appState !== "object") {
     return null;
   }
@@ -566,42 +567,44 @@ export function recomputeAnchorDerivedState(appState) {
     trackChange("/anchor/anchorLocation", updatedAnchorLocation);
 
     // --- History (breadcrumbs) ---
-    const now = Date.now();
-    const existingHistory = Array.isArray(updatedAnchor.history)
-      ? updatedAnchor.history
-      : [];
-    
-    // Only add breadcrumb if at least 30 seconds have passed since last one
-    const MIN_BREADCRUMB_INTERVAL_MS = 30000; // 30 seconds
-    
-    const lastEntry = existingHistory.length > 0
-      ? existingHistory[existingHistory.length - 1]
-      : null;
-    
-    if (lastEntry && (now - lastEntry.time) < MIN_BREADCRUMB_INTERVAL_MS) {
-      // Skip adding breadcrumb - not enough time has passed
-    } else {
-      const historyEntry = {
-        position: {
-          latitude: boatLat,
-          longitude: boatLon,
-        },
-        time: now,
-      };
+    if (!skipHistory) {
+      const now = Date.now();
+      const existingHistory = Array.isArray(updatedAnchor.history)
+        ? updatedAnchor.history
+        : [];
+      
+      // Only add breadcrumb if at least 30 seconds have passed since last one
+      const MIN_BREADCRUMB_INTERVAL_MS = 30000; // 30 seconds
+      
+      const lastEntry = existingHistory.length > 0
+        ? existingHistory[existingHistory.length - 1]
+        : null;
+      
+      if (lastEntry && (now - lastEntry.time) < MIN_BREADCRUMB_INTERVAL_MS) {
+        // Skip adding breadcrumb - not enough time has passed
+      } else {
+        const historyEntry = {
+          position: {
+            latitude: boatLat,
+            longitude: boatLon,
+          },
+          time: now,
+        };
 
-      const newHistory = existingHistory.concat(historyEntry);
+        const newHistory = existingHistory.concat(historyEntry);
 
-      // Enforce maximum of 1000 entries, dropping oldest first
-      // At 30-second intervals = ~8.33 hours of history
-      const MAX_HISTORY_ENTRIES = 1000;
-      const trimmedHistory =
-        newHistory.length > MAX_HISTORY_ENTRIES
-          ? newHistory.slice(newHistory.length - MAX_HISTORY_ENTRIES)
-          : newHistory;
+        // Enforce maximum of 1000 entries, dropping oldest first
+        // At 30-second intervals = ~8.33 hours of history
+        const MAX_HISTORY_ENTRIES = 1000;
+        const trimmedHistory =
+          newHistory.length > MAX_HISTORY_ENTRIES
+            ? newHistory.slice(newHistory.length - MAX_HISTORY_ENTRIES)
+            : newHistory;
 
-      if (trimmedHistory !== existingHistory) {
-        updatedAnchor.history = trimmedHistory;
-        trackChange("/anchor/history", trimmedHistory);
+        if (trimmedHistory !== existingHistory) {
+          updatedAnchor.history = trimmedHistory;
+          trackChange("/anchor/history", trimmedHistory);
+        }
       }
     }
   }
@@ -639,7 +642,7 @@ export function recomputeAnchorDerivedState(appState) {
   }
 
   // --- Fence distance updates ---
-  if (boatLat != null && boatLon != null && updatedAnchor.fences?.length > 0) {
+  if (!skipHistory && boatLat != null && boatLon != null && updatedAnchor.fences?.length > 0) {
     // Build AIS targets map for fence lookups
     const aisTargetsMap = {};
     const aisTargetsArray = Array.isArray(appState.ais?.targets)
