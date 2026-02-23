@@ -173,8 +173,9 @@ async function startDirectServer({ coordinator } = {}, options = {}) {
       coordinator.broadcastInitialState((message) => {
         if (!isAlive || ws.readyState !== ws.OPEN) return;
         try {
-          console.log(`[DIRECT] Sending initial state to client ${clientId}`);
-          ws.send(JSON.stringify(message));
+          const payload = JSON.stringify(message);
+          console.log(`[DIRECT] Sending initial state to client ${clientId} (${payload.length} bytes)`);
+          ws.send(payload);
         } catch (error) {
           logError(`Error sending initial state to ${clientId}:`, error);
         }

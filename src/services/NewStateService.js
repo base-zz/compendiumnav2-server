@@ -1621,7 +1621,15 @@ class NewStateService extends ContinuousService {
 
         // Apply patches to stateManager
         if (patches.length > 0) {
+          const patchPaths = patches.map((patch) => patch.path).slice(0, 10);
+          this.log(
+            `[StateService] Generated ${patches.length} patches. Sample paths: ${patchPaths.join(
+              ", "
+            )}`
+          );
           ensureStateManager().applyPatchAndForward(patches);
+        } else {
+          this.log("[StateService] No patches generated for this batch");
         }
 
         // console.log("[StateService] After stateData.convert.updateAllDefivedValues", JSON.stringify(stateData, null, 2));
