@@ -455,27 +455,27 @@ export class StateManager extends EventEmitter {
         timestamp: Date.now(),
       };
 
-      const windSpeedOps = sanitizedPatch.filter((op) => {
+      const windAngleOps = sanitizedPatch.filter((op) => {
         if (!op || typeof op !== "object") return false;
         if (typeof op.path !== "string") return false;
 
         const path = op.path;
         if (!path.includes("/wind/")) return false;
 
-        if (path.includes("/speed")) return true;
+        if (path.includes("/angle")) return true;
         return false;
       });
 
-      if (windSpeedOps.length > 0) {
+      if (windAngleOps.length > 0) {
         const listenerCount = this.listenerCount("state:patch");
-        const opsSummary = windSpeedOps.map((op) => ({
+        const opsSummary = windAngleOps.map((op) => ({
           op: op.op,
           path: op.path,
           value: Object.prototype.hasOwnProperty.call(op, "value") ? op.value : undefined,
         }));
 
         console.log(
-          `[StateManager] Wind speed patch queued for clients (ops=${windSpeedOps.length}, listeners=${listenerCount}): ${JSON.stringify(opsSummary)}`
+          `[StateManager] Wind angle patch queued for clients (ops=${windAngleOps.length}, listeners=${listenerCount}): ${JSON.stringify(opsSummary)}`
         );
       }
 
