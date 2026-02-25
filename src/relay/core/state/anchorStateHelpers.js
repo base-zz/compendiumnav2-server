@@ -459,7 +459,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   // --- Distances and bearings relative to DROP location ---
   if (dropLat != null && dropLon != null) {
     const distanceBoatFromDrop = calculateDistance(boatLat, boatLon, dropLat, dropLon);
-    const bearingDropToBoat = calculateBearing(dropLat, dropLon, boatLat, boatLon);
+    const bearingBoatToDrop = calculateBearing(boatLat, boatLon, dropLat, dropLon);
 
     const updatedDropLocation = {
       ...(anchor.anchorDropLocation || {}),
@@ -473,7 +473,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       // existing value unchanged to avoid unintended side effects.
       bearing: {
         ...(anchor.anchorDropLocation?.bearing || {}),
-        value: bearingDropToBoat,
+        value: bearingBoatToDrop,
       },
     };
 
@@ -553,11 +553,11 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       anchorLat,
       anchorLon
     );
-    const bearingAnchorToBoat = calculateBearing(
-      anchorLat,
-      anchorLon,
+    const bearingBoatToAnchor = calculateBearing(
       boatLat,
-      boatLon
+      boatLon,
+      anchorLat,
+      anchorLon
     );
 
     let distancesFromDrop = anchor.anchorLocation?.distancesFromDrop;
@@ -588,7 +588,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       distancesFromDrop,
       bearing: {
         ...(anchor.anchorLocation?.bearing || {}),
-        value: bearingAnchorToBoat,
+        value: bearingBoatToAnchor,
       },
     };
 
