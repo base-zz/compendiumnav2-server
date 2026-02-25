@@ -913,6 +913,7 @@ export function createStateDataModel(unitPreferences = UNIT_PRESETS.IMPERIAL) {
           label: "Drop Depth",
           description: "Depth at Anchor Drop",
         },
+        depthSource: null,
         distancesFromCurrent: {
           value: 0,
           units: unitPreferences.length,

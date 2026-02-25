@@ -290,6 +290,32 @@ function extractRodeLengthMeters(anchor) {
   }
 }
 
+function extractDropDepthMeters(anchor) {
+  const depthObj = anchor?.anchorDropLocation?.depth;
+  const depthSource = anchor?.anchorDropLocation?.depthSource;
+  const amount = depthObj?.value;
+  const units = depthObj?.units;
+
+  if (depthSource == null) return null;
+  if (amount == null || units == null) return null;
+
+  if (!Number.isFinite(amount)) return null;
+  if (typeof units !== 'string') return null;
+
+  switch (units.toLowerCase()) {
+    case 'm':
+    case 'meters':
+    case 'meter':
+      return amount;
+    case 'ft':
+    case 'feet':
+    case 'foot':
+      return amount * 0.3048;
+    default:
+      return null;
+  }
+}
+
 /**
  * Calculate GPS error margin based on HDOP
  * @param {Object} position - Navigation position object
@@ -463,6 +489,12 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       const rodeLengthMeters = extractRodeLengthMeters(anchor);
       
       if (rodeLengthMeters != null) {
+        const dropDepthMeters = extractDropDepthMeters(anchor);
+        const effectiveRodeRadiusMeters =
+          dropDepthMeters != null && dropDepthMeters >= 0 && rodeLengthMeters > dropDepthMeters
+            ? Math.sqrt((rodeLengthMeters * rodeLengthMeters) - (dropDepthMeters * dropDepthMeters))
+            : rodeLengthMeters;
+
         const distanceBoatFromDrop = calculateDistance(
           boatLat,
           boatLon,
@@ -482,7 +514,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
         }
         
         const ANCHOR_MOVED_THRESHOLD = 5; // meters - anchor considered "moved" if >5m from drop
-        const rodeCircleViolated = distanceBoatFromDrop > rodeLengthMeters;
+        const rodeCircleViolated = distanceBoatFromDrop > effectiveRodeRadiusMeters;
         const anchorHasMoved = distanceAnchorFromDrop > ANCHOR_MOVED_THRESHOLD;
         
         // Dragging only if rode circle violated AND anchor has moved significantly
@@ -496,7 +528,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
           updatedAnchor.dragging = isDragging;
           trackChange("/anchor/dragging", isDragging);
           if (isDragging) {
-            console.log(`[Anchor] Dragging detected: distance from drop=${distanceBoatFromDrop.toFixed(1)}m, rode=${rodeLengthMeters.toFixed(1)}m, anchor moved=${distanceAnchorFromDrop.toFixed(1)}m`);
+            console.log(`[Anchor] Dragging detected: distance from drop=${distanceBoatFromDrop.toFixed(1)}m, rode=${rodeLengthMeters.toFixed(1)}m, effectiveRodeRadius=${effectiveRodeRadiusMeters.toFixed(1)}m, anchor moved=${distanceAnchorFromDrop.toFixed(1)}m`);
           } else {
             console.log('[Anchor] Dragging cleared - boat back inside rode circle');
           }
