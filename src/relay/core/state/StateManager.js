@@ -820,29 +820,93 @@ export class StateManager extends EventEmitter {
           ? anchorData.data
           : anchorData;
 
-      // Merge incoming anchor data into existing anchor state so that
-      // server-maintained fields (e.g., history, derived distances) are
-      // preserved and then recomputed by helpers.
-      const currentAnchor = this.appState?.anchor || {};
+      const toRad = (value) => (value * Math.PI) / 180;
+      const toDeg = (value) => (value * 180) / Math.PI;
 
-      // Never accept client-provided positions for anchoring.
-      const sanitizedPatch = { ...(incomingAnchorPatch || {}) };
-      if (sanitizedPatch.anchorDropLocation?.position != null) {
-        sanitizedPatch.anchorDropLocation = { ...sanitizedPatch.anchorDropLocation };
-        delete sanitizedPatch.anchorDropLocation.position;
-      }
-      if (sanitizedPatch.anchorLocation?.position != null) {
-        sanitizedPatch.anchorLocation = { ...sanitizedPatch.anchorLocation };
-        delete sanitizedPatch.anchorLocation.position;
-      }
+      const calculateBearingDegrees = (lat1, lon1, lat2, lon2) => {
+        if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
+        const φ1 = toRad(lat1);
+        const φ2 = toRad(lat2);
+        const λ1 = toRad(lon1);
+        const λ2 = toRad(lon2);
+        const Δλ = λ2 - λ1;
+        const y = Math.sin(Δλ) * Math.cos(φ2);
+        const x =
+          Math.cos(φ1) * Math.sin(φ2) -
+          Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+        const θ = Math.atan2(y, x);
+        const bearing = (toDeg(θ) + 360) % 360;
+        return Number.isFinite(bearing) ? bearing : null;
+      };
 
-      // If anchor is being deployed now, capture the server's current boat position as
-      // both the drop location and initial anchor location.
-      const wasDeployed = currentAnchor?.anchorDeployed === true;
-      const willBeDeployed = sanitizedPatch?.anchorDeployed === true;
-      const isDeployTransition = willBeDeployed && !wasDeployed;
+      const projectPoint = (latDeg, lonDeg, bearingDeg, distanceMeters) => {
+        if (latDeg == null || lonDeg == null || bearingDeg == null || distanceMeters == null) return null;
+        if (!Number.isFinite(latDeg) || !Number.isFinite(lonDeg) || !Number.isFinite(bearingDeg) || !Number.isFinite(distanceMeters)) {
+          return null;
+        }
+        const R = 6371e3;
+        const angularDistance = distanceMeters / R;
+        const bearingRad = toRad(bearingDeg);
+        const lat1 = toRad(latDeg);
+        const lon1 = toRad(lonDeg);
 
-      if (isDeployTransition) {
+        const lat2 = Math.asin(
+          Math.sin(lat1) * Math.cos(angularDistance) +
+            Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(bearingRad)
+        );
+        const lon2 = lon1 + Math.atan2(
+          Math.sin(bearingRad) * Math.sin(angularDistance) * Math.cos(lat1),
+          Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2)
+        );
+
+        const next = { latitude: toDeg(lat2), longitude: toDeg(lon2) };
+        if (!Number.isFinite(next.latitude) || !Number.isFinite(next.longitude)) return null;
+        return next;
+      };
+
+      const extractRodeLengthMeters = (anchor) => {
+        const rode = anchor?.rode;
+        const amount = rode?.amount ?? rode?.value;
+        const units = rode?.units ?? rode?.unit;
+        if (amount == null || units == null) return null;
+        if (!Number.isFinite(amount) || typeof units !== 'string') return null;
+        switch (units.toLowerCase()) {
+          case 'm':
+          case 'meter':
+          case 'meters':
+            return amount;
+          case 'ft':
+          case 'foot':
+          case 'feet':
+            return amount * 0.3048;
+          default:
+            return null;
+        }
+      };
+
+      const extractDropDepthMeters = (patchOrAnchor) => {
+        const depthObj = patchOrAnchor?.anchorDropLocation?.depth;
+        const depthSource = patchOrAnchor?.anchorDropLocation?.depthSource;
+        const amount = depthObj?.value;
+        const units = depthObj?.units;
+        if (depthSource == null) return null;
+        if (amount == null || units == null) return null;
+        if (!Number.isFinite(amount) || typeof units !== 'string') return null;
+        switch (units.toLowerCase()) {
+          case 'm':
+          case 'meter':
+          case 'meters':
+            return amount;
+          case 'ft':
+          case 'foot':
+          case 'feet':
+            return amount * 0.3048;
+          default:
+            return null;
+        }
+      };
+
+      const getServerBoatLatLon = () => {
         const navLat = this.appState?.navigation?.position?.latitude?.value;
         const navLon = this.appState?.navigation?.position?.longitude?.value;
 
@@ -857,32 +921,211 @@ export class StateManager extends EventEmitter {
 
         const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
         const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+        if (boatLat == null || boatLon == null) return null;
+        if (!Number.isFinite(boatLat) || !Number.isFinite(boatLon)) return null;
+        return { boatLat, boatLon };
+      };
 
-        if (boatLat != null && boatLon != null) {
-          const positionCaptured = {
-            latitude: { value: boatLat, units: 'deg' },
-            longitude: { value: boatLon, units: 'deg' },
-          };
+      // Merge incoming anchor data into existing anchor state so that
+      // server-maintained fields (e.g., history, derived distances) are
+      // preserved and then recomputed by helpers.
+      const currentAnchor = this.appState?.anchor || {};
 
-          sanitizedPatch.anchorDropLocation = {
-            ...(sanitizedPatch.anchorDropLocation || {}),
-            position: positionCaptured,
-            time: new Date().toISOString(),
-          };
+      // Never accept client-provided positions for anchoring.
+      const sanitizedPatch = { ...(incomingAnchorPatch || {}) };
 
-          sanitizedPatch.anchorLocation = {
-            ...(sanitizedPatch.anchorLocation || {}),
-            position: positionCaptured,
-            time: new Date().toISOString(),
-          };
+      const action = typeof sanitizedPatch.action === 'string' ? sanitizedPatch.action : null;
 
-          console.log('[StateManager] Anchor deployed: captured drop+anchor position from server navigation', {
-            latitude: boatLat,
-            longitude: boatLon,
-          });
-        } else {
-          console.warn('[StateManager] Anchor deploy requested but server boat position is unavailable; not capturing drop/anchor position');
+      delete sanitizedPatch.action;
+      delete sanitizedPatch.setBearing;
+
+      if (sanitizedPatch.anchorDropLocation?.position != null) {
+        sanitizedPatch.anchorDropLocation = { ...sanitizedPatch.anchorDropLocation };
+        delete sanitizedPatch.anchorDropLocation.position;
+      }
+      if (sanitizedPatch.anchorLocation?.position != null) {
+        sanitizedPatch.anchorLocation = { ...sanitizedPatch.anchorLocation };
+        delete sanitizedPatch.anchorLocation.position;
+      }
+
+      if (sanitizedPatch.anchorDropLocation && typeof sanitizedPatch.anchorDropLocation === 'object') {
+        sanitizedPatch.anchorDropLocation = { ...sanitizedPatch.anchorDropLocation };
+        delete sanitizedPatch.anchorDropLocation.bearing;
+        delete sanitizedPatch.anchorDropLocation.originalBearing;
+        delete sanitizedPatch.anchorDropLocation.distancesFromCurrent;
+        delete sanitizedPatch.anchorDropLocation.distancesFromDrop;
+      }
+
+      if (sanitizedPatch.anchorLocation && typeof sanitizedPatch.anchorLocation === 'object') {
+        sanitizedPatch.anchorLocation = { ...sanitizedPatch.anchorLocation };
+        delete sanitizedPatch.anchorLocation.bearing;
+        delete sanitizedPatch.anchorLocation.originalBearing;
+        delete sanitizedPatch.anchorLocation.distancesFromCurrent;
+        delete sanitizedPatch.anchorLocation.distancesFromDrop;
+        delete sanitizedPatch.anchorLocation.originalPosition;
+      }
+
+      delete sanitizedPatch.dragging;
+      delete sanitizedPatch.history;
+
+      const boatLatLon = getServerBoatLatLon();
+      const serverNowIso = new Date().toISOString();
+
+      // If anchor is being deployed now, capture the server's current boat position as
+      // both the drop location and initial anchor location.
+      const wasDeployed = currentAnchor?.anchorDeployed === true;
+      const willBeDeployed = sanitizedPatch?.anchorDeployed === true;
+      const isDeployTransition = willBeDeployed && !wasDeployed;
+
+      const applyCapturedDropAndAnchorPosition = () => {
+        if (!boatLatLon) {
+          console.warn('[StateManager] Anchor action requires server boat position but it is unavailable');
+          return;
         }
+
+        const positionCaptured = {
+          latitude: { value: boatLatLon.boatLat, units: 'deg' },
+          longitude: { value: boatLatLon.boatLon, units: 'deg' },
+        };
+
+        sanitizedPatch.anchorDropLocation = {
+          ...(currentAnchor?.anchorDropLocation || {}),
+          ...(sanitizedPatch.anchorDropLocation || {}),
+          position: positionCaptured,
+          time: serverNowIso,
+        };
+
+        sanitizedPatch.anchorLocation = {
+          ...(currentAnchor?.anchorLocation || {}),
+          ...(sanitizedPatch.anchorLocation || {}),
+          position: positionCaptured,
+          time: serverNowIso,
+        };
+      };
+
+      const applyProjectedDropAndAnchorPositionFromSetAfterDeploy = () => {
+        if (!boatLatLon) {
+          console.warn('[StateManager] set_after_deploy requires server boat position but it is unavailable');
+          return;
+        }
+
+        const setBearing = incomingAnchorPatch?.setBearing;
+        const bearingValue = setBearing?.value;
+        const bearingUnits = setBearing?.units;
+        if (bearingValue == null || bearingUnits == null) {
+          console.warn('[StateManager] set_after_deploy requires setBearing.value and setBearing.units');
+          return;
+        }
+        if (!Number.isFinite(bearingValue) || typeof bearingUnits !== 'string' || bearingUnits.toLowerCase() !== 'deg') {
+          console.warn('[StateManager] set_after_deploy requires setBearing.units="deg" and numeric value');
+          return;
+        }
+
+        const rodeMeters = extractRodeLengthMeters({
+          rode: sanitizedPatch?.rode != null ? sanitizedPatch.rode : currentAnchor?.rode,
+        });
+        if (rodeMeters == null) {
+          console.warn('[StateManager] set_after_deploy requires rode (amount+units) either in patch or existing anchor state');
+          return;
+        }
+
+        const dropDepthMeters = extractDropDepthMeters({
+          anchorDropLocation:
+            sanitizedPatch?.anchorDropLocation != null
+              ? sanitizedPatch.anchorDropLocation
+              : currentAnchor?.anchorDropLocation,
+        });
+
+        const effectiveHorizontalMeters =
+          dropDepthMeters != null && dropDepthMeters >= 0 && rodeMeters > dropDepthMeters
+            ? Math.sqrt((rodeMeters * rodeMeters) - (dropDepthMeters * dropDepthMeters))
+            : rodeMeters;
+
+        const projected = projectPoint(
+          boatLatLon.boatLat,
+          boatLatLon.boatLon,
+          bearingValue,
+          effectiveHorizontalMeters
+        );
+        if (!projected) {
+          console.warn('[StateManager] set_after_deploy projection failed; not updating drop/anchor positions');
+          return;
+        }
+
+        const projectedPositionObj = {
+          latitude: { value: projected.latitude, units: 'deg' },
+          longitude: { value: projected.longitude, units: 'deg' },
+        };
+
+        sanitizedPatch.anchorDropLocation = {
+          ...(currentAnchor?.anchorDropLocation || {}),
+          ...(sanitizedPatch.anchorDropLocation || {}),
+          position: projectedPositionObj,
+          time: serverNowIso,
+        };
+
+        sanitizedPatch.anchorLocation = {
+          ...(currentAnchor?.anchorLocation || {}),
+          ...(sanitizedPatch.anchorLocation || {}),
+          position: projectedPositionObj,
+          time: serverNowIso,
+        };
+      };
+
+      const applyResetAnchorHere = () => {
+        if (!boatLatLon) {
+          console.warn('[StateManager] reset_anchor_here requires server boat position but it is unavailable');
+          return;
+        }
+
+        const oldDropPos = currentAnchor?.anchorDropLocation?.position;
+        const oldDropLat = oldDropPos?.latitude?.value;
+        const oldDropLon = oldDropPos?.longitude?.value;
+
+        applyCapturedDropAndAnchorPosition();
+
+        const moveBearingDeg = calculateBearingDegrees(oldDropLat, oldDropLon, boatLatLon.boatLat, boatLatLon.boatLon);
+        if (moveBearingDeg == null) {
+          return;
+        }
+
+        const existingBearingUnits = currentAnchor?.anchorDropLocation?.bearing?.units;
+        const writeBearingValue =
+          typeof existingBearingUnits === 'string' && existingBearingUnits.toLowerCase() === 'rad'
+            ? toRad(moveBearingDeg)
+            : moveBearingDeg;
+
+        sanitizedPatch.anchorDropLocation = {
+          ...(currentAnchor?.anchorDropLocation || {}),
+          ...(sanitizedPatch.anchorDropLocation || {}),
+          originalBearing: {
+            ...(currentAnchor?.anchorDropLocation?.originalBearing || {}),
+            value: writeBearingValue,
+          },
+          bearing: {
+            ...(currentAnchor?.anchorDropLocation?.bearing || {}),
+            value: writeBearingValue,
+          },
+        };
+
+        if (Object.prototype.hasOwnProperty.call(sanitizedPatch.anchorDropLocation.originalBearing, 'degrees')) {
+          sanitizedPatch.anchorDropLocation.originalBearing.degrees = moveBearingDeg;
+        }
+        if (Object.prototype.hasOwnProperty.call(sanitizedPatch.anchorDropLocation.bearing, 'degrees')) {
+          sanitizedPatch.anchorDropLocation.bearing.degrees = moveBearingDeg;
+        }
+      };
+
+      if (action === 'drop_now') {
+        if (isDeployTransition) {
+          applyCapturedDropAndAnchorPosition();
+        }
+      } else if (action === 'set_after_deploy') {
+        applyProjectedDropAndAnchorPositionFromSetAfterDeploy();
+      } else if (action === 'reset_anchor_here') {
+        applyResetAnchorHere();
+      } else if (isDeployTransition) {
+        applyCapturedDropAndAnchorPosition();
       }
 
       const mergedAnchor = this._deepMergeAnchor(currentAnchor, sanitizedPatch);
