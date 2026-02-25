@@ -473,10 +473,6 @@ export class StateManager extends EventEmitter {
           path: op.path,
           value: Object.prototype.hasOwnProperty.call(op, "value") ? op.value : undefined,
         }));
-
-        console.log(
-          `[StateManager] Wind angle patch queued for clients (ops=${windAngleOps.length}, listeners=${listenerCount}): ${JSON.stringify(opsSummary)}`
-        );
       }
 
       logState(`Emitting state:patch event with ${validPatch.length} operations, listener count: ${this.listenerCount('state:patch')}`);
@@ -816,35 +812,80 @@ export class StateManager extends EventEmitter {
       return;
     }
 
-    if (anchorData.anchorLocation && anchorData.anchorLocation.position) {
-      const pos = anchorData.anchorLocation.position;
-      this.log(
-        `[StateManager] Anchor position: ${pos.latitude}, ${pos.longitude}`
-      );
-    }
-
-    if (anchorData.rode) {
-      this.log(
-        `[StateManager] Rode length: ${anchorData.rode.value} ${anchorData.rode.unit}`
-      );
-    }
-
-    if (
-      anchorData.anchorDropLocation &&
-      anchorData.anchorDropLocation.position
-    ) {
-      const pos = anchorData.anchorDropLocation.position;
-      this.log(
-        `[StateManager] Drop position: ${pos.latitude}, ${pos.longitude}`
-      );
-    }
-
     try {
+      // Client sends a wrapper message: { type: 'anchor:update', data: { ...anchorStatePatch } }
+      // The server must treat this as actions/parameters only.
+      const incomingAnchorPatch =
+        anchorData?.data && typeof anchorData.data === 'object'
+          ? anchorData.data
+          : anchorData;
+
       // Merge incoming anchor data into existing anchor state so that
       // server-maintained fields (e.g., history, derived distances) are
       // preserved and then recomputed by helpers.
       const currentAnchor = this.appState?.anchor || {};
-      const mergedAnchor = this._deepMergeAnchor(currentAnchor, anchorData);
+
+      // Never accept client-provided positions for anchoring.
+      const sanitizedPatch = { ...(incomingAnchorPatch || {}) };
+      if (sanitizedPatch.anchorDropLocation?.position != null) {
+        sanitizedPatch.anchorDropLocation = { ...sanitizedPatch.anchorDropLocation };
+        delete sanitizedPatch.anchorDropLocation.position;
+      }
+      if (sanitizedPatch.anchorLocation?.position != null) {
+        sanitizedPatch.anchorLocation = { ...sanitizedPatch.anchorLocation };
+        delete sanitizedPatch.anchorLocation.position;
+      }
+
+      // If anchor is being deployed now, capture the server's current boat position as
+      // both the drop location and initial anchor location.
+      const wasDeployed = currentAnchor?.anchorDeployed === true;
+      const willBeDeployed = sanitizedPatch?.anchorDeployed === true;
+      const isDeployTransition = willBeDeployed && !wasDeployed;
+
+      if (isDeployTransition) {
+        const navLat = this.appState?.navigation?.position?.latitude?.value;
+        const navLon = this.appState?.navigation?.position?.longitude?.value;
+
+        const positionRoot =
+          this.appState?.position && typeof this.appState.position === 'object'
+            ? this.appState.position
+            : {};
+        const boatPositionFromPosition =
+          positionRoot.signalk && typeof positionRoot.signalk === 'object'
+            ? positionRoot.signalk
+            : positionRoot;
+
+        const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
+        const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+
+        if (boatLat != null && boatLon != null) {
+          const positionCaptured = {
+            latitude: { value: boatLat, units: 'deg' },
+            longitude: { value: boatLon, units: 'deg' },
+          };
+
+          sanitizedPatch.anchorDropLocation = {
+            ...(sanitizedPatch.anchorDropLocation || {}),
+            position: positionCaptured,
+            time: new Date().toISOString(),
+          };
+
+          sanitizedPatch.anchorLocation = {
+            ...(sanitizedPatch.anchorLocation || {}),
+            position: positionCaptured,
+            time: new Date().toISOString(),
+          };
+
+          console.log('[StateManager] Anchor deployed: captured drop+anchor position from server navigation', {
+            latitude: boatLat,
+            longitude: boatLon,
+          });
+        } else {
+          console.warn('[StateManager] Anchor deploy requested but server boat position is unavailable; not capturing drop/anchor position');
+        }
+      }
+
+      const mergedAnchor = this._deepMergeAnchor(currentAnchor, sanitizedPatch);
 
       if (Array.isArray(currentAnchor.fences) && Array.isArray(mergedAnchor.fences)) {
         const fencesById = new Map(currentAnchor.fences.map((fence) => [fence?.id, fence]));
