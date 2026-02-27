@@ -57,7 +57,7 @@ setInterval(() => {
     external: formatMb(memory.external),
     arrayBuffers: formatMb(memory.arrayBuffers || 0),
   });
-}, 60000);
+}, 300000);
 
 // --- CLI flag parsing ---
 console.log("[SERVER] Parsing CLI flags...");
