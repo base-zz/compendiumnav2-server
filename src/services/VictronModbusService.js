@@ -759,9 +759,8 @@ export class VictronModbusService extends ContinuousService {
           }
         }
       } catch (error) {
-        if (!error.message.includes('timeout') && !error.message.includes('not available')) {
-          console.log(`[VictronModbus] Rescan Unit ID ${unitId} error: ${error.message}`);
-        }
+        // Intentionally suppress per-Unit-ID errors during scan loops.
+        // These scans frequently hit "Port Not Open" or similar transport errors and would spam logs.
       }
     }
     this.client.setID(this.unitId);

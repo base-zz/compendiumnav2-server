@@ -764,6 +764,7 @@ export class StateManager extends EventEmitter {
     const currentTidesState = this.appState.tides;
     const currentForecastState = this.appState.forecast;
     const currentBluetoothState = this.appState.bluetooth;
+    const currentElectricalState = this.appState?.vessel?.systems?.electrical;
 
     // Replace the state with the new state
     this.appState = this._safeClone(newStateData);
@@ -780,6 +781,15 @@ export class StateManager extends EventEmitter {
     }
     if (currentBluetoothState) {
       this.appState.bluetooth = currentBluetoothState;
+    }
+    if (currentElectricalState && !this.appState?.vessel?.systems?.electrical) {
+      if (!this.appState.vessel || typeof this.appState.vessel !== 'object') {
+        this.appState.vessel = {};
+      }
+      if (!this.appState.vessel.systems || typeof this.appState.vessel.systems !== 'object') {
+        this.appState.vessel.systems = {};
+      }
+      this.appState.vessel.systems.electrical = currentElectricalState;
     }
 
     // Forward aisTargets to the rule engine so AIS proximity rules can evaluate
