@@ -237,6 +237,45 @@ export class ClientSyncCoordinator {
       return this._handleBluetoothCommand(normalized, respondFn);
     }
 
+    // Handle alert acknowledgment messages
+    if (
+      normalized.type === 'command' &&
+      normalized.service === 'alert' &&
+      normalized.action === 'acknowledge' &&
+      normalized.data
+    ) {
+      try {
+        const { alertId, trigger, clientId, timestamp } = normalized.data;
+        let result;
+
+        if (alertId) {
+          // Single alert acknowledgment
+          result = this.stateManager.alertService.acknowledgeAlert(alertId, clientId, timestamp);
+        } else if (trigger) {
+          // Bulk acknowledgment by trigger type
+          result = this.stateManager.alertService.acknowledgeAlertsByTrigger(trigger, clientId, timestamp);
+        } else {
+          throw new Error('Either alertId or trigger must be provided');
+        }
+
+        respondFn({
+          type: 'alert:acknowledge:ack',
+          success: true,
+          acknowledged: result,
+          timestamp: Date.now(),
+        });
+      } catch (error) {
+        logError('Error processing alert acknowledgment:', error);
+        respondFn({
+          type: 'alert:acknowledge:ack',
+          success: false,
+          error: error.message,
+          timestamp: Date.now(),
+        });
+      }
+      return true;
+    }
+
     if (normalized.type === 'tide:update' || normalized.type === 'weather:update') {
       // Allow upstream updates to flow into the state manager when needed
       const updateFn = normalized.type === 'tide:update'

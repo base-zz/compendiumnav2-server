@@ -897,6 +897,93 @@ export class AlertService {
    * @param {Object} resolutionData - Additional data about the resolution
    * @returns {Array} - The resolved alerts
    */
+  /**
+   * Acknowledge a specific alert
+   * @param {string} alertId - The ID of the alert to acknowledge
+   * @param {string} [clientId] - ID of the client acknowledging the alert
+   * @param {string} [timestamp] - Timestamp of acknowledgment (defaults to now)
+   * @returns {Object} - The acknowledged alert
+   * @throws {Error} If alert not found or already acknowledged
+   */
+  acknowledgeAlert(alertId, clientId, timestamp) {
+    this._ensureAlertsStructure();
+    
+    const alertIndex = this.stateManager.appState.alerts.active.findIndex(
+      alert => alert.id === alertId
+    );
+    
+    if (alertIndex === -1) {
+      throw new Error(`Alert ${alertId} not found or already acknowledged`);
+    }
+    
+    const alert = this.stateManager.appState.alerts.active[alertIndex];
+    
+    // Update acknowledgment fields
+    alert.acknowledged = true;
+    alert.acknowledgedBy = clientId;
+    alert.acknowledgedAt = timestamp || new Date().toISOString();
+    alert.status = 'acknowledged';
+    
+    // Move from active to resolved
+    this.stateManager.appState.alerts.active.splice(alertIndex, 1);
+    this.stateManager.appState.alerts.resolved.push(alert);
+    
+    console.log(`[AlertService] Alert acknowledged: ${alert.label} by ${clientId || 'unknown'}`);
+    
+    // Broadcast to all clients
+    this.stateManager.emit('alerts:updated', { 
+      type: 'alert:acknowledged', 
+      alert 
+    });
+    
+    return alert;
+  }
+
+  /**
+   * Acknowledge all alerts of a specific trigger type
+   * @param {string} trigger - The trigger type to acknowledge
+   * @param {string} [clientId] - ID of the client acknowledging the alerts
+   * @param {string} [timestamp] - Timestamp of acknowledgment (defaults to now)
+   * @returns {Object[]} - Array of acknowledged alerts
+   */
+  acknowledgeAlertsByTrigger(trigger, clientId, timestamp) {
+    this._ensureAlertsStructure();
+    
+    const alertsToAcknowledge = this.stateManager.appState.alerts.active.filter(
+      alert => alert.trigger === trigger && !alert.acknowledged
+    );
+    
+    if (alertsToAcknowledge.length === 0) {
+      return [];
+    }
+    
+    console.log(`[AlertService] Bulk acknowledging ${alertsToAcknowledge.length} alerts with trigger: ${trigger}`);
+    
+    // Update all alerts
+    alertsToAcknowledge.forEach(alert => {
+      alert.acknowledged = true;
+      alert.acknowledgedBy = clientId;
+      alert.acknowledgedAt = timestamp || new Date().toISOString();
+      alert.status = 'acknowledged';
+    });
+    
+    // Remove from active and add to resolved
+    this.stateManager.appState.alerts.active = 
+      this.stateManager.appState.alerts.active.filter(
+        alert => !alertsToAcknowledge.includes(alert)
+      );
+    
+    this.stateManager.appState.alerts.resolved.push(...alertsToAcknowledge);
+    
+    // Broadcast bulk update
+    this.stateManager.emit('alerts:updated', { 
+      type: 'alerts:bulk_acknowledged',
+      alerts: alertsToAcknowledge
+    });
+    
+    return alertsToAcknowledge;
+  }
+
   resolveAlertsByTrigger(triggerType, resolutionData = {}) {
     this._ensureAlertsStructure();
     
