@@ -456,17 +456,27 @@ export const anchorRules = [
 
       console.log('[AIS Proximity] Targets in range:', targetsInRange.length);
 
+      // Get MMSI numbers of vessels currently in range
+      const inRangeMMSIs = targetsInRange.map(target => target.mmsi).filter(Boolean);
+      console.log('[AIS Proximity] Vessels in range MMSIs:', inRangeMMSIs);
+
+      // Check for existing alerts for these specific vessels
       const activeAlerts = state.alerts?.active || [];
-      console.log(`[AIS Proximity] Active alerts check: count=${activeAlerts.length}, alerts=${JSON.stringify(activeAlerts.map(a => ({ trigger: a.trigger, acknowledged: a.acknowledged })))}`);
+      const existingAlertMMSIs = activeAlerts
+        .filter(alert => alert.trigger === 'ais_proximity' && !alert.acknowledged && alert.data?.targetMMSIs)
+        .flatMap(alert => alert.data.targetMMSIs);
+      
+      console.log('[AIS Proximity] Existing alert MMSIs:', existingAlertMMSIs);
 
-      const hasActiveAlert = activeAlerts.some(
-        (alert) => alert.trigger === 'ais_proximity' && !alert.acknowledged
-      );
-
-      const shouldTrigger = targetsInRange.length > 0 && !hasActiveAlert;
+      // Find vessels that need new alerts (in range but don't have alerts yet)
+      const newVesselsNeedingAlerts = inRangeMMSIs.filter(mmsi => !existingAlertMMSIs.includes(mmsi));
+      
+      const shouldTrigger = newVesselsNeedingAlerts.length > 0;
       console.log('[AIS Proximity] Rule result:', {
         targetsInRange: targetsInRange.length,
-        hasActiveAlert,
+        inRangeMMSIs,
+        existingAlertMMSIs,
+        newVesselsNeedingAlerts,
         shouldTrigger
       });
 
@@ -498,6 +508,7 @@ export const anchorRules = [
       const isMetric = state.units?.distance === 'meters';
       const unitLabel = isMetric ? 'm' : 'ft';
 
+      // Get detailed info for vessels in range
       const targetsInRange = aisTargetsArray.filter((target) => {
         if (!target.position) return false;
 
@@ -509,7 +520,26 @@ export const anchorRules = [
         );
 
         return distance <= warningRadius;
-      }).length;
+      });
+
+      // Get existing alert MMSIs to find vessels that need new alerts
+      const activeAlerts = state.alerts?.active || [];
+      const existingAlertMMSIs = activeAlerts
+        .filter(alert => alert.trigger === 'ais_proximity' && !alert.acknowledged && alert.data?.targetMMSIs)
+        .flatMap(alert => alert.data.targetMMSIs);
+
+      // Find vessels that need new alerts (in range but don't have alerts yet)
+      const newVesselsNeedingAlerts = targetsInRange.filter(target => 
+        target.mmsi && !existingAlertMMSIs.includes(target.mmsi)
+      );
+
+      if (newVesselsNeedingAlerts.length === 0) {
+        console.log('[AIS Proximity] No new vessels need alerts');
+        return null;
+      }
+
+      const newVesselMMSIs = newVesselsNeedingAlerts.map(v => v.mmsi);
+      console.log('[AIS Proximity] Creating alerts for vessels:', newVesselMMSIs);
 
       return {
         type: 'CREATE_ALERT',
@@ -519,10 +549,12 @@ export const anchorRules = [
           source: 'ais_monitor',
           level: 'warning',
           label: 'AIS Proximity Warning',
-          message: `${targetsInRange} vessel(s) detected within warning radius of ${warningRadius} ${unitLabel}.`,
+          message: `${newVesselsNeedingAlerts.length} new vessel(s) detected within warning radius of ${warningRadius} ${unitLabel}.`,
           trigger: 'ais_proximity',
           data: {
-            targetCount: targetsInRange,
+            targetCount: targetsInRange.length,
+            newVesselCount: newVesselsNeedingAlerts.length,
+            targetMMSIs: newVesselMMSIs,
             warningRadius,
             units: unitLabel,
           },

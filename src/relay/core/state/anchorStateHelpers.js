@@ -406,6 +406,7 @@ function projectNewAnchorPosition(boatPos, currentAnchorPos, rodeLengthMeters) {
  */
 export function recomputeAnchorDerivedState(appState, options = {}) {
   const skipHistory = options.skipHistory === true;
+  const stateManager = options.stateManager;
   if (!appState || typeof appState !== "object") {
     return null;
   }
@@ -450,6 +451,10 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
 
   let updatedAnchor = { ...anchor };
   const changedPaths = [];
+  
+  // Track if warning radius changed for obsolete alert checking
+  const oldWarningRadius = appState.anchor?.warningRange?.r ?? null;
+  const warningRadiusChanged = oldWarningRadius !== warningRadius;
 
   // Helper to track changes
   const trackChange = (path, value) => {
@@ -669,6 +674,59 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       if (updatedAnchor.aisWarning !== hasWarning) {
         updatedAnchor.aisWarning = hasWarning;
         trackChange("/anchor/aisWarning", hasWarning);
+      }
+      
+      // Check for obsolete AIS proximity alerts when warning range changes
+      if (appState.alerts?.active && warningRadiusChanged) {
+        const obsoleteAlerts = appState.alerts.active.filter(alert => 
+          alert.trigger === 'ais_proximity' && 
+          !alert.acknowledged &&
+          alert.data?.targetMMSIs
+        );
+        
+        if (obsoleteAlerts.length > 0) {
+          console.log('[Anchor] Checking for obsolete AIS proximity alerts due to range change');
+          
+          // For each alert, check if its target vessels are still in range
+          const alertsToResolve = [];
+          
+          for (const alert of obsoleteAlerts) {
+            const alertMMSIs = alert.data.targetMMSIs;
+            let allVesselsOutOfRange = true;
+            
+            for (const mmsi of alertMMSIs) {
+              const target = aisTargetsArray.find(t => t.mmsi === mmsi);
+              if (target?.position && boatLat != null && boatLon != null) {
+                const distance = calculateDistance(
+                  target.position.latitude,
+                  target.position.longitude,
+                  boatLat,
+                  boatLon
+                );
+                
+                if (distance <= warningRadius) {
+                  allVesselsOutOfRange = false;
+                  break;
+                }
+              }
+            }
+            
+            if (allVesselsOutOfRange) {
+              console.log(`[Anchor] Resolving obsolete AIS proximity alert for MMSIs: ${alertMMSIs.join(', ')}`);
+              alertsToResolve.push(alert);
+            }
+          }
+          
+          // Resolve obsolete alerts
+          if (alertsToResolve.length > 0) {
+            // Access AlertService through stateManager (passed as parameter)
+            if (stateManager?.alertService) {
+              for (const alert of alertsToResolve) {
+                stateManager.alertService.resolveAlert(alert.id);
+              }
+            }
+          }
+        }
       }
     }
   }
