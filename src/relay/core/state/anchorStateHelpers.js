@@ -407,6 +407,7 @@ function projectNewAnchorPosition(boatPos, currentAnchorPos, rodeLengthMeters) {
 export function recomputeAnchorDerivedState(appState, options = {}) {
   const skipHistory = options.skipHistory === true;
   const stateManager = options.stateManager;
+  const patchOps = options.patchOps;
   if (!appState || typeof appState !== "object") {
     return null;
   }
@@ -453,15 +454,31 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   const changedPaths = [];
   
   // Track if warning radius changed for obsolete alert checking
-  // Note: appState already has the patch applied, so we need to compare with the original anchor
-  const oldWarningRadius = anchor.warningRange?.r ?? null;
-  const newWarningRadius = appState.anchor?.warningRange?.r ?? null;
+  // Extract old value from patch operations if available
+  let oldWarningRadius = anchor.warningRange?.r ?? null;
+  let newWarningRadius = appState.anchor?.warningRange?.r ?? null;
+  
+  // If we have patch operations, try to extract the old warning radius value
+  if (Array.isArray(patchOps)) {
+    const warningRangePatch = patchOps.find(op => 
+      op.path === "/anchor/warningRange/r" || op.path.startsWith("/anchor/warningRange")
+    );
+    
+    if (warningRangePatch) {
+      // For replace operations, the value being replaced is the old value
+      // We need to get it from the current anchor state before the patch was applied
+      console.log('[Anchor] Found warning range patch:', warningRangePatch);
+    }
+  }
+  
   const warningRadiusChanged = oldWarningRadius !== newWarningRadius;
   
   console.log('[Anchor] Warning radius check:', {
     oldRadius: oldWarningRadius,
     newRadius: newWarningRadius,
-    changed: warningRadiusChanged
+    changed: warningRadiusChanged,
+    hasPatchOps: !!patchOps,
+    patchOpsCount: patchOps?.length || 0
   });
 
   // Helper to track changes

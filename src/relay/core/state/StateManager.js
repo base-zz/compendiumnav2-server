@@ -6,7 +6,7 @@ import storageService from "../../../bluetooth/services/storage/storageService.j
 import { RuleEngine2 } from "./ruleEngine2.js";
 import { getRules } from "./allRules2.js";
 import { AlertService } from "../services/AlertService.js";
-import { recomputeAnchorDerivedState } from "./anchorStateHelpers.js";
+import { recomputeAnchorDerivedState, calculateDistance } from "./anchorStateHelpers.js";
 import { getOrCreateAppUuid } from "../../../server/uniqueAppId.js";
 import { defaultProfile } from "../../../config/profiles.js";
 import { UNIT_PRESETS } from "../../../shared/unitPreferences.js";
@@ -434,6 +434,9 @@ export class StateManager extends EventEmitter {
         return;
       }
       sanitizedPatch = applySafely(currentState, sanitizedPatch);
+
+      // Check for obsolete AIS proximity alerts when anchor warning range changes
+      this._checkObsoleteAISAlerts(sanitizedPatch);
 
       // Run state helpers (e.g., anchor derived state) after the patch has been
       // fully applied to appState, so helpers see the latest snapshot.
@@ -1230,6 +1233,7 @@ export class StateManager extends EventEmitter {
       const helperResult = recomputeAnchorDerivedState(this.appState, {
         skipHistory: hasAnchorPatch,
         stateManager: this,
+        patchOps: patchOps,
       });
       if (helperResult) {
         const { anchor: updatedAnchor, changedPaths } = helperResult;
@@ -1382,6 +1386,95 @@ export class StateManager extends EventEmitter {
   }
 
   // Alert management has been moved to the AlertService
+
+  /**
+   * Check for obsolete AIS proximity alerts when anchor warning range changes
+   * @param {Array} patchOps - Patch operations that were applied
+   */
+  _checkObsoleteAISAlerts(patchOps) {
+    if (!Array.isArray(patchOps)) return;
+    
+    // Check if this patch contains a warning range change
+    const warningRangePatch = patchOps.find(op => 
+      op.path === "/anchor/warningRange/r" || op.path.startsWith("/anchor/warningRange")
+    );
+    
+    if (!warningRangePatch) return;
+    
+    console.log('[StateManager] Checking for obsolete AIS alerts due to warning range change:', warningRangePatch);
+    
+    const activeAlerts = this.appState.alerts?.active || [];
+    const aisAlerts = activeAlerts.filter(alert => 
+      alert.trigger === 'ais_proximity' && 
+      !alert.acknowledged &&
+      alert.data?.targetMMSIs
+    );
+    
+    if (aisAlerts.length === 0) {
+      console.log('[StateManager] No active AIS proximity alerts to check');
+      return;
+    }
+    
+    // Get the new warning radius
+    const newWarningRadius = this.appState.anchor?.warningRange?.r;
+    if (!newWarningRadius) {
+      console.log('[StateManager] No new warning radius found');
+      return;
+    }
+    
+    // Get boat position and AIS targets
+    const navLat = this.appState.navigation?.position?.latitude?.value;
+    const navLon = this.appState.navigation?.position?.longitude?.value;
+    const boatLat = navLat != null ? navLat : this.appState.position?.signalk?.latitude;
+    const boatLon = navLon != null ? navLon : this.appState.position?.signalk?.longitude;
+    
+    if (boatLat == null || boatLon == null) {
+      console.log('[StateManager] No boat position available for distance checks');
+      return;
+    }
+    
+    const aisTargetsArray = Array.isArray(this.appState.ais?.targets)
+      ? this.appState.ais.targets
+      : Object.values(this.appState.aisTargets || {});
+    
+    // Check each alert to see if its target vessels are still in range
+    const alertsToResolve = [];
+    
+    for (const alert of aisAlerts) {
+      const alertMMSIs = alert.data.targetMMSIs;
+      let allVesselsOutOfRange = true;
+      
+      for (const mmsi of alertMMSIs) {
+        const target = aisTargetsArray.find(t => t.mmsi === mmsi);
+        if (target?.position) {
+          const distance = calculateDistance(
+            target.position.latitude,
+            target.position.longitude,
+            boatLat,
+            boatLon
+          );
+          
+          if (distance <= newWarningRadius) {
+            allVesselsOutOfRange = false;
+            break;
+          }
+        }
+      }
+      
+      if (allVesselsOutOfRange) {
+        console.log(`[StateManager] Resolving obsolete AIS proximity alert for MMSIs: ${alertMMSIs.join(', ')}`);
+        alertsToResolve.push(alert);
+      }
+    }
+    
+    // Resolve obsolete alerts
+    if (alertsToResolve.length > 0) {
+      console.log(`[StateManager] Resolving ${alertsToResolve.length} obsolete AIS proximity alerts BEFORE state helpers run`);
+      for (const alert of alertsToResolve) {
+        this.alertService.resolveAlert(alert.id);
+      }
+    }
+  }
 
   _applySyncProfile(config) {
     Object.entries(config).forEach(([dataType, settings]) => {
