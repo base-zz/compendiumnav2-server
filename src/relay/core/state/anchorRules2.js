@@ -473,6 +473,7 @@ export const anchorRules = [
       return shouldTrigger;
     },
     action: (state) => {
+      console.log('[AIS Proximity] ACTION TRIGGERED - Creating alert');
       const anchorState = state.anchor || {};
       const aisTargetsArray = Array.isArray(state.ais?.targets)
         ? state.ais.targets

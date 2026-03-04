@@ -823,6 +823,13 @@ export class AlertService {
       ...alertData
     };
     
+    console.log('[AlertService] Creating alert:', {
+      trigger: alertData.trigger,
+      type: alertData.type,
+      message: alertData.message,
+      id: newAlert.id
+    });
+    
     // Use stateManager's updateState if available, otherwise modify directly
     if (typeof this.stateManager.updateState === 'function') {
       this.stateManager.updateState(state => ({
@@ -836,6 +843,7 @@ export class AlertService {
       this.stateManager.appState.alerts.active.push(newAlert);
     }
     
+    console.log('[AlertService] Alert added to state, total active alerts:', this.stateManager.appState.alerts.active.length);
     this.stateManager.emit('alerts:updated', { type: 'alert:created', alert: newAlert });
     
     return newAlert;
