@@ -296,6 +296,14 @@ function extractDropDepthMeters(anchor) {
   const amount = depthObj?.value;
   const units = depthObj?.units;
 
+  // Log depth extraction for debugging
+  console.log('[anchorStateHelpers] extractDropDepthMeters:', {
+    hasDepthObj: !!depthObj,
+    depthSource,
+    amount,
+    units
+  });
+
   if (depthSource == null) return null;
   if (amount == null || units == null) return null;
 
@@ -645,6 +653,14 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   const aisTargetsArray = Array.isArray(appState.ais?.targets)
     ? appState.ais.targets
     : Object.values(appState.aisTargets || {});
+
+  // Log anchor state for debugging depth fields
+  console.log('[anchorStateHelpers] recomputeAnchorDerivedState - anchorDropLocation:', {
+    hasDepth: !!anchor.anchorDropLocation?.depth,
+    hasDepthSource: !!anchor.anchorDropLocation?.depthSource,
+    depth: anchor.anchorDropLocation?.depth,
+    depthSource: anchor.anchorDropLocation?.depthSource
+  });
 
   if (warningRadius != null && Array.isArray(aisTargetsArray) && aisTargetsArray.length > 0) {
     // Use boat position as the reference for AIS proximity checks

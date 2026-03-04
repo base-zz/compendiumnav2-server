@@ -380,10 +380,8 @@ export const anchorRules = [
     priority: 'high',
     condition: (state) => {
       const anchorState = state.anchor || {};
-      console.log('[AIS Proximity] Rule evaluation - anchorDeployed:', anchorState.anchorDeployed);
       
       if (!anchorState.anchorDeployed) {
-        console.log('[AIS Proximity] Rule skipped - anchor not deployed');
         return false;
       }
 
@@ -392,14 +390,6 @@ export const anchorRules = [
         ? state.ais.targets
         : Object.values(aisTargetsObj);
       const warningRadius = anchorState.warningRange?.r || 15;
-      
-      console.log('[AIS Proximity] AIS data:', {
-        aisTargetsCount: aisTargetsArray.length,
-        warningRadius,
-        hasAisTargets: !!state.ais?.targets,
-        hasAisTargetsObj: !!state.aisTargets,
-        aisTargetsSample: aisTargetsArray.slice(0, 2)
-      });
 
       const navLat = state.navigation?.position?.latitude?.value;
       const navLon = state.navigation?.position?.longitude?.value;
@@ -416,25 +406,23 @@ export const anchorRules = [
       const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
       const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
 
-      console.log('[AIS Proximity] Position data:', {
-        navLat, navLon,
-        boatLat, boatLon,
-        hasNavPosition: !!state.navigation?.position,
-        hasPosition: !!state.position
-      });
-
       if (!warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
-        console.log('[AIS Proximity] Rule failed - missing data:', {
-          hasWarningRadius: !!warningRadius,
-          hasBoatLat: boatLat != null,
-          hasBoatLon: boatLon != null,
-          hasTargets: aisTargetsArray.length > 0
-        });
         return false;
       }
 
-      const targetsInRange = aisTargetsArray.filter((target) => {
+      // Filter out targets with invalid positions
+      const validTargets = aisTargetsArray.filter((target) => {
         if (!target.position) return false;
+        if (target.position.latitude == null || target.position.longitude == null ||
+            isNaN(target.position.latitude) || isNaN(target.position.longitude) ||
+            Math.abs(target.position.latitude) > 90 || Math.abs(target.position.longitude) > 180) {
+            return false;
+        }
+        return true;
+      });
+
+
+      const targetsInRange = validTargets.filter((target) => {
 
         const distance = calculateDistance(
           target.position.latitude,
@@ -443,22 +431,13 @@ export const anchorRules = [
           boatLon
         );
 
-        console.log('[AIS Proximity] Target distance check:', {
-          target: target.name || target.mmsi || 'unknown',
-          distance,
-          withinRange: distance <= warningRadius,
-          targetPos: target.position,
-          boatPos: { lat: boatLat, lon: boatLon }
-        });
 
         return distance <= warningRadius;
       });
 
-      console.log('[AIS Proximity] Targets in range:', targetsInRange.length);
 
       // Get MMSI numbers of vessels currently in range
       const inRangeMMSIs = targetsInRange.map(target => target.mmsi).filter(Boolean);
-      console.log('[AIS Proximity] Vessels in range MMSIs:', inRangeMMSIs);
 
       // Check for existing alerts for these specific vessels
       const activeAlerts = state.alerts?.active || [];
@@ -466,24 +445,15 @@ export const anchorRules = [
         .filter(alert => alert.trigger === 'ais_proximity' && !alert.acknowledged && alert.data?.targetMMSIs)
         .flatMap(alert => alert.data.targetMMSIs);
       
-      console.log('[AIS Proximity] Existing alert MMSIs:', existingAlertMMSIs);
 
       // Find vessels that need new alerts (in range but don't have alerts yet)
       const newVesselsNeedingAlerts = inRangeMMSIs.filter(mmsi => !existingAlertMMSIs.includes(mmsi));
       
       const shouldTrigger = newVesselsNeedingAlerts.length > 0;
-      console.log('[AIS Proximity] Rule result:', {
-        targetsInRange: targetsInRange.length,
-        inRangeMMSIs,
-        existingAlertMMSIs,
-        newVesselsNeedingAlerts,
-        shouldTrigger
-      });
 
       return shouldTrigger;
     },
     action: (state) => {
-      console.log('[AIS Proximity] ACTION TRIGGERED - Creating alert');
       const anchorState = state.anchor || {};
       const aisTargetsArray = Array.isArray(state.ais?.targets)
         ? state.ais.targets
@@ -494,11 +464,11 @@ export const anchorRules = [
       const navLon = state.navigation?.position?.longitude?.value;
 
       const positionRoot =
-        state.position && typeof state.position === 'object'
+        state.position && typeof state.position === "object"
           ? state.position
           : {};
       const boatPositionFromPosition =
-        positionRoot.signalk && typeof positionRoot.signalk === 'object'
+        positionRoot.signalk && typeof positionRoot.signalk === "object"
           ? positionRoot.signalk
           : positionRoot;
 
@@ -534,12 +504,10 @@ export const anchorRules = [
       );
 
       if (newVesselsNeedingAlerts.length === 0) {
-        console.log('[AIS Proximity] No new vessels need alerts');
         return null;
       }
 
       const newVesselMMSIs = newVesselsNeedingAlerts.map(v => v.mmsi);
-      console.log('[AIS Proximity] Creating alerts for vessels:', newVesselMMSIs);
 
       return {
         type: 'CREATE_ALERT',

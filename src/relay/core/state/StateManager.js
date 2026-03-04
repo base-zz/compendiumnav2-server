@@ -949,6 +949,17 @@ export class StateManager extends EventEmitter {
 
       const action = typeof sanitizedPatch.action === 'string' ? sanitizedPatch.action : null;
 
+      // Log incoming anchorDropLocation data for debugging
+      if (sanitizedPatch.anchorDropLocation) {
+        console.log('[StateManager] Incoming anchorDropLocation:', {
+          hasDepth: !!sanitizedPatch.anchorDropLocation.depth,
+          hasDepthSource: !!sanitizedPatch.anchorDropLocation.depthSource,
+          depth: sanitizedPatch.anchorDropLocation.depth,
+          depthSource: sanitizedPatch.anchorDropLocation.depthSource,
+          action: action
+        });
+      }
+
       delete sanitizedPatch.action;
       delete sanitizedPatch.setBearing;
 
@@ -1077,6 +1088,14 @@ export class StateManager extends EventEmitter {
           time: serverNowIso,
         };
 
+        // Ensure depth and depthSource are preserved during set_after_deploy
+        if (sanitizedPatch.anchorDropLocation.depth == null && currentAnchor?.anchorDropLocation?.depth != null) {
+          sanitizedPatch.anchorDropLocation.depth = currentAnchor.anchorDropLocation.depth;
+        }
+        if (sanitizedPatch.anchorDropLocation.depthSource == null && currentAnchor?.anchorDropLocation?.depthSource != null) {
+          sanitizedPatch.anchorDropLocation.depthSource = currentAnchor.anchorDropLocation.depthSource;
+        }
+
         sanitizedPatch.anchorLocation = {
           ...(currentAnchor?.anchorLocation || {}),
           ...(sanitizedPatch.anchorLocation || {}),
@@ -1143,6 +1162,18 @@ export class StateManager extends EventEmitter {
 
       const mergedAnchor = this._deepMergeAnchor(currentAnchor, sanitizedPatch);
 
+      // Log merge results for debugging depth fields
+      console.log('[StateManager] After _deepMergeAnchor:', {
+        currentHadDepth: !!currentAnchor?.anchorDropLocation?.depth,
+        currentHadDepthSource: !!currentAnchor?.anchorDropLocation?.depthSource,
+        patchHadDepth: !!sanitizedPatch?.anchorDropLocation?.depth,
+        patchHadDepthSource: !!sanitizedPatch?.anchorDropLocation?.depthSource,
+        mergedHasDepth: !!mergedAnchor?.anchorDropLocation?.depth,
+        mergedHasDepthSource: !!mergedAnchor?.anchorDropLocation?.depthSource,
+        mergedDepth: mergedAnchor?.anchorDropLocation?.depth,
+        mergedDepthSource: mergedAnchor?.anchorDropLocation?.depthSource
+      });
+
       if (Array.isArray(currentAnchor.fences) && Array.isArray(mergedAnchor.fences)) {
         const fencesById = new Map(currentAnchor.fences.map((fence) => [fence?.id, fence]));
         mergedAnchor.fences = mergedAnchor.fences.map((fence) => {
@@ -1167,6 +1198,15 @@ export class StateManager extends EventEmitter {
 
       // Apply the patch using our existing method
       this.applyPatchAndForward(patch);
+      
+      // Log the final anchor state to verify depth fields are preserved
+      console.log('[StateManager] Final anchorDropLocation after update:', {
+        hasDepth: !!this.appState?.anchor?.anchorDropLocation?.depth,
+        hasDepthSource: !!this.appState?.anchor?.anchorDropLocation?.depthSource,
+        depth: this.appState?.anchor?.anchorDropLocation?.depth,
+        depthSource: this.appState?.anchor?.anchorDropLocation?.depthSource
+      });
+      
       this.log(
         "[StateManager][updateAnchorState] anchor after update:",
         JSON.stringify(this.appState?.anchor, null, 2)
