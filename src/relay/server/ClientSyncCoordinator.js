@@ -32,6 +32,7 @@ export class ClientSyncCoordinator {
     this._stateHandler = this._handleStateEvent.bind(this);
     this._tideHandler = this._handleTideUpdate.bind(this);
     this._weatherHandler = this._handleWeatherUpdate.bind(this);
+    this._alertsHandler = this._handleAlertsUpdate.bind(this);
 
     this._registerStateListeners();
 
@@ -45,6 +46,7 @@ export class ClientSyncCoordinator {
     this.stateManager.on('state:full-update', this._stateHandler);
     this.stateManager.on('tide:update', this._tideHandler);
     this.stateManager.on('weather:update', this._weatherHandler);
+    this.stateManager.on('alerts:updated', this._alertsHandler);
   }
 
   _handleStateEvent(payload) {
@@ -80,6 +82,20 @@ export class ClientSyncCoordinator {
       });
     } catch (error) {
       logError('Failed to forward weather update:', error);
+    }
+  }
+
+  _handleAlertsUpdate(data) {
+    try {
+      console.log('[ClientSyncCoordinator] Received alerts update, forwarding to clients:', data.type);
+      this._publish({
+        type: 'alerts:updated',
+        data,
+        boatId: this.stateManager.boatId,
+        timestamp: Date.now(),
+      });
+    } catch (error) {
+      logError('Failed to forward alerts update:', error);
     }
   }
 

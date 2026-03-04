@@ -844,6 +844,7 @@ export class AlertService {
     }
     
     console.log('[AlertService] Alert added to state, total active alerts:', this.stateManager.appState.alerts.active.length);
+    console.log('[AlertService] Emitting alerts:updated event for alert:', newAlert.id);
     this.stateManager.emit('alerts:updated', { type: 'alert:created', alert: newAlert });
     
     return newAlert;
