@@ -797,3 +797,5 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
 
   return changedPaths.length > 0 ? { anchor: updatedAnchor, changedPaths } : null;
 }
+
+export { calculateDistance };
