@@ -456,7 +456,13 @@ export const anchorRules = [
 
       console.log('[AIS Proximity] Targets in range:', targetsInRange.length);
 
-      const hasActiveAlert = state.alerts?.active?.some(
+      const activeAlerts = state.alerts?.active || [];
+      console.log('[AIS Proximity] Active alerts check:', {
+        activeAlertsCount: activeAlerts.length,
+        activeAlerts: activeAlerts.map(a => ({ trigger: a.trigger, acknowledged: a.acknowledged }))
+      });
+
+      const hasActiveAlert = activeAlerts.some(
         (alert) => alert.trigger === 'ais_proximity' && !alert.acknowledged
       );
 
