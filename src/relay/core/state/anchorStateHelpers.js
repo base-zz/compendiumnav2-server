@@ -453,12 +453,14 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   const changedPaths = [];
   
   // Track if warning radius changed for obsolete alert checking
-  const oldWarningRadius = appState.anchor?.warningRange?.r ?? null;
-  const warningRadiusChanged = oldWarningRadius !== warningRadius;
+  // Note: appState already has the patch applied, so we need to compare with the original anchor
+  const oldWarningRadius = anchor.warningRange?.r ?? null;
+  const newWarningRadius = appState.anchor?.warningRange?.r ?? null;
+  const warningRadiusChanged = oldWarningRadius !== newWarningRadius;
   
   console.log('[Anchor] Warning radius check:', {
     oldRadius: oldWarningRadius,
-    newRadius: warningRadius,
+    newRadius: newWarningRadius,
     changed: warningRadiusChanged
   });
 
@@ -657,7 +659,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
     ? appState.ais.targets
     : Object.values(appState.aisTargets || {});
 
-  if (warningRadius != null && Array.isArray(aisTargetsArray) && aisTargetsArray.length > 0) {
+  if (newWarningRadius != null && Array.isArray(aisTargetsArray) && aisTargetsArray.length > 0) {
     // Use boat position as the reference for AIS proximity checks
     const refLat = boatLat;
     const refLon = boatLon;
@@ -672,7 +674,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
         if (tLat == null || tLon == null) return false;
 
         const distance = calculateDistance(refLat, refLon, tLat, tLon);
-        return distance <= warningRadius;
+        return distance <= newWarningRadius;
       });
 
       const hasWarning = targetsInRange.length > 0;
@@ -716,7 +718,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
                   boatLon
                 );
                 
-                if (distance <= warningRadius) {
+                if (distance <= newWarningRadius) {
                   allVesselsOutOfRange = false;
                   break;
                 }
