@@ -613,6 +613,14 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
         ? updatedAnchor.history
         : [];
       
+      console.log('[anchorStateHelpers] History check:', {
+        anchorDeployed: anchor.anchorDeployed,
+        boatLat,
+        boatLon,
+        existingHistoryLength: existingHistory.length,
+        lastEntry: existingHistory.length > 0 ? existingHistory[existingHistory.length - 1] : null
+      });
+      
       // Only add breadcrumb if at least 30 seconds have passed since last one
       const MIN_BREADCRUMB_INTERVAL_MS = 30000; // 30 seconds
       
@@ -622,6 +630,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       
       if (lastEntry && (now - lastEntry.time) < MIN_BREADCRUMB_INTERVAL_MS) {
         // Skip adding breadcrumb - not enough time has passed
+        console.log('[anchorStateHelpers] Skipping breadcrumb - too soon since last');
       } else {
         const historyEntry = {
           position: {
@@ -644,6 +653,9 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
         if (trimmedHistory !== existingHistory) {
           updatedAnchor.history = trimmedHistory;
           trackChange("/anchor/history", trimmedHistory);
+          console.log('[anchorStateHelpers] Added breadcrumb, new history length:', trimmedHistory.length);
+        } else {
+          console.log('[anchorStateHelpers] No history change');
         }
       }
     }
