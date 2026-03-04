@@ -406,8 +406,6 @@ function projectNewAnchorPosition(boatPos, currentAnchorPos, rodeLengthMeters) {
  */
 export function recomputeAnchorDerivedState(appState, options = {}) {
   const skipHistory = options.skipHistory === true;
-  const stateManager = options.stateManager;
-  const patchOps = options.patchOps;
   if (!appState || typeof appState !== "object") {
     return null;
   }
@@ -452,34 +450,6 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
 
   let updatedAnchor = { ...anchor };
   const changedPaths = [];
-  
-  // Track if warning radius changed for obsolete alert checking
-  // Extract old value from patch operations if available
-  let oldWarningRadius = anchor.warningRange?.r ?? null;
-  let newWarningRadius = appState.anchor?.warningRange?.r ?? null;
-  
-  // If we have patch operations, try to extract the old warning radius value
-  if (Array.isArray(patchOps)) {
-    const warningRangePatch = patchOps.find(op => 
-      op.path === "/anchor/warningRange/r" || op.path.startsWith("/anchor/warningRange")
-    );
-    
-    if (warningRangePatch) {
-      // For replace operations, the value being replaced is the old value
-      // We need to get it from the current anchor state before the patch was applied
-      console.log('[Anchor] Found warning range patch:', warningRangePatch);
-    }
-  }
-  
-  const warningRadiusChanged = oldWarningRadius !== newWarningRadius;
-  
-  console.log('[Anchor] Warning radius check:', {
-    oldRadius: oldWarningRadius,
-    newRadius: newWarningRadius,
-    changed: warningRadiusChanged,
-    hasPatchOps: !!patchOps,
-    patchOpsCount: patchOps?.length || 0
-  });
 
   // Helper to track changes
   const trackChange = (path, value) => {
@@ -676,7 +646,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
     ? appState.ais.targets
     : Object.values(appState.aisTargets || {});
 
-  if (newWarningRadius != null && Array.isArray(aisTargetsArray) && aisTargetsArray.length > 0) {
+  if (warningRadius != null && Array.isArray(aisTargetsArray) && aisTargetsArray.length > 0) {
     // Use boat position as the reference for AIS proximity checks
     const refLat = boatLat;
     const refLon = boatLon;
@@ -691,7 +661,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
         if (tLat == null || tLon == null) return false;
 
         const distance = calculateDistance(refLat, refLon, tLat, tLon);
-        return distance <= newWarningRadius;
+        return distance <= warningRadius;
       });
 
       const hasWarning = targetsInRange.length > 0;
@@ -699,68 +669,6 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       if (updatedAnchor.aisWarning !== hasWarning) {
         updatedAnchor.aisWarning = hasWarning;
         trackChange("/anchor/aisWarning", hasWarning);
-      }
-      
-      // Check for obsolete AIS proximity alerts when warning range changes
-      console.log('[Anchor] Obsolete alert check:', {
-        hasAlerts: !!appState.alerts?.active,
-        activeCount: appState.alerts?.active?.length || 0,
-        warningRadiusChanged
-      });
-      
-      if (appState.alerts?.active && warningRadiusChanged) {
-        const obsoleteAlerts = appState.alerts.active.filter(alert => 
-          alert.trigger === 'ais_proximity' && 
-          !alert.acknowledged &&
-          alert.data?.targetMMSIs
-        );
-        
-        if (obsoleteAlerts.length > 0) {
-          console.log('[Anchor] Checking for obsolete AIS proximity alerts due to range change');
-          
-          // For each alert, check if its target vessels are still in range
-          const alertsToResolve = [];
-          
-          for (const alert of obsoleteAlerts) {
-            const alertMMSIs = alert.data.targetMMSIs;
-            let allVesselsOutOfRange = true;
-            
-            for (const mmsi of alertMMSIs) {
-              const target = aisTargetsArray.find(t => t.mmsi === mmsi);
-              if (target?.position && boatLat != null && boatLon != null) {
-                const distance = calculateDistance(
-                  target.position.latitude,
-                  target.position.longitude,
-                  boatLat,
-                  boatLon
-                );
-                
-                if (distance <= newWarningRadius) {
-                  allVesselsOutOfRange = false;
-                  break;
-                }
-              }
-            }
-            
-            if (allVesselsOutOfRange) {
-              console.log(`[Anchor] Resolving obsolete AIS proximity alert for MMSIs: ${alertMMSIs.join(', ')}`);
-              alertsToResolve.push(alert);
-            }
-          }
-          
-          // Resolve obsolete alerts
-          if (alertsToResolve.length > 0) {
-            console.log(`[Anchor] Resolving ${alertsToResolve.length} obsolete AIS proximity alerts BEFORE emitting anchor state patch`);
-            // Access AlertService through stateManager (passed as parameter)
-            if (stateManager?.alertService) {
-              for (const alert of alertsToResolve) {
-                console.log(`[Anchor] Resolving alert ${alert.id} for MMSIs: ${alert.data?.targetMMSIs?.join(', ')}`);
-                stateManager.alertService.resolveAlert(alert.id);
-              }
-              console.log(`[Anchor] Finished resolving obsolete alerts, anchor state patch will be emitted next`);
-            }
-          }
-        }
       }
     }
   }
