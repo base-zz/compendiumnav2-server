@@ -1269,7 +1269,6 @@ export class StateManager extends EventEmitter {
 
     if (anchorRelevant) {
       const helperResult = recomputeAnchorDerivedState(this.appState, {
-        skipHistory: hasAnchorPatch,
         stateManager: this,
         patchOps: patchOps,
       });
