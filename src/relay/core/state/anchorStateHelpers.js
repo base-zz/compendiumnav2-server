@@ -455,6 +455,12 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   // Track if warning radius changed for obsolete alert checking
   const oldWarningRadius = appState.anchor?.warningRange?.r ?? null;
   const warningRadiusChanged = oldWarningRadius !== warningRadius;
+  
+  console.log('[Anchor] Warning radius check:', {
+    oldRadius: oldWarningRadius,
+    newRadius: warningRadius,
+    changed: warningRadiusChanged
+  });
 
   // Helper to track changes
   const trackChange = (path, value) => {
@@ -677,6 +683,12 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       }
       
       // Check for obsolete AIS proximity alerts when warning range changes
+      console.log('[Anchor] Obsolete alert check:', {
+        hasAlerts: !!appState.alerts?.active,
+        activeCount: appState.alerts?.active?.length || 0,
+        warningRadiusChanged
+      });
+      
       if (appState.alerts?.active && warningRadiusChanged) {
         const obsoleteAlerts = appState.alerts.active.filter(alert => 
           alert.trigger === 'ais_proximity' && 
