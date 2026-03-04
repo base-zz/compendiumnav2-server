@@ -1254,9 +1254,7 @@ export class StateManager extends EventEmitter {
       ? patchOps.some((op) =>
           typeof op.path === "string" &&
           (op.path.startsWith("/anchor") ||
-            op.path.startsWith("/position") ||
-            op.path.startsWith("/navigation") ||
-            op.path.startsWith("/ais"))
+            op.path.startsWith("/aisTargets"))
         )
       : true;
 
