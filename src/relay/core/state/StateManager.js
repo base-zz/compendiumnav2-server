@@ -1428,22 +1428,45 @@ export class StateManager extends EventEmitter {
       nextWarningRadius,
     });
 
-    if (!Array.isArray(resolvedAlerts) || resolvedAlerts.length === 0) {
-      return;
+    if (Array.isArray(resolvedAlerts) && resolvedAlerts.length > 0) {
+      this._syncAlertsToRuleEngine();
+      this._emitAlertsPatch();
+      this.emit('alerts:updated', {
+        type: 'alerts:resolved',
+        trigger: 'ais_proximity',
+        alerts: resolvedAlerts,
+        data: {
+          reason: 'anchor_warning_range_changed',
+          previousWarningRadius,
+          nextWarningRadius,
+        },
+      });
     }
 
-    this._syncAlertsToRuleEngine();
-    this._emitAlertsPatch();
-    this.emit('alerts:updated', {
-      type: 'alerts:resolved',
-      trigger: 'ais_proximity',
-      alerts: resolvedAlerts,
-      data: {
-        reason: 'anchor_warning_range_changed',
-        previousWarningRadius,
-        nextWarningRadius,
-      },
-    });
+    const hasActiveAisProximityAlerts = this.appState?.alerts?.active?.some(
+      (alert) => alert?.trigger === 'ais_proximity' && !alert?.acknowledged
+    );
+
+    if (!hasActiveAisProximityAlerts && this.appState?.anchor?.aisWarning !== false) {
+      this.appState.anchor.aisWarning = false;
+      this.emit('state:patch', {
+        type: 'state:patch',
+        data: [
+          {
+            op: 'replace',
+            path: '/anchor/aisWarning',
+            value: false,
+          },
+        ],
+        boatId: this._boatId,
+        timestamp: Date.now(),
+      });
+      this.ruleEngine.updateState({
+        anchor: {
+          ...(this.appState.anchor || {}),
+        },
+      });
+    }
   }
 
   _applySyncProfile(config) {
