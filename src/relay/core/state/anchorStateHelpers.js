@@ -719,11 +719,14 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
           
           // Resolve obsolete alerts
           if (alertsToResolve.length > 0) {
+            console.log(`[Anchor] Resolving ${alertsToResolve.length} obsolete AIS proximity alerts BEFORE emitting anchor state patch`);
             // Access AlertService through stateManager (passed as parameter)
             if (stateManager?.alertService) {
               for (const alert of alertsToResolve) {
+                console.log(`[Anchor] Resolving alert ${alert.id} for MMSIs: ${alert.data?.targetMMSIs?.join(', ')}`);
                 stateManager.alertService.resolveAlert(alert.id);
               }
+              console.log(`[Anchor] Finished resolving obsolete alerts, anchor state patch will be emitted next`);
             }
           }
         }
