@@ -8,6 +8,7 @@
     "start": "node -r module-alias/register dist/index.js",
     "build": "tsc",
     "dev": "node -r module-alias/register src/mainServer.js",
+    "mcp": "node -r module-alias/register src/mcpServer.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
@@ -15,6 +16,7 @@
     "@capacitor/app": "^7.0.1",
     "@capacitor/push-notifications": "^7.0.1",
     "@compendiumnav2/shared": "file:../compendiumnav2-shared",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@parse/node-apn": "^6.5.0",
     "axios": "^1.9.0",
     "cors": "^2.8.5",
@@ -34,8 +36,10 @@
     "pouchdb": "^9.0.0",
     "pouchdb-find": "^9.0.0",
     "socket.io": "^4.7.2",
+    "sqlite3": "^5.1.7",
     "winston": "^3.17.0",
-    "ws": "^8.14.2"
+    "ws": "^8.14.2",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@capacitor/preferences": "^7.0.1",
