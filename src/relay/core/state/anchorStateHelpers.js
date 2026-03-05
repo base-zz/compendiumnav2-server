@@ -447,6 +447,8 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
 
   const criticalRange = anchor.criticalRange?.r ?? null;
   const warningRadius = anchor.warningRange?.r ?? null;
+  const isDeploying = anchor.deploymentPhase === 'deploying';
+  const isMonitoringSuppressed = anchor.alertsSuppressed === true || anchor.anchorSet === false;
 
   let updatedAnchor = { ...anchor };
   const changedPaths = [];
@@ -460,6 +462,34 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   if (dropLat != null && dropLon != null) {
     const distanceBoatFromDrop = calculateDistance(boatLat, boatLon, dropLat, dropLon);
     const bearingBoatToDrop = calculateBearing(boatLat, boatLon, dropLat, dropLon);
+
+    if (isDeploying) {
+      const previousMaxDistance = anchor.dropSession?.measured?.maxDistanceFromDrop;
+      const nextMaxDistance =
+        Number.isFinite(previousMaxDistance)
+          ? Math.max(previousMaxDistance, distanceBoatFromDrop)
+          : distanceBoatFromDrop;
+
+      const nextDropSession = {
+        ...(updatedAnchor.dropSession || {}),
+        measured: {
+          ...(updatedAnchor.dropSession?.measured || {}),
+          currentDistanceFromDrop: distanceBoatFromDrop,
+          maxDistanceFromDrop: nextMaxDistance,
+          currentBearingFromDropDeg: bearingBoatToDrop,
+          lastSampleAt: Date.now(),
+        },
+      };
+
+      if (
+        updatedAnchor.dropSession?.measured?.currentDistanceFromDrop !== nextDropSession.measured.currentDistanceFromDrop ||
+        updatedAnchor.dropSession?.measured?.maxDistanceFromDrop !== nextDropSession.measured.maxDistanceFromDrop ||
+        updatedAnchor.dropSession?.measured?.currentBearingFromDropDeg !== nextDropSession.measured.currentBearingFromDropDeg
+      ) {
+        updatedAnchor.dropSession = nextDropSession;
+        trackChange('/anchor/dropSession', nextDropSession);
+      }
+    }
 
     const updatedDropLocation = {
       ...(anchor.anchorDropLocation || {}),
@@ -488,7 +518,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
     if (dropLat != null && dropLon != null) {
       const rodeLengthMeters = extractRodeLengthMeters(anchor);
       
-      if (rodeLengthMeters != null) {
+      if (rodeLengthMeters != null && !isMonitoringSuppressed) {
         const dropDepthMeters = extractDropDepthMeters(anchor);
         const effectiveRodeRadiusMeters =
           dropDepthMeters != null && dropDepthMeters >= 0 && rodeLengthMeters > dropDepthMeters
@@ -541,6 +571,17 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
             console.log(`[Anchor] Rode circle violated but anchor hasn't moved - check rode length config: distance=${distanceBoatFromDrop.toFixed(1)}m, rode=${rodeLengthMeters.toFixed(1)}m`);
           }
         }
+      }
+    }
+
+    if (isMonitoringSuppressed) {
+      if (updatedAnchor.dragging !== false) {
+        updatedAnchor.dragging = false;
+        trackChange('/anchor/dragging', false);
+      }
+      if (updatedAnchor.rodeCircleViolation !== false) {
+        updatedAnchor.rodeCircleViolation = false;
+        trackChange('/anchor/rodeCircleViolation', false);
       }
     }
   }
@@ -646,7 +687,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
     ? appState.ais.targets
     : Object.values(appState.aisTargets || {});
 
-  if (warningRadius != null && Array.isArray(aisTargetsArray) && aisTargetsArray.length > 0) {
+  if (!isMonitoringSuppressed && warningRadius != null && Array.isArray(aisTargetsArray) && aisTargetsArray.length > 0) {
     // Use boat position as the reference for AIS proximity checks
     const refLat = boatLat;
     const refLon = boatLon;
@@ -671,6 +712,9 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
         trackChange("/anchor/aisWarning", hasWarning);
       }
     }
+  } else if (isMonitoringSuppressed && updatedAnchor.aisWarning !== false) {
+    updatedAnchor.aisWarning = false;
+    trackChange('/anchor/aisWarning', false);
   }
 
   // --- Fence distance updates ---

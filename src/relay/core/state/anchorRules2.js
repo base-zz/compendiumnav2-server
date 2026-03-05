@@ -15,6 +15,14 @@ const anchorAlertDebounceState = {
   draggingCandidateSince: null,
 };
 
+function isAnchorMonitoringEnabled(anchorState) {
+  if (!anchorState || typeof anchorState !== 'object') return false;
+  if (anchorState.anchorDeployed !== true) return false;
+  if (anchorState.alertsSuppressed === true) return false;
+  if (anchorState.anchorSet === false) return false;
+  return true;
+}
+
 export const anchorRules = [
   // Legacy navigation-based notifications (kept for compatibility)
   {
@@ -108,7 +116,7 @@ export const anchorRules = [
     priority: 'high',
     condition: (state) => {
       const anchorState = state.anchor || {};
-      if (!anchorState.anchorDeployed) {
+      if (!isAnchorMonitoringEnabled(anchorState)) {
         return false;
       }
 
@@ -231,7 +239,7 @@ export const anchorRules = [
     priority: 'high',
     condition: (state) => {
       const anchorState = state.anchor || {};
-      if (!anchorState.anchorDeployed) {
+      if (!isAnchorMonitoringEnabled(anchorState)) {
         return false;
       }
 
@@ -381,7 +389,7 @@ export const anchorRules = [
     condition: (state) => {
       const anchorState = state.anchor || {};
       
-      if (!anchorState.anchorDeployed) {
+      if (!isAnchorMonitoringEnabled(anchorState)) {
         return false;
       }
 
@@ -546,6 +554,10 @@ export const anchorRules = [
       );
 
       const anchorState = state.anchor || {};
+      if (!isAnchorMonitoringEnabled(anchorState)) {
+        return false;
+      }
+
       const aisTargetsArray = Array.isArray(state.ais?.targets)
         ? state.ais.targets
         : Object.values(state.aisTargets || {});

@@ -810,16 +810,6 @@ export class StateManager extends EventEmitter {
    * @param {Object} anchorData - The anchor data from the client
    */
   updateAnchorState(anchorData) {
-    console.log('[StateManager] anchor:update received', {
-      hasData: !!anchorData,
-      keys: anchorData && typeof anchorData === 'object' ? Object.keys(anchorData) : null,
-      anchorDeployed: anchorData?.anchorDeployed,
-    });
-
-    this.log(
-      "[StateManager][updateAnchorState] called. Stack:",
-      new Error().stack
-    );
     if (!anchorData) {
       this.log("[StateManager] Received empty anchor data");
       return;
@@ -949,17 +939,6 @@ export class StateManager extends EventEmitter {
 
       const action = typeof sanitizedPatch.action === 'string' ? sanitizedPatch.action : null;
 
-      // Log incoming anchorDropLocation data for debugging
-      if (sanitizedPatch.anchorDropLocation) {
-        console.log('[StateManager] Incoming anchorDropLocation:', {
-          hasDepth: !!sanitizedPatch.anchorDropLocation.depth,
-          hasDepthSource: !!sanitizedPatch.anchorDropLocation.depthSource,
-          depth: sanitizedPatch.anchorDropLocation.depth,
-          depthSource: sanitizedPatch.anchorDropLocation.depthSource,
-          action: action
-        });
-      }
-
       delete sanitizedPatch.action;
       delete sanitizedPatch.setBearing;
 
@@ -994,6 +973,27 @@ export class StateManager extends EventEmitter {
 
       const boatLatLon = getServerBoatLatLon();
       const serverNowIso = new Date().toISOString();
+      const serverNowMs = Date.now();
+
+      const resolveAnchorMonitoringAlerts = (reason) => {
+        if (!this.alertService || typeof this.alertService.resolveAlertsByTrigger !== 'function') {
+          return;
+        }
+
+        const triggers = ['critical_range', 'anchor_dragging', 'ais_proximity'];
+        let resolvedAny = false;
+        for (const trigger of triggers) {
+          const resolved = this.alertService.resolveAlertsByTrigger(trigger, { reason });
+          if (Array.isArray(resolved) && resolved.length > 0) {
+            resolvedAny = true;
+          }
+        }
+
+        if (resolvedAny) {
+          this._syncAlertsToRuleEngine();
+          this._emitAlertsPatch();
+        }
+      };
 
       // If anchor is being deployed now, capture the server's current boat position as
       // both the drop location and initial anchor location.
@@ -1148,31 +1148,159 @@ export class StateManager extends EventEmitter {
         }
       };
 
-      if (action === 'drop_now') {
-        if (isDeployTransition) {
-          applyCapturedDropAndAnchorPosition();
+      const validateFinalizeDropNowPayload = () => {
+        const rodeAmount = sanitizedPatch?.rode?.amount;
+        const rodeUnits = sanitizedPatch?.rode?.units;
+        if (rodeAmount == null || rodeUnits == null) {
+          throw new Error('finalize_drop_now requires rode.amount and rode.units');
         }
+
+        const warningRangeValue = sanitizedPatch?.warningRange?.r;
+        const warningRangeUnits = sanitizedPatch?.warningRange?.units;
+        if (warningRangeValue == null || warningRangeUnits == null) {
+          throw new Error('finalize_drop_now requires warningRange.r and warningRange.units');
+        }
+
+        const criticalRangeValue = sanitizedPatch?.criticalRange?.r;
+        const criticalRangeUnits = sanitizedPatch?.criticalRange?.units;
+        if (criticalRangeValue == null || criticalRangeUnits == null) {
+          throw new Error('finalize_drop_now requires criticalRange.r and criticalRange.units');
+        }
+
+        const bearingValue = incomingAnchorPatch?.setBearing?.value;
+        const bearingUnits = incomingAnchorPatch?.setBearing?.units;
+        if (bearingValue == null || bearingUnits == null) {
+          throw new Error('finalize_drop_now requires setBearing.value and setBearing.units');
+        }
+        if (!Number.isFinite(bearingValue) || typeof bearingUnits !== 'string' || bearingUnits.toLowerCase() !== 'deg') {
+          throw new Error('finalize_drop_now requires setBearing.units="deg" and numeric value');
+        }
+
+        const depthValue = sanitizedPatch?.anchorDropLocation?.depth?.value;
+        const depthUnits = sanitizedPatch?.anchorDropLocation?.depth?.units;
+        const depthSource = sanitizedPatch?.anchorDropLocation?.depthSource;
+        if (depthValue == null || depthUnits == null || depthSource == null) {
+          throw new Error('finalize_drop_now requires anchorDropLocation.depth and anchorDropLocation.depthSource');
+        }
+      };
+
+      const applyFinalizeDropNow = () => {
+        validateFinalizeDropNowPayload();
+
+        const bearingValue = incomingAnchorPatch?.setBearing?.value;
+
+        sanitizedPatch.anchorDeployed = true;
+        sanitizedPatch.deploymentPhase = 'finalized';
+        sanitizedPatch.anchorSet = true;
+        sanitizedPatch.alertsSuppressed = false;
+        sanitizedPatch.dragging = false;
+        sanitizedPatch.aisWarning = false;
+
+        sanitizedPatch.dropSession = {
+          ...(currentAnchor?.dropSession || {}),
+          endedAt: serverNowMs,
+          cancelledAt: null,
+          measured: {
+            ...(currentAnchor?.dropSession?.measured || {}),
+          },
+        };
+
+        sanitizedPatch.anchorDropLocation = {
+          ...(currentAnchor?.anchorDropLocation || {}),
+          ...(sanitizedPatch.anchorDropLocation || {}),
+          bearing: {
+            ...(currentAnchor?.anchorDropLocation?.bearing || {}),
+            value: bearingValue,
+            units: 'deg',
+          },
+          originalBearing: {
+            ...(currentAnchor?.anchorDropLocation?.originalBearing || {}),
+            value: bearingValue,
+            units: 'deg',
+          },
+        };
+      };
+
+      const applyCancelDropNow = () => {
+        sanitizedPatch.anchorDeployed = false;
+        sanitizedPatch.deploymentPhase = 'idle';
+        sanitizedPatch.anchorSet = false;
+        sanitizedPatch.alertsSuppressed = false;
+        sanitizedPatch.dragging = false;
+        sanitizedPatch.aisWarning = false;
+        sanitizedPatch.dropSession = {
+          ...(currentAnchor?.dropSession || {}),
+          endedAt: null,
+          cancelledAt: serverNowMs,
+          measured: {
+            currentDistanceFromDrop: null,
+            maxDistanceFromDrop: null,
+            currentBearingFromDropDeg: null,
+            lastSampleAt: null,
+          },
+        };
+        resolveAnchorMonitoringAlerts('drop_now_cancelled');
+      };
+
+      if (action === 'drop_now') {
+        if (!boatLatLon) {
+          throw new Error('drop_now requires server boat position but it is unavailable');
+        }
+        const dropDepthValue = sanitizedPatch?.anchorDropLocation?.depth?.value;
+        const dropDepthUnits = sanitizedPatch?.anchorDropLocation?.depth?.units;
+        const dropDepthSource = sanitizedPatch?.anchorDropLocation?.depthSource;
+        if (dropDepthValue == null || dropDepthUnits == null || dropDepthSource == null) {
+          throw new Error('drop_now requires anchorDropLocation.depth and anchorDropLocation.depthSource');
+        }
+        applyCapturedDropAndAnchorPosition();
+        sanitizedPatch.anchorDeployed = true;
+        sanitizedPatch.deploymentPhase = 'deploying';
+        sanitizedPatch.anchorSet = false;
+        sanitizedPatch.alertsSuppressed = true;
+        sanitizedPatch.dragging = false;
+        sanitizedPatch.aisWarning = false;
+        sanitizedPatch.dropSession = {
+          ...(currentAnchor?.dropSession || {}),
+          startedAt: serverNowMs,
+          endedAt: null,
+          cancelledAt: null,
+          measured: {
+            currentDistanceFromDrop: 0,
+            maxDistanceFromDrop: 0,
+            currentBearingFromDropDeg: null,
+            lastSampleAt: serverNowMs,
+          },
+        };
+        resolveAnchorMonitoringAlerts('drop_now_started');
+      } else if (action === 'finalize_drop_now') {
+        applyFinalizeDropNow();
+      } else if (action === 'cancel_drop_now') {
+        applyCancelDropNow();
       } else if (action === 'set_after_deploy') {
         applyProjectedDropAndAnchorPositionFromSetAfterDeploy();
+        sanitizedPatch.anchorDeployed = true;
+        sanitizedPatch.deploymentPhase = 'finalized';
+        sanitizedPatch.anchorSet = true;
+        sanitizedPatch.alertsSuppressed = false;
       } else if (action === 'reset_anchor_here') {
         applyResetAnchorHere();
+        sanitizedPatch.anchorDeployed = true;
+        sanitizedPatch.deploymentPhase = 'finalized';
+        sanitizedPatch.anchorSet = true;
+        sanitizedPatch.alertsSuppressed = false;
       } else if (isDeployTransition) {
         applyCapturedDropAndAnchorPosition();
+        sanitizedPatch.anchorDeployed = true;
+        sanitizedPatch.deploymentPhase = 'finalized';
+        sanitizedPatch.anchorSet = true;
+        sanitizedPatch.alertsSuppressed = false;
+      } else if (sanitizedPatch.anchorDeployed === false) {
+        sanitizedPatch.deploymentPhase = 'idle';
+        sanitizedPatch.anchorSet = false;
+        sanitizedPatch.alertsSuppressed = false;
       }
 
       const mergedAnchor = this._deepMergeAnchor(currentAnchor, sanitizedPatch);
-
-      // Log merge results for debugging depth fields
-      console.log('[StateManager] After _deepMergeAnchor:', {
-        currentHadDepth: !!currentAnchor?.anchorDropLocation?.depth,
-        currentHadDepthSource: !!currentAnchor?.anchorDropLocation?.depthSource,
-        patchHadDepth: !!sanitizedPatch?.anchorDropLocation?.depth,
-        patchHadDepthSource: !!sanitizedPatch?.anchorDropLocation?.depthSource,
-        mergedHasDepth: !!mergedAnchor?.anchorDropLocation?.depth,
-        mergedHasDepthSource: !!mergedAnchor?.anchorDropLocation?.depthSource,
-        mergedDepth: mergedAnchor?.anchorDropLocation?.depth,
-        mergedDepthSource: mergedAnchor?.anchorDropLocation?.depthSource
-      });
 
       if (Array.isArray(currentAnchor.fences) && Array.isArray(mergedAnchor.fences)) {
         const fencesById = new Map(currentAnchor.fences.map((fence) => [fence?.id, fence]));
@@ -1198,20 +1326,6 @@ export class StateManager extends EventEmitter {
 
       // Apply the patch using our existing method
       this.applyPatchAndForward(patch);
-      
-      // Log the final anchor state to verify depth fields are preserved
-      console.log('[StateManager] Final anchorDropLocation after update:', {
-        hasDepth: !!this.appState?.anchor?.anchorDropLocation?.depth,
-        hasDepthSource: !!this.appState?.anchor?.anchorDropLocation?.depthSource,
-        depth: this.appState?.anchor?.anchorDropLocation?.depth,
-        depthSource: this.appState?.anchor?.anchorDropLocation?.depthSource
-      });
-      
-      this.log(
-        "[StateManager][updateAnchorState] anchor after update:",
-        JSON.stringify(this.appState?.anchor, null, 2)
-      );
-      this.log("[StateManager] Anchor state updated successfully");
 
       return true;
     } catch (error) {
