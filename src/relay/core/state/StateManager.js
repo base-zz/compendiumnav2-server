@@ -1154,17 +1154,26 @@ export class StateManager extends EventEmitter {
         if (rodeAmount == null || rodeUnits == null) {
           throw new Error('finalize_drop_now requires rode.amount and rode.units');
         }
+        if (!Number.isFinite(rodeAmount) || rodeAmount <= 0) {
+          throw new Error('finalize_drop_now requires rode.amount > 0');
+        }
 
         const warningRangeValue = sanitizedPatch?.warningRange?.r;
         const warningRangeUnits = sanitizedPatch?.warningRange?.units;
         if (warningRangeValue == null || warningRangeUnits == null) {
           throw new Error('finalize_drop_now requires warningRange.r and warningRange.units');
         }
+        if (!Number.isFinite(warningRangeValue) || warningRangeValue <= 0) {
+          throw new Error('finalize_drop_now requires warningRange.r > 0');
+        }
 
         const criticalRangeValue = sanitizedPatch?.criticalRange?.r;
         const criticalRangeUnits = sanitizedPatch?.criticalRange?.units;
         if (criticalRangeValue == null || criticalRangeUnits == null) {
           throw new Error('finalize_drop_now requires criticalRange.r and criticalRange.units');
+        }
+        if (!Number.isFinite(criticalRangeValue) || criticalRangeValue <= 0) {
+          throw new Error('finalize_drop_now requires criticalRange.r > 0');
         }
 
         const bearingValue = incomingAnchorPatch?.setBearing?.value;
@@ -1190,7 +1199,8 @@ export class StateManager extends EventEmitter {
           throw new Error('finalize_drop_now requires rode.units');
         }
 
-        if (sanitizedPatch?.rode?.amount != null) {
+        const rodeAmount = sanitizedPatch?.rode?.amount;
+        if (Number.isFinite(rodeAmount) && rodeAmount > 0) {
           return;
         }
 
