@@ -1184,7 +1184,60 @@ export class StateManager extends EventEmitter {
         }
       };
 
+      const backfillFinalizeRodeFromMeasuredDistance = () => {
+        const rodeUnits = sanitizedPatch?.rode?.units;
+        if (rodeUnits == null) {
+          throw new Error('finalize_drop_now requires rode.units');
+        }
+
+        if (sanitizedPatch?.rode?.amount != null) {
+          return;
+        }
+
+        const measuredMeters = currentAnchor?.dropSession?.measured?.maxDistanceFromDrop;
+        if (!Number.isFinite(measuredMeters)) {
+          throw new Error('finalize_drop_now requires rode.amount or a measured dropSession.measured.maxDistanceFromDrop');
+        }
+
+        if (typeof rodeUnits !== 'string') {
+          throw new Error('finalize_drop_now requires rode.units to be a string');
+        }
+
+        let convertedAmount = null;
+        switch (rodeUnits.toLowerCase()) {
+          case 'm':
+          case 'meter':
+          case 'meters':
+            convertedAmount = measuredMeters;
+            break;
+          case 'ft':
+          case 'foot':
+          case 'feet':
+            convertedAmount = measuredMeters / 0.3048;
+            break;
+          default:
+            throw new Error('finalize_drop_now requires rode.units to be one of: m, meter, meters, ft, foot, feet');
+        }
+
+        sanitizedPatch.rode = {
+          ...(sanitizedPatch.rode || {}),
+          amount: convertedAmount,
+          units: rodeUnits,
+        };
+      };
+
       const applyFinalizeDropNow = () => {
+        console.log('[StateManager][finalize_drop_now] incoming payload summary', {
+          rode: sanitizedPatch?.rode,
+          warningRange: sanitizedPatch?.warningRange,
+          criticalRange: sanitizedPatch?.criticalRange,
+          setBearing: incomingAnchorPatch?.setBearing,
+          anchorDropDepth: sanitizedPatch?.anchorDropLocation?.depth,
+          anchorDropDepthSource: sanitizedPatch?.anchorDropLocation?.depthSource,
+          measuredMaxDistanceFromDrop: currentAnchor?.dropSession?.measured?.maxDistanceFromDrop,
+        });
+
+        backfillFinalizeRodeFromMeasuredDistance();
         validateFinalizeDropNowPayload();
 
         const bearingValue = incomingAnchorPatch?.setBearing?.value;
@@ -1326,6 +1379,16 @@ export class StateManager extends EventEmitter {
 
       // Apply the patch using our existing method
       this.applyPatchAndForward(patch);
+
+      if (action === 'finalize_drop_now') {
+        console.log('[StateManager][finalize_drop_now] persisted anchor values', {
+          rode: this.appState?.anchor?.rode,
+          warningRange: this.appState?.anchor?.warningRange,
+          criticalRange: this.appState?.anchor?.criticalRange,
+          deploymentPhase: this.appState?.anchor?.deploymentPhase,
+          anchorSet: this.appState?.anchor?.anchorSet,
+        });
+      }
 
       return true;
     } catch (error) {
