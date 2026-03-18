@@ -430,11 +430,11 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       ? positionRoot.signalk
       : positionRoot;
 
-  const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
-  const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+  const rawBoatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
+  const rawBoatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
 
   // We only recompute when anchor is deployed and we have a boat position
-  if (!anchor.anchorDeployed || boatLat == null || boatLon == null) {
+  if (!anchor.anchorDeployed || rawBoatLat == null || rawBoatLon == null) {
     return null;
   }
 
@@ -459,10 +459,72 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
     changedPaths.push({ path, value });
   };
 
+  const previousFilteredBoatLat = anchor.filteredBoatPosition?.position?.latitude?.value;
+  const previousFilteredBoatLon = anchor.filteredBoatPosition?.position?.longitude?.value;
+  const FILTER_ALPHA = 0.2;
+  const FILTER_DEADBAND_METERS = 3;
+
+  let filteredBoatLat = rawBoatLat;
+  let filteredBoatLon = rawBoatLon;
+
+  if (
+    Number.isFinite(previousFilteredBoatLat) &&
+    Number.isFinite(previousFilteredBoatLon)
+  ) {
+    const deltaFromPreviousFilteredMeters = calculateDistance(
+      previousFilteredBoatLat,
+      previousFilteredBoatLon,
+      rawBoatLat,
+      rawBoatLon
+    );
+
+    if (
+      Number.isFinite(deltaFromPreviousFilteredMeters) &&
+      deltaFromPreviousFilteredMeters <= FILTER_DEADBAND_METERS
+    ) {
+      filteredBoatLat = previousFilteredBoatLat;
+      filteredBoatLon = previousFilteredBoatLon;
+    } else {
+      filteredBoatLat = previousFilteredBoatLat + ((rawBoatLat - previousFilteredBoatLat) * FILTER_ALPHA);
+      filteredBoatLon = previousFilteredBoatLon + ((rawBoatLon - previousFilteredBoatLon) * FILTER_ALPHA);
+    }
+  }
+
+  const filteredBoatPositionTime = appState.navigation?.position?.timestamp ?? new Date().toISOString();
+  const nextFilteredBoatPosition = {
+    ...(updatedAnchor.filteredBoatPosition || {}),
+    position: {
+      ...(updatedAnchor.filteredBoatPosition?.position || {}),
+      latitude: {
+        ...(updatedAnchor.filteredBoatPosition?.position?.latitude || {}),
+        value: filteredBoatLat,
+        units: 'deg',
+      },
+      longitude: {
+        ...(updatedAnchor.filteredBoatPosition?.position?.longitude || {}),
+        value: filteredBoatLon,
+        units: 'deg',
+      },
+    },
+    time: filteredBoatPositionTime,
+  };
+
+  if (
+    updatedAnchor.filteredBoatPosition?.position?.latitude?.value !== nextFilteredBoatPosition.position.latitude.value ||
+    updatedAnchor.filteredBoatPosition?.position?.longitude?.value !== nextFilteredBoatPosition.position.longitude.value ||
+    updatedAnchor.filteredBoatPosition?.time !== nextFilteredBoatPosition.time
+  ) {
+    updatedAnchor = {
+      ...updatedAnchor,
+      filteredBoatPosition: nextFilteredBoatPosition,
+    };
+    trackChange('/anchor/filteredBoatPosition', nextFilteredBoatPosition);
+  }
+
   // --- Distances and bearings relative to DROP location ---
   if (dropLat != null && dropLon != null) {
-    const distanceBoatFromDrop = calculateDistance(boatLat, boatLon, dropLat, dropLon);
-    const bearingBoatToDrop = calculateBearing(boatLat, boatLon, dropLat, dropLon);
+    const distanceBoatFromDrop = calculateDistance(filteredBoatLat, filteredBoatLon, dropLat, dropLon);
+    const bearingBoatToDrop = calculateBearing(filteredBoatLat, filteredBoatLon, dropLat, dropLon);
 
     if (isDeploying) {
       const previousMaxDistance = anchor.dropSession?.measured?.maxDistanceFromDrop;
@@ -529,50 +591,26 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
     };
     trackChange("/anchor/anchorDropLocation", updatedDropLocation);
 
-    // --- Anchor dragging detection: simple circle check against DROP location ---
-    // If boat center is outside rode-length circle from where anchor was dropped, check if anchor moved
     if (dropLat != null && dropLon != null) {
-      const rodeLengthMeters = extractRodeLengthMeters(anchor);
-      
-      if (rodeLengthMeters != null && !isMonitoringSuppressed) {
-        const dropDepthMeters = extractDropDepthMeters(anchor);
-        const effectiveRodeRadiusMeters =
-          dropDepthMeters != null && dropDepthMeters >= 0 && rodeLengthMeters > dropDepthMeters
-            ? Math.sqrt((rodeLengthMeters * rodeLengthMeters) - (dropDepthMeters * dropDepthMeters))
-            : rodeLengthMeters;
+      const criticalRange = anchor.criticalRange?.r;
 
+      if (criticalRange != null && !isMonitoringSuppressed) {
         const distanceBoatFromDrop = calculateDistance(
-          boatLat,
-          boatLon,
+          filteredBoatLat,
+          filteredBoatLon,
           dropLat,
           dropLon
         );
-        
-        // Check how far anchor has moved from drop point (if anchor position known)
-        let distanceAnchorFromDrop = 0;
-        if (anchorLat != null && anchorLon != null) {
-          distanceAnchorFromDrop = calculateDistance(
-            dropLat,
-            dropLon,
-            anchorLat,
-            anchorLon
-          );
-        }
-        
-        const ANCHOR_MOVED_THRESHOLD = 5; // meters - anchor considered "moved" if >5m from drop
-        const rodeCircleViolated = distanceBoatFromDrop > effectiveRodeRadiusMeters;
-        const anchorHasMoved = distanceAnchorFromDrop > ANCHOR_MOVED_THRESHOLD;
-        
-        // Dragging only if rode circle violated AND anchor has moved significantly
-        const isDragging = rodeCircleViolated && anchorHasMoved;
-        
+
+        const isDragging = distanceBoatFromDrop > criticalRange;
+
         if (updatedAnchor.dragging !== isDragging) {
           updatedAnchor.dragging = isDragging;
           trackChange("/anchor/dragging", isDragging);
           if (isDragging) {
-            console.log(`[Anchor] Dragging detected: distance from drop=${distanceBoatFromDrop.toFixed(1)}m, rode=${rodeLengthMeters.toFixed(1)}m, effectiveRodeRadius=${effectiveRodeRadiusMeters.toFixed(1)}m, anchor moved=${distanceAnchorFromDrop.toFixed(1)}m`);
+            console.log(`[Anchor] Dragging detected: distance from drop=${distanceBoatFromDrop.toFixed(1)}m, criticalRange=${criticalRange.toFixed(1)}m`);
           } else {
-            console.log('[Anchor] Dragging cleared - boat back inside rode circle');
+            console.log('[Anchor] Dragging cleared - boat back inside critical range');
           }
         }
 
@@ -595,14 +633,14 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   // --- Distances and bearings relative to ANCHOR location ---
   if (anchorLat != null && anchorLon != null) {
     const distanceBoatFromAnchor = calculateDistance(
-      boatLat,
-      boatLon,
+      filteredBoatLat,
+      filteredBoatLon,
       anchorLat,
       anchorLon
     );
     const bearingBoatToAnchor = calculateBearing(
-      boatLat,
-      boatLon,
+      filteredBoatLat,
+      filteredBoatLon,
       anchorLat,
       anchorLon
     );
@@ -664,8 +702,8 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       } else {
         const historyEntry = {
           position: {
-            latitude: boatLat,
-            longitude: boatLon,
+            latitude: filteredBoatLat,
+            longitude: filteredBoatLon,
           },
           time: now,
         };
@@ -695,8 +733,8 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
 
   if (!isMonitoringSuppressed && warningRadius != null && Array.isArray(aisTargetsArray) && aisTargetsArray.length > 0) {
     // Use boat position as the reference for AIS proximity checks
-    const refLat = boatLat;
-    const refLon = boatLon;
+    const refLat = filteredBoatLat;
+    const refLon = filteredBoatLon;
 
     if (refLat != null && refLon != null) {
       const targetsInRange = aisTargetsArray.filter((target) => {
@@ -724,7 +762,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   }
 
   // --- Fence distance updates ---
-  if (!skipHistory && boatLat != null && boatLon != null && updatedAnchor.fences?.length > 0) {
+  if (!skipHistory && filteredBoatLat != null && filteredBoatLon != null && updatedAnchor.fences?.length > 0) {
     // Build AIS targets map for fence lookups
     const aisTargetsMap = {};
     const aisTargetsArray = Array.isArray(appState.ais?.targets)
@@ -737,7 +775,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       }
     }
     
-    const boatPosition = { latitude: boatLat, longitude: boatLon };
+    const boatPosition = { latitude: filteredBoatLat, longitude: filteredBoatLon };
     const dropLocation = updatedAnchor.anchorDropLocation?.position;
     
     const updatedFences = updateAllFences(

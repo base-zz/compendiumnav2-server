@@ -243,63 +243,13 @@ export const anchorRules = [
         return false;
       }
 
-      const navLat = state.navigation?.position?.latitude?.value;
-      const navLon = state.navigation?.position?.longitude?.value;
-
-      const positionRoot =
-        state.position && typeof state.position === 'object'
-          ? state.position
-          : {};
-      const boatPositionFromPosition =
-        positionRoot.signalk && typeof positionRoot.signalk === 'object'
-          ? positionRoot.signalk
-          : positionRoot;
-
-      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
-      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
-
-      const dropPosition = anchorState.anchorDropLocation?.position;
-      const anchorPosition = anchorState.anchorLocation?.position;
-      const criticalRange = anchorState.criticalRange?.r;
-
-      if (!criticalRange || !dropPosition || !anchorPosition || boatLat == null || boatLon == null) {
-        return false;
-      }
-
-      const dropLat = typeof dropPosition.latitude === 'object' ? dropPosition.latitude?.value : dropPosition.latitude;
-      const dropLon = typeof dropPosition.longitude === 'object' ? dropPosition.longitude?.value : dropPosition.longitude;
-      const anchorLat = typeof anchorPosition.latitude === 'object' ? anchorPosition.latitude?.value : anchorPosition.latitude;
-      const anchorLon = typeof anchorPosition.longitude === 'object' ? anchorPosition.longitude?.value : anchorPosition.longitude;
-
-      if (dropLat == null || dropLon == null || anchorLat == null || anchorLon == null) {
-        return false;
-      }
-
-      const distanceBoatFromDrop = calculateDistance(
-        boatLat,
-        boatLon,
-        dropLat,
-        dropLon
-      );
-
-      const drift = calculateDistance(
-        dropLat,
-        dropLon,
-        anchorLat,
-        anchorLon
-      );
-
-      const ANCHOR_MOVED_THRESHOLD_METERS = 5;
-      const anchorHasMoved = drift > ANCHOR_MOVED_THRESHOLD_METERS;
-      const isOutsideCriticalRange = distanceBoatFromDrop > criticalRange;
+      const isDragging = anchorState.dragging === true;
 
       const hasActiveAlert = state.alerts?.active?.some(
         (alert) => alert.trigger === 'anchor_dragging' && !alert.acknowledged
       );
 
-      const draggingCondition = isOutsideCriticalRange && anchorHasMoved;
-
-      if (!draggingCondition || hasActiveAlert) {
+      if (!isDragging || hasActiveAlert) {
         anchorAlertDebounceState.draggingCandidateSince = null;
         return false;
       }
@@ -315,20 +265,13 @@ export const anchorRules = [
     action: (state) => {
       const anchorState = state.anchor || {};
 
-      const navLat = state.navigation?.position?.latitude?.value;
-      const navLon = state.navigation?.position?.longitude?.value;
-
-      const positionRoot =
-        state.position && typeof state.position === 'object'
-          ? state.position
-          : {};
-      const boatPositionFromPosition =
-        positionRoot.signalk && typeof positionRoot.signalk === 'object'
-          ? positionRoot.signalk
-          : positionRoot;
-
-      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
-      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+      const filteredBoatPosition = anchorState.filteredBoatPosition?.position;
+      const boatLat = typeof filteredBoatPosition?.latitude === 'object'
+        ? filteredBoatPosition.latitude?.value
+        : filteredBoatPosition?.latitude;
+      const boatLon = typeof filteredBoatPosition?.longitude === 'object'
+        ? filteredBoatPosition.longitude?.value
+        : filteredBoatPosition?.longitude;
 
       const dropPosition = anchorState.anchorDropLocation?.position;
       const anchorPosition = anchorState.anchorLocation?.position;
@@ -340,6 +283,10 @@ export const anchorRules = [
       const dropLon = typeof dropPosition.longitude === 'object' ? dropPosition.longitude?.value : dropPosition.longitude;
       const anchorLat = typeof anchorPosition.latitude === 'object' ? anchorPosition.latitude?.value : anchorPosition.latitude;
       const anchorLon = typeof anchorPosition.longitude === 'object' ? anchorPosition.longitude?.value : anchorPosition.longitude;
+
+      if (boatLat == null || boatLon == null || dropLat == null || dropLon == null || anchorLat == null || anchorLon == null) {
+        return null;
+      }
 
       const distanceBoatFromDrop = calculateDistance(
         boatLat,

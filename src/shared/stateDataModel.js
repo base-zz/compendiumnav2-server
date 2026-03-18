@@ -986,6 +986,23 @@ export function createStateDataModel(unitPreferences = UNIT_PRESETS.IMPERIAL) {
           description: "Current Bearing to Anchor",
         },
       },
+      filteredBoatPosition: {
+        position: {
+          latitude: {
+            value: null,
+            units: "deg",
+            label: "Filt Lat",
+            description: "Filtered Boat Latitude For Anchor",
+          },
+          longitude: {
+            value: null,
+            units: "deg",
+            label: "Filt Lon",
+            description: "Filtered Boat Longitude For Anchor",
+          },
+        },
+        time: null,
+      },
       rode: {
         amount: 0,
         units: unitPreferences.length,
