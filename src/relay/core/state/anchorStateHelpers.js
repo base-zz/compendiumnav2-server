@@ -285,8 +285,7 @@ function extractRodeLengthMeters(anchor) {
     case 'foot':
       return amount * 0.3048;
     default:
-      console.warn(`[Anchor] Unknown rode unit: ${units}, assuming meters`);
-      return amount;
+      return null;
   }
 }
 
@@ -316,20 +315,22 @@ function extractDropDepthMeters(anchor) {
   }
 }
 
-/**
- * Calculate GPS error margin based on HDOP
- * @param {Object} position - Navigation position object
- * @returns {number} margin in meters
- */
-function calculateHDOPMargin(position) {
-  const hdop = position?.gnss?.hdop?.value;
-  
-  if (hdop == null || !Number.isFinite(hdop)) {
-    return 5; // Default 5m margin when HDOP unavailable
+function convertMetersToRequestedLengthUnits(meters, units) {
+  if (!Number.isFinite(meters)) return null;
+  if (typeof units !== 'string') return null;
+
+  switch (units.toLowerCase()) {
+    case 'm':
+    case 'meters':
+    case 'meter':
+      return meters;
+    case 'ft':
+    case 'feet':
+    case 'foot':
+      return meters / 0.3048;
+    default:
+      return null;
   }
-  
-  const margin = (hdop * 5) + 1; // 5x HDOP + 1m base
-  return margin;
 }
 
 /**
@@ -481,6 +482,9 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
         },
       };
 
+      const rodeUnits = updatedAnchor?.rode?.units;
+      const convertedRodeAmount = convertMetersToRequestedLengthUnits(nextMaxDistance, rodeUnits);
+
       if (
         updatedAnchor.dropSession?.measured?.currentDistanceFromDrop !== nextDropSession.measured.currentDistanceFromDrop ||
         updatedAnchor.dropSession?.measured?.maxDistanceFromDrop !== nextDropSession.measured.maxDistanceFromDrop ||
@@ -488,6 +492,18 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       ) {
         updatedAnchor.dropSession = nextDropSession;
         trackChange('/anchor/dropSession', nextDropSession);
+      }
+
+      if (convertedRodeAmount != null && updatedAnchor?.rode?.amount !== convertedRodeAmount) {
+        updatedAnchor = {
+          ...updatedAnchor,
+          rode: {
+            ...(updatedAnchor.rode || {}),
+            amount: convertedRodeAmount,
+            units: rodeUnits,
+          },
+        };
+        trackChange('/anchor/rode', updatedAnchor.rode);
       }
     }
 
@@ -550,10 +566,6 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
         // Dragging only if rode circle violated AND anchor has moved significantly
         const isDragging = rodeCircleViolated && anchorHasMoved;
         
-        // Configuration mismatch: rode circle violated but anchor hasn't moved
-        // This suggests rode length in app doesn't match deployed rode
-        const isRodeMismatch = rodeCircleViolated && !anchorHasMoved;
-        
         if (updatedAnchor.dragging !== isDragging) {
           updatedAnchor.dragging = isDragging;
           trackChange("/anchor/dragging", isDragging);
@@ -563,13 +575,11 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
             console.log('[Anchor] Dragging cleared - boat back inside rode circle');
           }
         }
-        
-        if (updatedAnchor.rodeCircleViolation !== isRodeMismatch) {
-          updatedAnchor.rodeCircleViolation = isRodeMismatch;
-          trackChange("/anchor/rodeCircleViolation", isRodeMismatch);
-          if (isRodeMismatch) {
-            console.log(`[Anchor] Rode circle violated but anchor hasn't moved - check rode length config: distance=${distanceBoatFromDrop.toFixed(1)}m, rode=${rodeLengthMeters.toFixed(1)}m`);
-          }
+
+        // No rode mismatch test: keep this flag false to avoid stale state.
+        if (updatedAnchor.rodeCircleViolation !== false) {
+          updatedAnchor.rodeCircleViolation = false;
+          trackChange("/anchor/rodeCircleViolation", false);
         }
       }
     }
@@ -578,10 +588,6 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       if (updatedAnchor.dragging !== false) {
         updatedAnchor.dragging = false;
         trackChange('/anchor/dragging', false);
-      }
-      if (updatedAnchor.rodeCircleViolation !== false) {
-        updatedAnchor.rodeCircleViolation = false;
-        trackChange('/anchor/rodeCircleViolation', false);
       }
     }
   }

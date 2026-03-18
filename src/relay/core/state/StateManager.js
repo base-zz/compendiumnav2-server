@@ -909,6 +909,22 @@ export class StateManager extends EventEmitter {
         }
       };
 
+      const convertMetersToRequestedLengthUnits = (meters, units) => {
+        if (!Number.isFinite(meters) || typeof units !== 'string') return null;
+        switch (units.toLowerCase()) {
+          case 'm':
+          case 'meter':
+          case 'meters':
+            return meters;
+          case 'ft':
+          case 'foot':
+          case 'feet':
+            return meters / 0.3048;
+          default:
+            return null;
+        }
+      };
+
       const getServerBoatLatLon = () => {
         const navLat = this.appState?.navigation?.position?.latitude?.value;
         const navLon = this.appState?.navigation?.position?.longitude?.value;
@@ -1113,6 +1129,20 @@ export class StateManager extends EventEmitter {
         const oldDropPos = currentAnchor?.anchorDropLocation?.position;
         const oldDropLat = oldDropPos?.latitude?.value;
         const oldDropLon = oldDropPos?.longitude?.value;
+
+        const rodeUnits = sanitizedPatch?.rode?.units ?? currentAnchor?.rode?.units;
+        if (Number.isFinite(oldDropLat) && Number.isFinite(oldDropLon) && typeof rodeUnits === 'string') {
+          const movedDistanceMeters = calculateDistance(oldDropLat, oldDropLon, boatLatLon.boatLat, boatLatLon.boatLon);
+          const convertedRodeAmount = convertMetersToRequestedLengthUnits(movedDistanceMeters, rodeUnits);
+          if (convertedRodeAmount != null) {
+            sanitizedPatch.rode = {
+              ...(currentAnchor?.rode || {}),
+              ...(sanitizedPatch.rode || {}),
+              amount: convertedRodeAmount,
+              units: rodeUnits,
+            };
+          }
+        }
 
         applyCapturedDropAndAnchorPosition();
 
