@@ -69,23 +69,46 @@ function updateMinimumDistance(fence, distance, nowMs) {
  * @param {Object} fence - Fence object to update
  * @param {Object} boatPosition - Boat position {latitude, longitude}
  * @param {Object} anchorDropLocation - Anchor drop position {latitude, longitude}
+ * @param {Object} anchorLocation - Current anchor position {latitude, longitude}
  * @returns {boolean} true if fence was modified
  */
-function updateFenceDistance(fence, boatPosition, anchorDropLocation) {
+function updateFenceDistance(fence, boatPosition, anchorDropLocation, anchorLocation) {
   if (!fence.enabled) return false;
-  if (!boatPosition?.latitude || !boatPosition?.longitude) return false;
+  const boatLat = typeof boatPosition?.latitude === 'object'
+    ? boatPosition.latitude?.value
+    : boatPosition?.latitude;
+  const boatLon = typeof boatPosition?.longitude === 'object'
+    ? boatPosition.longitude?.value
+    : boatPosition?.longitude;
+  if (boatLat == null || boatLon == null) return false;
   
   // Determine reference position based on fence type
   let referenceLat, referenceLon;
   
   if (fence.referenceType === 'anchor_drop') {
-    if (!anchorDropLocation?.latitude || !anchorDropLocation?.longitude) return false;
-    referenceLat = anchorDropLocation.latitude;
-    referenceLon = anchorDropLocation.longitude;
+    const dropLat = typeof anchorDropLocation?.latitude === 'object'
+      ? anchorDropLocation.latitude?.value
+      : anchorDropLocation?.latitude;
+    const dropLon = typeof anchorDropLocation?.longitude === 'object'
+      ? anchorDropLocation.longitude?.value
+      : anchorDropLocation?.longitude;
+    if (dropLat == null || dropLon == null) return false;
+    referenceLat = dropLat;
+    referenceLon = dropLon;
+  } else if (fence.referenceType === 'anchor_location') {
+    const anchorLat = typeof anchorLocation?.latitude === 'object'
+      ? anchorLocation.latitude?.value
+      : anchorLocation?.latitude;
+    const anchorLon = typeof anchorLocation?.longitude === 'object'
+      ? anchorLocation.longitude?.value
+      : anchorLocation?.longitude;
+    if (anchorLat == null || anchorLon == null) return false;
+    referenceLat = anchorLat;
+    referenceLon = anchorLon;
   } else {
     // Default to boat position as reference
-    referenceLat = boatPosition.latitude;
-    referenceLon = boatPosition.longitude;
+    referenceLat = boatLat;
+    referenceLon = boatLon;
   }
   
   // Calculate distance from reference to target
@@ -157,12 +180,19 @@ function updateFenceDistance(fence, boatPosition, anchorDropLocation) {
  * @param {Array} fences - Array of fence objects
  * @param {Object} boatPosition - Current boat position
  * @param {Object} anchorDropLocation - Anchor drop location
+ * @param {Object} anchorLocation - Current anchor location
  * @param {Object} aisTargets - AIS targets object (mmsi -> target)
  * @returns {Array|null} Updated fences array or null if unchanged
  */
-function updateAllFences(fences, boatPosition, anchorDropLocation, aisTargets) {
+function updateAllFences(fences, boatPosition, anchorDropLocation, anchorLocation, aisTargets) {
   if (!Array.isArray(fences) || fences.length === 0) return null;
-  if (!boatPosition?.latitude || !boatPosition?.longitude) return null;
+  const boatLat = typeof boatPosition?.latitude === 'object'
+    ? boatPosition.latitude?.value
+    : boatPosition?.latitude;
+  const boatLon = typeof boatPosition?.longitude === 'object'
+    ? boatPosition.longitude?.value
+    : boatPosition?.longitude;
+  if (boatLat == null || boatLon == null) return null;
   
   let anyModified = false;
   const updatedFences = fences.map(fence => {
@@ -178,7 +208,7 @@ function updateAllFences(fences, boatPosition, anchorDropLocation, aisTargets) {
       }
     }
     
-    const modified = updateFenceDistance(fenceWithTarget, boatPosition, anchorDropLocation);
+    const modified = updateFenceDistance(fenceWithTarget, boatPosition, anchorDropLocation, anchorLocation);
     if (modified) anyModified = true;
     return fenceWithTarget;
   });
@@ -777,11 +807,13 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
     
     const boatPosition = { latitude: filteredBoatLat, longitude: filteredBoatLon };
     const dropLocation = updatedAnchor.anchorDropLocation?.position;
+    const currentAnchorLocation = updatedAnchor.anchorLocation?.position;
     
     const updatedFences = updateAllFences(
       updatedAnchor.fences,
       boatPosition,
       dropLocation,
+      currentAnchorLocation,
       aisTargetsMap
     );
     
