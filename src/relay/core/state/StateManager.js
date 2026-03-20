@@ -450,15 +450,29 @@ export class StateManager extends EventEmitter {
 
       this.ruleEngine.updateState(changes);
 
+      const patchForEmit = sanitizedPatch.map((operation) => {
+        if (
+          operation?.op === "replace" &&
+          operation?.path === "/anchor"
+        ) {
+          return {
+            ...operation,
+            value: this.appState?.anchor,
+          };
+        }
+
+        return operation;
+      });
+
       // Always emit patch events for direct server
       const patchPayload = {
         type: "state:patch",
-        data: sanitizedPatch,
+        data: patchForEmit,
         boatId: this._boatId,
         timestamp: Date.now(),
       };
 
-      const windAngleOps = sanitizedPatch.filter((op) => {
+      const windAngleOps = patchForEmit.filter((op) => {
         if (!op || typeof op !== "object") return false;
         if (typeof op.path !== "string") return false;
 
@@ -478,7 +492,7 @@ export class StateManager extends EventEmitter {
         }));
       }
 
-      logState(`Emitting state:patch event with ${validPatch.length} operations, listener count: ${this.listenerCount('state:patch')}`);
+      logState(`Emitting state:patch event with ${patchForEmit.length} operations, listener count: ${this.listenerCount('state:patch')}`);
       this.emit("state:patch", patchPayload);
 
       
