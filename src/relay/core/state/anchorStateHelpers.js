@@ -164,27 +164,31 @@ function updateFenceDistance(fence, boatPosition, anchorDropLocation, anchorLoca
   
   const targetMmsi = fence.targetMmsi ?? fence.targetRef?.mmsi;
 
-  if (fence.targetType === 'ais' && targetMmsi) {
-    // For AIS targets, we'd need to look up the target position from AIS data
-    // This would require passing AIS state - handled by caller
-    return false; // Not implemented in this function
-  } else if (fence.targetPosition) {
-    targetLat = fence.targetPosition.latitude;
-    targetLon = fence.targetPosition.longitude;
-  } else if (fence.targetType === 'point' && fence.targetRef) {
-    targetLat = fence.targetRef.latitude;
-    targetLon = fence.targetRef.longitude;
+  const targetPosition = fence.targetPosition || (fence.targetType === 'point' ? fence.targetRef : null);
+
+  if (targetPosition) {
+    targetLat = typeof targetPosition.latitude === 'object'
+      ? targetPosition.latitude?.value
+      : targetPosition.latitude;
+    targetLon = typeof targetPosition.longitude === 'object'
+      ? targetPosition.longitude?.value
+      : targetPosition.longitude;
+  } else if (fence.targetType === 'ais' && targetMmsi) {
+    // AIS target exists but its live position has not been injected yet.
+    return false;
   } else {
     return false;
   }
   
-  if (targetLat == null || targetLon == null) return false;
+  if (!Number.isFinite(targetLat) || !Number.isFinite(targetLon)) return false;
   
   // Calculate distance in meters
   const distanceMeters = calculateDistance(referenceLat, referenceLon, targetLat, targetLon);
+  if (!Number.isFinite(distanceMeters)) return false;
   
   // Convert to fence units
   const distanceInUnits = convertDistanceToFenceUnits(distanceMeters, fence.units);
+  if (!Number.isFinite(distanceInUnits)) return false;
   
   const nowMs = Date.now();
   let modified = false;
@@ -512,8 +516,15 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       ? positionRoot.signalk
       : positionRoot;
 
-  const rawBoatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
-  const rawBoatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+  const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
+    ? boatPositionFromPosition.latitude?.value
+    : boatPositionFromPosition?.latitude;
+  const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
+    ? boatPositionFromPosition.longitude?.value
+    : boatPositionFromPosition?.longitude;
+
+  const rawBoatLat = navLat != null ? navLat : fallbackBoatLat;
+  const rawBoatLon = navLon != null ? navLon : fallbackBoatLon;
 
   // We only recompute when anchor is deployed and we have a boat position
   if (!anchor.anchorDeployed || rawBoatLat == null || rawBoatLon == null) {

@@ -132,8 +132,15 @@ export const anchorRules = [
           ? positionRoot.signalk
           : positionRoot;
 
-      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
-      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+      const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
+        ? boatPositionFromPosition.latitude?.value
+        : boatPositionFromPosition?.latitude;
+      const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
+        ? boatPositionFromPosition.longitude?.value
+        : boatPositionFromPosition?.longitude;
+
+      const boatLat = navLat != null ? navLat : fallbackBoatLat;
+      const boatLon = navLon != null ? navLon : fallbackBoatLon;
 
       const criticalRange = anchorState.criticalRange?.r;
       const dropPosition = anchorState.anchorDropLocation?.position;
@@ -191,8 +198,15 @@ export const anchorRules = [
           ? positionRoot.signalk
           : positionRoot;
 
-      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
-      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+      const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
+        ? boatPositionFromPosition.latitude?.value
+        : boatPositionFromPosition?.latitude;
+      const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
+        ? boatPositionFromPosition.longitude?.value
+        : boatPositionFromPosition?.longitude;
+
+      const boatLat = navLat != null ? navLat : fallbackBoatLat;
+      const boatLon = navLon != null ? navLon : fallbackBoatLon;
 
       const dropPosition = anchorState.anchorDropLocation?.position;
       const criticalRange = anchorState.criticalRange?.r;
@@ -358,8 +372,15 @@ export const anchorRules = [
           ? positionRoot.signalk
           : positionRoot;
 
-      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
-      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+      const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
+        ? boatPositionFromPosition.latitude?.value
+        : boatPositionFromPosition?.latitude;
+      const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
+        ? boatPositionFromPosition.longitude?.value
+        : boatPositionFromPosition?.longitude;
+
+      const boatLat = navLat != null ? navLat : fallbackBoatLat;
+      const boatLon = navLon != null ? navLon : fallbackBoatLon;
 
       if (!warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
         return false;
@@ -427,8 +448,15 @@ export const anchorRules = [
           ? positionRoot.signalk
           : positionRoot;
 
-      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
-      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+      const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
+        ? boatPositionFromPosition.latitude?.value
+        : boatPositionFromPosition?.latitude;
+      const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
+        ? boatPositionFromPosition.longitude?.value
+        : boatPositionFromPosition?.longitude;
+
+      const boatLat = navLat != null ? navLat : fallbackBoatLat;
+      const boatLon = navLon != null ? navLon : fallbackBoatLon;
 
       const isMetric = state.units?.distance === 'meters';
       const unitLabel = isMetric ? 'm' : 'ft';
@@ -522,8 +550,15 @@ export const anchorRules = [
           ? positionRoot.signalk
           : positionRoot;
 
-      const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
-      const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+      const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
+        ? boatPositionFromPosition.latitude?.value
+        : boatPositionFromPosition?.latitude;
+      const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
+        ? boatPositionFromPosition.longitude?.value
+        : boatPositionFromPosition?.longitude;
+
+      const boatLat = navLat != null ? navLat : fallbackBoatLat;
+      const boatLon = navLon != null ? navLon : fallbackBoatLon;
 
       if (!hasActiveAlerts || !warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
         return false;

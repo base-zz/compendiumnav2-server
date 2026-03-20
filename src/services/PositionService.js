@@ -243,8 +243,14 @@ export class PositionService extends ContinuousService {
         op: 'add',
         path: `/position/${sourceName}`,
         value: {
-          latitude: positionData.latitude,
-          longitude: positionData.longitude,
+          latitude: {
+            value: positionData.latitude,
+            units: 'deg',
+          },
+          longitude: {
+            value: positionData.longitude,
+            units: 'deg',
+          },
           timestamp: timestamp,
           source: sourceName
         }

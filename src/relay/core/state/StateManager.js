@@ -952,8 +952,15 @@ export class StateManager extends EventEmitter {
             ? positionRoot.signalk
             : positionRoot;
 
-        const boatLat = navLat != null ? navLat : boatPositionFromPosition?.latitude;
-        const boatLon = navLon != null ? navLon : boatPositionFromPosition?.longitude;
+        const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
+          ? boatPositionFromPosition.latitude?.value
+          : boatPositionFromPosition?.latitude;
+        const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
+          ? boatPositionFromPosition.longitude?.value
+          : boatPositionFromPosition?.longitude;
+
+        const boatLat = navLat != null ? navLat : fallbackBoatLat;
+        const boatLon = navLon != null ? navLon : fallbackBoatLon;
         if (boatLat == null || boatLon == null) return null;
         if (!Number.isFinite(boatLat) || !Number.isFinite(boatLon)) return null;
         return { boatLat, boatLon };
