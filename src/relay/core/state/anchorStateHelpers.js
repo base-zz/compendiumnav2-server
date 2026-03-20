@@ -63,6 +63,54 @@ function updateMinimumDistance(fence, distance, nowMs) {
   }
 }
 
+function projectPoint(latDeg, lonDeg, bearingDeg, distanceMeters) {
+  if (
+    latDeg == null ||
+    lonDeg == null ||
+    bearingDeg == null ||
+    distanceMeters == null
+  ) {
+    return null;
+  }
+
+  if (
+    !Number.isFinite(latDeg) ||
+    !Number.isFinite(lonDeg) ||
+    !Number.isFinite(bearingDeg) ||
+    !Number.isFinite(distanceMeters)
+  ) {
+    return null;
+  }
+
+  const toRad = (value) => (value * Math.PI) / 180;
+  const toDeg = (value) => (value * 180) / Math.PI;
+  const R = 6371e3;
+  const angularDistance = distanceMeters / R;
+  const bearingRad = toRad(bearingDeg);
+  const lat1 = toRad(latDeg);
+  const lon1 = toRad(lonDeg);
+
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(angularDistance) +
+      Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(bearingRad)
+  );
+  const lon2 = lon1 + Math.atan2(
+    Math.sin(bearingRad) * Math.sin(angularDistance) * Math.cos(lat1),
+    Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2)
+  );
+
+  const next = {
+    latitude: toDeg(lat2),
+    longitude: toDeg(lon2),
+  };
+
+  if (!Number.isFinite(next.latitude) || !Number.isFinite(next.longitude)) {
+    return null;
+  }
+
+  return next;
+}
+
 /**
  * Update fence distance and related fields
  * Called every navigation position update (max 1Hz)
@@ -114,7 +162,9 @@ function updateFenceDistance(fence, boatPosition, anchorDropLocation, anchorLoca
   // Calculate distance from reference to target
   let targetLat, targetLon;
   
-  if (fence.targetType === 'ais' && fence.targetMmsi) {
+  const targetMmsi = fence.targetMmsi ?? fence.targetRef?.mmsi;
+
+  if (fence.targetType === 'ais' && targetMmsi) {
     // For AIS targets, we'd need to look up the target position from AIS data
     // This would require passing AIS state - handled by caller
     return false; // Not implemented in this function
@@ -198,8 +248,10 @@ function updateAllFences(fences, boatPosition, anchorDropLocation, anchorLocatio
   const updatedFences = fences.map(fence => {
     // For AIS targets, inject target position from aisTargets
     let fenceWithTarget = fence;
-    if (fence.targetType === 'ais' && fence.targetMmsi && aisTargets?.[fence.targetMmsi]) {
-      const aisTarget = aisTargets[fence.targetMmsi];
+    const targetMmsi = fence.targetMmsi ?? fence.targetRef?.mmsi;
+
+    if (fence.targetType === 'ais' && targetMmsi && aisTargets?.[targetMmsi]) {
+      const aisTarget = aisTargets[targetMmsi];
       if (aisTarget?.position) {
         fenceWithTarget = {
           ...fence,
@@ -476,6 +528,11 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   const anchorLat = typeof anchorPos?.latitude === 'object' ? anchorPos.latitude?.value : anchorPos?.latitude;
   const anchorLon = typeof anchorPos?.longitude === 'object' ? anchorPos.longitude?.value : anchorPos?.longitude;
 
+  let resolvedAnchorLat = anchorLat;
+  let resolvedAnchorLon = anchorLon;
+  let resolvedAnchorPosition = anchorPos;
+  let resolvedAnchorTime = anchor.anchorLocation?.time;
+
   const criticalRange = anchor.criticalRange?.r ?? null;
   const warningRadius = anchor.warningRange?.r ?? null;
   const isDeploying = anchor.deploymentPhase === 'deploying';
@@ -549,6 +606,62 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       filteredBoatPosition: nextFilteredBoatPosition,
     };
     trackChange('/anchor/filteredBoatPosition', nextFilteredBoatPosition);
+  }
+
+  // Infer anchor movement independently from critical-range alerting.
+  // If boat is farther from drop than rode length, infer anchor slip.
+  const rodeLengthMeters = extractRodeLengthMeters(anchor);
+  if (
+    !isMonitoringSuppressed &&
+    dropLat != null &&
+    dropLon != null &&
+    Number.isFinite(rodeLengthMeters) &&
+    rodeLengthMeters > 0
+  ) {
+    const distanceBoatFromDrop = calculateDistance(
+      filteredBoatLat,
+      filteredBoatLon,
+      dropLat,
+      dropLon
+    );
+
+    if (
+      Number.isFinite(distanceBoatFromDrop) &&
+      distanceBoatFromDrop > rodeLengthMeters
+    ) {
+      const inferredAnchorDriftMeters = distanceBoatFromDrop - rodeLengthMeters;
+      const bearingDropToBoat = calculateBearing(
+        dropLat,
+        dropLon,
+        filteredBoatLat,
+        filteredBoatLon
+      );
+      const inferredAnchorPosition = projectPoint(
+        dropLat,
+        dropLon,
+        bearingDropToBoat,
+        inferredAnchorDriftMeters
+      );
+
+      if (inferredAnchorPosition) {
+        resolvedAnchorLat = inferredAnchorPosition.latitude;
+        resolvedAnchorLon = inferredAnchorPosition.longitude;
+        resolvedAnchorTime = filteredBoatPositionTime;
+        resolvedAnchorPosition = {
+          ...(anchorPos || {}),
+          latitude: {
+            ...(anchorPos?.latitude || {}),
+            value: resolvedAnchorLat,
+            units: 'deg',
+          },
+          longitude: {
+            ...(anchorPos?.longitude || {}),
+            value: resolvedAnchorLon,
+            units: 'deg',
+          },
+        };
+      }
+    }
   }
 
   // --- Distances and bearings relative to DROP location ---
@@ -661,18 +774,18 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   }
 
   // --- Distances and bearings relative to ANCHOR location ---
-  if (anchorLat != null && anchorLon != null) {
+  if (resolvedAnchorLat != null && resolvedAnchorLon != null) {
     const distanceBoatFromAnchor = calculateDistance(
       filteredBoatLat,
       filteredBoatLon,
-      anchorLat,
-      anchorLon
+      resolvedAnchorLat,
+      resolvedAnchorLon
     );
     const bearingBoatToAnchor = calculateBearing(
       filteredBoatLat,
       filteredBoatLon,
-      anchorLat,
-      anchorLon
+      resolvedAnchorLat,
+      resolvedAnchorLon
     );
 
     let distancesFromDrop = anchor.anchorLocation?.distancesFromDrop;
@@ -683,8 +796,8 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       const distanceAnchorFromDrop = calculateDistance(
         dropLat,
         dropLon,
-        anchorLat,
-        anchorLon
+        resolvedAnchorLat,
+        resolvedAnchorLon
       );
 
       distancesFromDrop = {
@@ -695,7 +808,8 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
 
     const updatedAnchorLocation = {
       ...(anchor.anchorLocation || {}),
-      position: anchorPos,
+      position: resolvedAnchorPosition,
+      time: resolvedAnchorTime,
       distancesFromCurrent: {
         ...(anchor.anchorLocation?.distancesFromCurrent || {}),
         value: distanceBoatFromAnchor,
