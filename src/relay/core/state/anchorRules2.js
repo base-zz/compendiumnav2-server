@@ -13,6 +13,8 @@ if (!Number.isFinite(ANCHOR_ALERT_DEBOUNCE_MS) || ANCHOR_ALERT_DEBOUNCE_MS < 0) 
 const anchorAlertDebounceState = {
   criticalRangeCandidateSince: null,
   draggingCandidateSince: null,
+  aisProximityCandidateSince: null,
+  aisProximityClearCandidateSince: null,
 };
 
 function isAnchorMonitoringEnabled(anchorState) {
@@ -21,6 +23,12 @@ function isAnchorMonitoringEnabled(anchorState) {
   if (anchorState.alertsSuppressed === true) return false;
   if (anchorState.anchorSet === false) return false;
   return true;
+}
+
+function normalizeMmsi(mmsi) {
+  if (mmsi == null) return null;
+  const normalized = String(mmsi).replace(/\D/g, '');
+  return normalized.length > 0 ? normalized : null;
 }
 
 export const anchorRules = [
@@ -354,6 +362,8 @@ export const anchorRules = [
         return false;
       }
 
+      const selfMmsi = normalizeMmsi(state?.vessel?.info?.mmsi);
+
       const aisTargetsObj = state.aisTargets || {};
       const aisTargetsArray = Array.isArray(state.ais?.targets)
         ? state.ais.targets
@@ -389,6 +399,8 @@ export const anchorRules = [
       // Filter out targets with invalid positions
       const validTargets = aisTargetsArray.filter((target) => {
         if (!target.position) return false;
+        const targetMmsi = normalizeMmsi(target?.mmsi);
+        if (selfMmsi != null && targetMmsi != null && targetMmsi === selfMmsi) return false;
         if (target.position.latitude == null || target.position.longitude == null ||
             isNaN(target.position.latitude) || isNaN(target.position.longitude) ||
             Math.abs(target.position.latitude) > 90 || Math.abs(target.position.longitude) > 180) {
@@ -424,13 +436,24 @@ export const anchorRules = [
 
       // Find vessels that need new alerts (in range but don't have alerts yet)
       const newVesselsNeedingAlerts = inRangeMMSIs.filter(mmsi => !existingAlertMMSIs.includes(mmsi));
-      
-      const shouldTrigger = newVesselsNeedingAlerts.length > 0;
 
-      return shouldTrigger;
+      const shouldTrigger = newVesselsNeedingAlerts.length > 0;
+      if (!shouldTrigger) {
+        anchorAlertDebounceState.aisProximityCandidateSince = null;
+        return false;
+      }
+
+      const now = Date.now();
+      if (anchorAlertDebounceState.aisProximityCandidateSince == null) {
+        anchorAlertDebounceState.aisProximityCandidateSince = now;
+        return false;
+      }
+
+      return (now - anchorAlertDebounceState.aisProximityCandidateSince) >= ANCHOR_ALERT_DEBOUNCE_MS;
     },
     action: (state) => {
       const anchorState = state.anchor || {};
+      const selfMmsi = normalizeMmsi(state?.vessel?.info?.mmsi);
       const aisTargetsArray = Array.isArray(state.ais?.targets)
         ? state.ais.targets
         : Object.values(state.aisTargets || {});
@@ -464,6 +487,8 @@ export const anchorRules = [
       // Get detailed info for vessels in range
       const targetsInRange = aisTargetsArray.filter((target) => {
         if (!target.position) return false;
+        const targetMmsi = normalizeMmsi(target?.mmsi);
+        if (selfMmsi != null && targetMmsi != null && targetMmsi === selfMmsi) return false;
 
         const distance = calculateDistance(
           target.position.latitude,
@@ -489,6 +514,8 @@ export const anchorRules = [
       if (newVesselsNeedingAlerts.length === 0) {
         return null;
       }
+
+      anchorAlertDebounceState.aisProximityCandidateSince = null;
 
       const newVesselMMSIs = newVesselsNeedingAlerts.map(v => v.mmsi);
 
@@ -529,6 +556,7 @@ export const anchorRules = [
       );
 
       const anchorState = state.anchor || {};
+      const selfMmsi = normalizeMmsi(state?.vessel?.info?.mmsi);
       if (!isAnchorMonitoringEnabled(anchorState)) {
         return false;
       }
@@ -561,10 +589,21 @@ export const anchorRules = [
       const boatLon = navLon != null ? navLon : fallbackBoatLon;
 
       if (!hasActiveAlerts || !warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
+        anchorAlertDebounceState.aisProximityClearCandidateSince = null;
         return false;
       }
 
       const targetsInRange = aisTargetsArray.filter((target) => {
+        const targetMmsi = normalizeMmsi(target?.mmsi);
+        if (selfMmsi != null && targetMmsi != null && targetMmsi === selfMmsi) return false;
+
+        if (!target?.position) return false;
+        if (target.position.latitude == null || target.position.longitude == null ||
+            isNaN(target.position.latitude) || isNaN(target.position.longitude) ||
+            Math.abs(target.position.latitude) > 90 || Math.abs(target.position.longitude) > 180) {
+          return false;
+        }
+
         const distance = calculateDistance(
           target.position.latitude,
           target.position.longitude,
@@ -575,12 +614,25 @@ export const anchorRules = [
         return distance <= warningRadius;
       });
 
-      return targetsInRange.length === 0;
+      if (targetsInRange.length > 0) {
+        anchorAlertDebounceState.aisProximityClearCandidateSince = null;
+        return false;
+      }
+
+      const now = Date.now();
+      if (anchorAlertDebounceState.aisProximityClearCandidateSince == null) {
+        anchorAlertDebounceState.aisProximityClearCandidateSince = now;
+        return false;
+      }
+
+      return (now - anchorAlertDebounceState.aisProximityClearCandidateSince) >= ANCHOR_ALERT_DEBOUNCE_MS;
     },
     action: (state) => {
       const anchorState = state.anchor || {};
       const warningRadius = anchorState.warningRange?.r;
       const isMetric = state.units?.distance === 'meters';
+
+      anchorAlertDebounceState.aisProximityClearCandidateSince = null;
 
       return {
         type: 'RESOLVE_ALERT',

@@ -43,7 +43,6 @@ function appendDistanceHistory(fence, distance, nowMs) {
   
   if (shouldAppend) {
     fence.distanceHistory.push({ t: nowMs, v: distance });
-    console.log(`[Fence][${fence.id || 'unknown'}] Appended history entry: t=${nowMs}, v=${distance}, newLength=${fence.distanceHistory.length}`);
   }
   
   return shouldAppend;
