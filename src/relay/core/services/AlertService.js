@@ -829,6 +829,19 @@ export class AlertService {
       message: alertData.message,
       id: newAlert.id
     });
+
+    if (alertData.trigger === 'ais_proximity') {
+      console.log('[AlertService] AIS proximity alert payload:', {
+        id: newAlert.id,
+        label: alertData.label,
+        message: alertData.message,
+        targetCount: alertData.data?.targetCount,
+        newVesselCount: alertData.data?.newVesselCount,
+        targetMMSIs: alertData.data?.targetMMSIs,
+        warningRadius: alertData.data?.warningRadius,
+        units: alertData.data?.units,
+      });
+    }
     
     // Use stateManager's updateState if available, otherwise modify directly
     if (typeof this.stateManager.updateState === 'function') {
