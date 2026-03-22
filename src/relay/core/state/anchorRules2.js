@@ -31,6 +31,22 @@ function normalizeMmsi(mmsi) {
   return normalized.length > 0 ? normalized : null;
 }
 
+function convertDistanceToMeters(value, units) {
+  if (!Number.isFinite(value)) return null;
+
+  if (units === 'ft') return value * 0.3048;
+  if (units === 'nm') return value * 1852;
+  return value;
+}
+
+function convertDistanceFromMeters(valueMeters, units) {
+  if (!Number.isFinite(valueMeters)) return null;
+
+  if (units === 'ft') return valueMeters / 0.3048;
+  if (units === 'nm') return valueMeters / 1852;
+  return valueMeters;
+}
+
 export const anchorRules = [
   // Legacy navigation-based notifications (kept for compatibility)
   {
@@ -150,10 +166,12 @@ export const anchorRules = [
       const boatLat = navLat != null ? navLat : fallbackBoatLat;
       const boatLon = navLon != null ? navLon : fallbackBoatLon;
 
-      const criticalRange = anchorState.criticalRange?.r;
+      const criticalRangeValue = anchorState.criticalRange?.r;
+      const criticalRangeUnits = anchorState.criticalRange?.units;
+      const criticalRangeMeters = convertDistanceToMeters(criticalRangeValue, criticalRangeUnits);
       const dropPosition = anchorState.anchorDropLocation?.position;
 
-      if (!criticalRange || !dropPosition || boatLat == null || boatLon == null) {
+      if (!Number.isFinite(criticalRangeMeters) || !dropPosition || boatLat == null || boatLon == null) {
         return false;
       }
 
@@ -172,11 +190,13 @@ export const anchorRules = [
         dropLon
       );
 
+      const distanceInRangeUnits = convertDistanceFromMeters(distance, criticalRangeUnits);
+
       const hasActiveAlert = state.alerts?.active?.some(
         (alert) => alert.trigger === 'critical_range' && !alert.acknowledged
       );
 
-      const isOutsideCriticalRange = distance > criticalRange;
+      const isOutsideCriticalRange = distance > criticalRangeMeters;
 
       if (!isOutsideCriticalRange || hasActiveAlert) {
         anchorAlertDebounceState.criticalRangeCandidateSince = null;
@@ -217,9 +237,10 @@ export const anchorRules = [
       const boatLon = navLon != null ? navLon : fallbackBoatLon;
 
       const dropPosition = anchorState.anchorDropLocation?.position;
-      const criticalRange = anchorState.criticalRange?.r;
-      const isMetric = state.units?.distance === 'meters';
-      const unitLabel = isMetric ? 'm' : 'ft';
+      const criticalRangeValue = anchorState.criticalRange?.r;
+      const criticalRangeUnits = anchorState.criticalRange?.units;
+      const criticalRangeMeters = convertDistanceToMeters(criticalRangeValue, criticalRangeUnits);
+      const unitLabel = criticalRangeUnits;
 
       const dropLat = typeof dropPosition.latitude === 'object' ? dropPosition.latitude?.value : dropPosition.latitude;
       const dropLon = typeof dropPosition.longitude === 'object' ? dropPosition.longitude?.value : dropPosition.longitude;
@@ -231,6 +252,8 @@ export const anchorRules = [
         dropLon
       );
 
+      const distanceInRangeUnits = convertDistanceFromMeters(distance, criticalRangeUnits);
+
       return {
         type: 'CREATE_ALERT',
         data: {
@@ -240,12 +263,13 @@ export const anchorRules = [
           level: 'critical',
           label: 'Critical Range Exceeded',
           message: `Boat has exceeded critical range! Distance from drop (${Math.round(
-            distance
-          )} ${unitLabel}) is beyond critical range (${criticalRange} ${unitLabel}).`,
+            distanceInRangeUnits
+          )} ${unitLabel}) is beyond critical range (${criticalRangeValue} ${unitLabel}).`,
           trigger: 'critical_range',
           data: {
-            distance: Math.round(distance),
-            criticalRange,
+            distance: Math.round(distanceInRangeUnits),
+            criticalRange: criticalRangeValue,
+            criticalRangeMeters,
             units: unitLabel,
           },
           autoResolvable: true,
@@ -297,9 +321,10 @@ export const anchorRules = [
 
       const dropPosition = anchorState.anchorDropLocation?.position;
       const anchorPosition = anchorState.anchorLocation?.position;
-      const criticalRange = anchorState.criticalRange?.r;
-      const isMetric = state.units?.distance === 'meters';
-      const unitLabel = isMetric ? 'm' : 'ft';
+      const criticalRangeValue = anchorState.criticalRange?.r;
+      const criticalRangeUnits = anchorState.criticalRange?.units;
+      const criticalRangeMeters = convertDistanceToMeters(criticalRangeValue, criticalRangeUnits);
+      const unitLabel = criticalRangeUnits;
 
       const dropLat = typeof dropPosition.latitude === 'object' ? dropPosition.latitude?.value : dropPosition.latitude;
       const dropLon = typeof dropPosition.longitude === 'object' ? dropPosition.longitude?.value : dropPosition.longitude;
@@ -316,6 +341,8 @@ export const anchorRules = [
         dropLat,
         dropLon
       );
+
+      const distanceInRangeUnits = convertDistanceFromMeters(distanceBoatFromDrop, criticalRangeUnits);
 
       const drift = calculateDistance(
         dropLat,
@@ -335,12 +362,13 @@ export const anchorRules = [
           level: 'critical',
           label: 'Anchor Dragging',
           message: `Anchor is dragging! Distance from drop (${Math.round(
-            distanceBoatFromDrop
-          )} ${unitLabel}) exceeds critical range (${criticalRange} ${unitLabel}).`,
+            distanceInRangeUnits
+          )} ${unitLabel}) exceeds critical range (${criticalRangeValue} ${unitLabel}).`,
           trigger: 'anchor_dragging',
           data: {
-            distance: Math.round(distanceBoatFromDrop),
-            criticalRange,
+            distance: Math.round(distanceInRangeUnits),
+            criticalRange: criticalRangeValue,
+            criticalRangeMeters,
             drift: Math.round(drift),
             units: unitLabel,
           },
@@ -368,7 +396,9 @@ export const anchorRules = [
       const aisTargetsArray = Array.isArray(state.ais?.targets)
         ? state.ais.targets
         : Object.values(aisTargetsObj);
-      const warningRadius = anchorState.warningRange?.r || 15;
+      const warningRadiusValue = anchorState.warningRange?.r;
+      const warningRadiusUnits = anchorState.warningRange?.units;
+      const warningRadiusMeters = convertDistanceToMeters(warningRadiusValue, warningRadiusUnits);
 
       const navLat = state.navigation?.position?.latitude?.value;
       const navLon = state.navigation?.position?.longitude?.value;
@@ -392,7 +422,7 @@ export const anchorRules = [
       const boatLat = navLat != null ? navLat : fallbackBoatLat;
       const boatLon = navLon != null ? navLon : fallbackBoatLon;
 
-      if (!warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
+      if (!Number.isFinite(warningRadiusMeters) || boatLat == null || boatLon == null || !aisTargetsArray.length) {
         return false;
       }
 
@@ -424,7 +454,7 @@ export const anchorRules = [
           latitude: target.position.latitude,
           longitude: target.position.longitude,
           distanceMeters,
-          inRange: Number.isFinite(distanceMeters) && distanceMeters <= warningRadius,
+          inRange: Number.isFinite(distanceMeters) && distanceMeters <= warningRadiusMeters,
         };
       });
 
@@ -450,7 +480,9 @@ export const anchorRules = [
             selfMmsi,
             boatLat,
             boatLon,
-            warningRadius,
+            warningRadiusValue,
+            warningRadiusUnits,
+            warningRadiusMeters,
             inRangeMMSIs,
             existingAlertMMSIs,
             targetDiagnostics,
@@ -467,7 +499,9 @@ export const anchorRules = [
           selfMmsi,
           boatLat,
           boatLon,
-          warningRadius,
+          warningRadiusValue,
+          warningRadiusUnits,
+          warningRadiusMeters,
           inRangeMMSIs,
           existingAlertMMSIs,
           newVesselsNeedingAlerts,
@@ -480,7 +514,9 @@ export const anchorRules = [
         selfMmsi,
         boatLat,
         boatLon,
-        warningRadius,
+        warningRadiusValue,
+        warningRadiusUnits,
+        warningRadiusMeters,
         inRangeMMSIs,
         existingAlertMMSIs,
         newVesselsNeedingAlerts,
@@ -496,7 +532,9 @@ export const anchorRules = [
       const aisTargetsArray = Array.isArray(state.ais?.targets)
         ? state.ais.targets
         : Object.values(state.aisTargets || {});
-      const warningRadius = anchorState.warningRange?.r || 15;
+      const warningRadiusValue = anchorState.warningRange?.r;
+      const warningRadiusUnits = anchorState.warningRange?.units;
+      const warningRadiusMeters = convertDistanceToMeters(warningRadiusValue, warningRadiusUnits);
 
       const navLat = state.navigation?.position?.latitude?.value;
       const navLon = state.navigation?.position?.longitude?.value;
@@ -520,8 +558,11 @@ export const anchorRules = [
       const boatLat = navLat != null ? navLat : fallbackBoatLat;
       const boatLon = navLon != null ? navLon : fallbackBoatLon;
 
-      const isMetric = state.units?.distance === 'meters';
-      const unitLabel = isMetric ? 'm' : 'ft';
+      if (!Number.isFinite(warningRadiusMeters) || boatLat == null || boatLon == null) {
+        return null;
+      }
+
+      const unitLabel = warningRadiusUnits;
 
       // Get detailed info for vessels in range
       const targetsInRange = aisTargetsArray.filter((target) => {
@@ -536,7 +577,7 @@ export const anchorRules = [
           boatLon
         );
 
-        return distance <= warningRadius;
+        return distance <= warningRadiusMeters;
       });
 
       // Get existing alert MMSIs to find vessels that need new alerts
@@ -566,13 +607,15 @@ export const anchorRules = [
           source: 'ais_monitor',
           level: 'warning',
           label: 'AIS Proximity Warning',
-          message: `${newVesselsNeedingAlerts.length} new vessel(s) detected within warning radius of ${warningRadius} ${unitLabel}.`,
+          message: `${newVesselsNeedingAlerts.length} new vessel(s) detected within warning radius of ${warningRadiusValue} ${unitLabel}.`,
           trigger: 'ais_proximity',
           data: {
             targetCount: targetsInRange.length,
             newVesselCount: newVesselsNeedingAlerts.length,
             targetMMSIs: newVesselMMSIs,
-            warningRadius,
+            warningRadius: warningRadiusValue,
+            warningRadiusUnits,
+            warningRadiusMeters,
             units: unitLabel,
           },
           autoResolvable: true,
@@ -603,7 +646,9 @@ export const anchorRules = [
       const aisTargetsArray = Array.isArray(state.ais?.targets)
         ? state.ais.targets
         : Object.values(state.aisTargets || {});
-      const warningRadius = anchorState.warningRange?.r;
+      const warningRadiusValue = anchorState.warningRange?.r;
+      const warningRadiusUnits = anchorState.warningRange?.units;
+      const warningRadiusMeters = convertDistanceToMeters(warningRadiusValue, warningRadiusUnits);
 
       const navLat = state.navigation?.position?.latitude?.value;
       const navLon = state.navigation?.position?.longitude?.value;
@@ -627,12 +672,14 @@ export const anchorRules = [
       const boatLat = navLat != null ? navLat : fallbackBoatLat;
       const boatLon = navLon != null ? navLon : fallbackBoatLon;
 
-      if (!hasActiveAlerts || !warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
+      if (!hasActiveAlerts || !Number.isFinite(warningRadiusMeters) || boatLat == null || boatLon == null || !aisTargetsArray.length) {
         if (anchorAlertDebounceState.aisProximityClearCandidateSince != null) {
           console.log('[AIS Proximity Resolution][diagnostics] clear candidate reset: prerequisites missing', {
             selfMmsi,
             hasActiveAlerts,
-            warningRadius,
+            warningRadiusValue,
+            warningRadiusUnits,
+            warningRadiusMeters,
             boatLat,
             boatLon,
             aisTargetsCount: aisTargetsArray.length,
@@ -683,7 +730,7 @@ export const anchorRules = [
           latitude: target.position.latitude,
           longitude: target.position.longitude,
           distanceMeters,
-          inRange: Number.isFinite(distanceMeters) && distanceMeters <= warningRadius,
+          inRange: Number.isFinite(distanceMeters) && distanceMeters <= warningRadiusMeters,
         };
       });
 
@@ -695,7 +742,9 @@ export const anchorRules = [
             selfMmsi,
             boatLat,
             boatLon,
-            warningRadius,
+            warningRadiusValue,
+            warningRadiusUnits,
+            warningRadiusMeters,
             targetsInRange,
             resolveTargetDiagnostics,
           });
@@ -711,7 +760,9 @@ export const anchorRules = [
           selfMmsi,
           boatLat,
           boatLon,
-          warningRadius,
+          warningRadiusValue,
+          warningRadiusUnits,
+          warningRadiusMeters,
           resolveTargetDiagnostics,
         });
         return false;
@@ -721,7 +772,9 @@ export const anchorRules = [
         selfMmsi,
         boatLat,
         boatLon,
-        warningRadius,
+        warningRadiusValue,
+        warningRadiusUnits,
+        warningRadiusMeters,
         resolveTargetDiagnostics,
         debounceMs: now - anchorAlertDebounceState.aisProximityClearCandidateSince,
       });
@@ -730,8 +783,8 @@ export const anchorRules = [
     },
     action: (state) => {
       const anchorState = state.anchor || {};
-      const warningRadius = anchorState.warningRange?.r;
-      const isMetric = state.units?.distance === 'meters';
+      const warningRadiusValue = anchorState.warningRange?.r;
+      const warningRadiusUnits = anchorState.warningRange?.units;
 
       anchorAlertDebounceState.aisProximityClearCandidateSince = null;
 
@@ -739,8 +792,8 @@ export const anchorRules = [
         type: 'RESOLVE_ALERT',
         trigger: 'ais_proximity',
         data: {
-          warningRadius,
-          units: isMetric ? 'm' : 'ft',
+          warningRadius: warningRadiusValue,
+          units: warningRadiusUnits,
         },
       };
     },

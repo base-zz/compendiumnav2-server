@@ -19,6 +19,14 @@ function convertDistanceToFenceUnits(distanceMeters, targetUnits) {
   return distanceMeters; // default to meters
 }
 
+function convertDistanceToMeters(value, units) {
+  if (!Number.isFinite(value)) return null;
+
+  if (units === 'ft') return value * 0.3048;
+  if (units === 'nm') return value * 1852;
+  return value;
+}
+
 /**
  * Append distance to fence history with 15-second sampling logic
  * @param {Object} fence - Fence object to update
@@ -543,8 +551,12 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   let resolvedAnchorPosition = anchorPos;
   let resolvedAnchorTime = anchor.anchorLocation?.time;
 
-  const criticalRange = anchor.criticalRange?.r ?? null;
-  const warningRadius = anchor.warningRange?.r ?? null;
+  const criticalRangeValue = anchor.criticalRange?.r ?? null;
+  const criticalRangeUnits = anchor.criticalRange?.units ?? null;
+  const criticalRangeMeters = convertDistanceToMeters(criticalRangeValue, criticalRangeUnits);
+  const warningRadiusValue = anchor.warningRange?.r ?? null;
+  const warningRadiusUnits = anchor.warningRange?.units ?? null;
+  const warningRadiusMeters = convertDistanceToMeters(warningRadiusValue, warningRadiusUnits);
   const isDeploying = anchor.deploymentPhase === 'deploying';
   const isMonitoringSuppressed = anchor.alertsSuppressed === true || anchor.anchorSet === false;
 
@@ -745,9 +757,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
     trackChange("/anchor/anchorDropLocation", updatedDropLocation);
 
     if (dropLat != null && dropLon != null) {
-      const criticalRange = anchor.criticalRange?.r;
-
-      if (criticalRange != null && !isMonitoringSuppressed) {
+      if (Number.isFinite(criticalRangeMeters) && !isMonitoringSuppressed) {
         const distanceBoatFromDrop = calculateDistance(
           filteredBoatLat,
           filteredBoatLon,
@@ -755,13 +765,13 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
           dropLon
         );
 
-        const isDragging = distanceBoatFromDrop > criticalRange;
+        const isDragging = distanceBoatFromDrop > criticalRangeMeters;
 
         if (updatedAnchor.dragging !== isDragging) {
           updatedAnchor.dragging = isDragging;
           trackChange("/anchor/dragging", isDragging);
           if (isDragging) {
-            console.log(`[Anchor] Dragging detected: distance from drop=${distanceBoatFromDrop.toFixed(1)}m, criticalRange=${criticalRange.toFixed(1)}m`);
+            console.log(`[Anchor] Dragging detected: distance from drop=${distanceBoatFromDrop.toFixed(1)}m, criticalRange=${criticalRangeMeters.toFixed(1)}m`);
           } else {
             console.log('[Anchor] Dragging cleared - boat back inside critical range');
           }
@@ -885,7 +895,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
     ? appState.ais.targets
     : Object.values(appState.aisTargets || {});
 
-  if (!isMonitoringSuppressed && warningRadius != null && Array.isArray(aisTargetsArray) && aisTargetsArray.length > 0) {
+  if (!isMonitoringSuppressed && Number.isFinite(warningRadiusMeters) && Array.isArray(aisTargetsArray) && aisTargetsArray.length > 0) {
     // Use boat position as the reference for AIS proximity checks
     const refLat = filteredBoatLat;
     const refLon = filteredBoatLon;
@@ -900,7 +910,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
         if (tLat == null || tLon == null) return false;
 
         const distance = calculateDistance(refLat, refLon, tLat, tLon);
-        return distance <= warningRadius;
+        return distance <= warningRadiusMeters;
       });
 
       const hasWarning = targetsInRange.length > 0;
