@@ -410,22 +410,28 @@ export const anchorRules = [
       });
 
 
-      const targetsInRange = validTargets.filter((target) => {
-
-        const distance = calculateDistance(
+      const targetDiagnostics = validTargets.map((target) => {
+        const distanceMeters = calculateDistance(
           target.position.latitude,
           target.position.longitude,
           boatLat,
           boatLon
         );
+        const targetMmsi = normalizeMmsi(target?.mmsi) ?? target?.mmsi ?? null;
 
-
-        return distance <= warningRadius;
+        return {
+          mmsi: targetMmsi,
+          latitude: target.position.latitude,
+          longitude: target.position.longitude,
+          distanceMeters,
+          inRange: Number.isFinite(distanceMeters) && distanceMeters <= warningRadius,
+        };
       });
 
+      const targetsInRange = targetDiagnostics.filter((target) => target.inRange);
 
       // Get MMSI numbers of vessels currently in range
-      const inRangeMMSIs = targetsInRange.map(target => target.mmsi).filter(Boolean);
+      const inRangeMMSIs = targetsInRange.map((target) => target.mmsi).filter(Boolean);
 
       // Check for existing alerts for these specific vessels
       const activeAlerts = state.alerts?.active || [];
@@ -439,6 +445,17 @@ export const anchorRules = [
 
       const shouldTrigger = newVesselsNeedingAlerts.length > 0;
       if (!shouldTrigger) {
+        if (anchorAlertDebounceState.aisProximityCandidateSince != null) {
+          console.log('[AIS Proximity Detection][diagnostics] candidate reset: no new vessels in range', {
+            selfMmsi,
+            boatLat,
+            boatLon,
+            warningRadius,
+            inRangeMMSIs,
+            existingAlertMMSIs,
+            targetDiagnostics,
+          });
+        }
         anchorAlertDebounceState.aisProximityCandidateSince = null;
         return false;
       }
@@ -446,8 +463,30 @@ export const anchorRules = [
       const now = Date.now();
       if (anchorAlertDebounceState.aisProximityCandidateSince == null) {
         anchorAlertDebounceState.aisProximityCandidateSince = now;
+        console.log('[AIS Proximity Detection][diagnostics] trigger candidate started', {
+          selfMmsi,
+          boatLat,
+          boatLon,
+          warningRadius,
+          inRangeMMSIs,
+          existingAlertMMSIs,
+          newVesselsNeedingAlerts,
+          targetDiagnostics,
+        });
         return false;
       }
+
+      console.log('[AIS Proximity Detection][diagnostics] trigger confirmed', {
+        selfMmsi,
+        boatLat,
+        boatLon,
+        warningRadius,
+        inRangeMMSIs,
+        existingAlertMMSIs,
+        newVesselsNeedingAlerts,
+        targetDiagnostics,
+        debounceMs: now - anchorAlertDebounceState.aisProximityCandidateSince,
+      });
 
       return (now - anchorAlertDebounceState.aisProximityCandidateSince) >= ANCHOR_ALERT_DEBOUNCE_MS;
     },
@@ -589,32 +628,78 @@ export const anchorRules = [
       const boatLon = navLon != null ? navLon : fallbackBoatLon;
 
       if (!hasActiveAlerts || !warningRadius || boatLat == null || boatLon == null || !aisTargetsArray.length) {
+        if (anchorAlertDebounceState.aisProximityClearCandidateSince != null) {
+          console.log('[AIS Proximity Resolution][diagnostics] clear candidate reset: prerequisites missing', {
+            selfMmsi,
+            hasActiveAlerts,
+            warningRadius,
+            boatLat,
+            boatLon,
+            aisTargetsCount: aisTargetsArray.length,
+          });
+        }
         anchorAlertDebounceState.aisProximityClearCandidateSince = null;
         return false;
       }
 
-      const targetsInRange = aisTargetsArray.filter((target) => {
+      const resolveTargetDiagnostics = aisTargetsArray.map((target) => {
         const targetMmsi = normalizeMmsi(target?.mmsi);
-        if (selfMmsi != null && targetMmsi != null && targetMmsi === selfMmsi) return false;
+        if (selfMmsi != null && targetMmsi != null && targetMmsi === selfMmsi) {
+          return {
+            mmsi: targetMmsi,
+            ignoredReason: 'self_target',
+            inRange: false,
+          };
+        }
 
-        if (!target?.position) return false;
+        if (!target?.position) {
+          return {
+            mmsi: targetMmsi,
+            ignoredReason: 'missing_position',
+            inRange: false,
+          };
+        }
         if (target.position.latitude == null || target.position.longitude == null ||
             isNaN(target.position.latitude) || isNaN(target.position.longitude) ||
             Math.abs(target.position.latitude) > 90 || Math.abs(target.position.longitude) > 180) {
-          return false;
+          return {
+            mmsi: targetMmsi,
+            latitude: target.position.latitude,
+            longitude: target.position.longitude,
+            ignoredReason: 'invalid_position',
+            inRange: false,
+          };
         }
 
-        const distance = calculateDistance(
+        const distanceMeters = calculateDistance(
           target.position.latitude,
           target.position.longitude,
           boatLat,
           boatLon
         );
 
-        return distance <= warningRadius;
+        return {
+          mmsi: targetMmsi,
+          latitude: target.position.latitude,
+          longitude: target.position.longitude,
+          distanceMeters,
+          inRange: Number.isFinite(distanceMeters) && distanceMeters <= warningRadius,
+        };
       });
 
+      const targetsInRange = resolveTargetDiagnostics.filter((target) => target.inRange);
+
       if (targetsInRange.length > 0) {
+        if (anchorAlertDebounceState.aisProximityClearCandidateSince != null) {
+          console.log('[AIS Proximity Resolution][diagnostics] clear candidate reset: targets still in range', {
+            selfMmsi,
+            boatLat,
+            boatLon,
+            warningRadius,
+            targetsInRange,
+            resolveTargetDiagnostics,
+          });
+        }
         anchorAlertDebounceState.aisProximityClearCandidateSince = null;
         return false;
       }
@@ -622,8 +707,24 @@ export const anchorRules = [
       const now = Date.now();
       if (anchorAlertDebounceState.aisProximityClearCandidateSince == null) {
         anchorAlertDebounceState.aisProximityClearCandidateSince = now;
+        console.log('[AIS Proximity Resolution][diagnostics] clear candidate started', {
+          selfMmsi,
+          boatLat,
+          boatLon,
+          warningRadius,
+          resolveTargetDiagnostics,
+        });
         return false;
       }
+
+      console.log('[AIS Proximity Resolution][diagnostics] clear confirmed', {
+        selfMmsi,
+        boatLat,
+        boatLon,
+        warningRadius,
+        resolveTargetDiagnostics,
+        debounceMs: now - anchorAlertDebounceState.aisProximityClearCandidateSince,
+      });
 
       return (now - anchorAlertDebounceState.aisProximityClearCandidateSince) >= ANCHOR_ALERT_DEBOUNCE_MS;
     },
