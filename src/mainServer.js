@@ -33,18 +33,26 @@ import { VictronModbusService } from "./services/VictronModbusService.js";
 import DemoRecorderService from "./services/DemoRecorderService.js";
 import RecordedDemoService from "./services/RecordedDemoService.js";
 
-console.log("[SERVER] TOP: mainServer.js imports completed, entering top-level code...");
 const log = debug("server:main");
+const verboseStartupLogs = process.env.VERBOSE_STARTUP_LOGS === "true";
+const startupLog = (...args) => {
+  if (verboseStartupLogs) {
+    console.log(...args);
+  }
+};
+const healthTelemetryLogsEnabled = process.env.HEALTH_TELEMETRY_LOGS === "true";
 
-console.log("[SERVER] TOP: before getStateManager()");
+startupLog("[SERVER] TOP: mainServer.js imports completed, entering top-level code...");
+
+startupLog("[SERVER] TOP: before getStateManager()");
 const stateManager = getStateManager();
-console.log("[SERVER] TOP: after getStateManager(), before setStateManagerInstance()");
+startupLog("[SERVER] TOP: after getStateManager(), before setStateManagerInstance()");
 setStateManagerInstance(stateManager);
-console.log("[SERVER] TOP: after setStateManagerInstance(), before dotenv.config");
+startupLog("[SERVER] TOP: after setStateManagerInstance(), before dotenv.config");
 
-console.log("Loading .env");
+startupLog("Loading .env");
 dotenv.config({ path: ".env" });
-console.log("[SERVER] TOP: after dotenv.config, before CLI flag parsing");
+startupLog("[SERVER] TOP: after dotenv.config, before CLI flag parsing");
 
 // Periodic memory usage logging to diagnose heap growth
 setInterval(() => {
@@ -60,7 +68,7 @@ setInterval(() => {
 }, 300000);
 
 // --- CLI flag parsing ---
-console.log("[SERVER] Parsing CLI flags...");
+startupLog("[SERVER] Parsing CLI flags...");
 const recordFlag = process.argv.includes('--record');
 const demoFlag = process.argv.includes('--demo');
 if (recordFlag && demoFlag) {
@@ -124,7 +132,7 @@ async function bridgeStateToRelay() {
 }
 
 function buildServiceManifest() {
-  console.log("[SERVER] buildServiceManifest() called");
+  startupLog("[SERVER] buildServiceManifest() called");
   const positionSources = {
     gps: { priority: 1, timeout: 10000 },
     ais: { priority: 2, timeout: 15000 },
@@ -132,9 +140,9 @@ function buildServiceManifest() {
   };
 
   const manifest = [];
-  console.log("[SERVER] buildServiceManifest(): initializing manifest array");
+  startupLog("[SERVER] buildServiceManifest(): initializing manifest array");
 
-  console.log("[SERVER] buildServiceManifest(): adding state service (NewStateService / RecordedDemoService)");
+  startupLog("[SERVER] buildServiceManifest(): adding state service (NewStateService / RecordedDemoService)");
   manifest.push({
     name: "state",
     create: () => (demoFlag ? new RecordedDemoService() : new NewStateService()),
@@ -156,7 +164,7 @@ function buildServiceManifest() {
   });
 
   if (!demoFlag) {
-    console.log("[SERVER] buildServiceManifest(): demoFlag is false, adding bluetooth and victron-modbus services");
+    startupLog("[SERVER] buildServiceManifest(): demoFlag is false, adding bluetooth and victron-modbus services");
     manifest.push(
       {
         name: "bluetooth",
@@ -175,19 +183,19 @@ function buildServiceManifest() {
   }
 
   if (recordFlag) {
-    console.log("[SERVER] buildServiceManifest(): recordFlag is true, adding demo-recorder service");
+    startupLog("[SERVER] buildServiceManifest(): recordFlag is true, adding demo-recorder service");
     manifest.push({
       name: "demo-recorder",
       create: () => new DemoRecorderService(),
     });
   }
 
-  console.log("[SERVER] buildServiceManifest(): manifest complete with services:", manifest.map(m => m.name));
+  startupLog("[SERVER] buildServiceManifest(): manifest complete with services:", manifest.map(m => m.name));
   return manifest;
 }
 
 async function startSecondaryServices() {
-  console.log("[SERVER] startSecondaryServices() called");
+  startupLog("[SERVER] startSecondaryServices() called");
   const stateService = requireService("state");
   const resolveService = (name, { required = false } = {}) => {
     const service = serviceManager.getService(name);
@@ -203,7 +211,7 @@ async function startSecondaryServices() {
   const bluetoothService = resolveService("bluetooth");
   const victronService = resolveService("victron-modbus");
 
-  console.log("[SERVER] startSecondaryServices(): resolved services:", {
+  startupLog("[SERVER] startSecondaryServices(): resolved services:", {
     hasPosition: !!positionService,
     hasTidal: !!tidalService,
     hasWeather: !!weatherService,
@@ -212,7 +220,7 @@ async function startSecondaryServices() {
   });
 
   // Listeners already set up before services started
-  console.log("[SERVER] startSecondaryServices(): StateManager already listening to active services");
+  startupLog("[SERVER] startSecondaryServices(): StateManager already listening to active services");
 
   if (bluetoothService) {
     stateManager.on(
@@ -233,12 +241,12 @@ async function startSecondaryServices() {
 
 async function startServer() {
   try {
-    console.log("[SERVER] startServer() called, beginning bootstrap...");
+    startupLog("[SERVER] startServer() called, beginning bootstrap...");
     const manifest = buildServiceManifest();
-    console.log("[SERVER] Service manifest built with entries:", manifest.map(m => m.name));
-    console.log("[SERVER] Calling bootstrapServices(manifest)...");
+    startupLog("[SERVER] Service manifest built with entries:", manifest.map(m => m.name));
+    startupLog("[SERVER] Calling bootstrapServices(manifest)...");
     const { failures } = await bootstrapServices(manifest);
-    console.log("[SERVER] bootstrapServices() completed, failures count:", failures.length);
+    startupLog("[SERVER] bootstrapServices() completed, failures count:", failures.length);
     if (failures.length > 0) {
       throw new Error(
         `Service bootstrap failures: ${failures
@@ -247,35 +255,66 @@ async function startServer() {
       );
     }
 
-    console.log("[SERVER] Starting registered services...");
+    startupLog("[SERVER] Starting registered services...");
     
     // Get service references before starting them so we can set up listeners
     const positionService = serviceManager.getService('position');
     const tidalService = serviceManager.getService('tidal');
     const weatherService = serviceManager.getService('weather');
+    const stateServiceForHealth = serviceManager.getService('state');
     const bluetoothService = serviceManager.getService('bluetooth');
     const victronService = serviceManager.getService('victron-modbus');
 
     // CRITICAL: Set up StateManager listeners BEFORE starting services
     // Services emit initial data immediately on startup (weather:update, tide:update, etc.)
     // If listeners are attached after service start, the initial data will be missed
-    console.log("[SERVER] Setting up StateManager listeners BEFORE starting services...");
+    startupLog("[SERVER] Setting up StateManager listeners BEFORE starting services...");
     [positionService, tidalService, weatherService, bluetoothService, victronService]
       .filter(Boolean)
       .forEach((service) => {
         stateManager.listenToService(service);
       });
-    console.log("[SERVER] StateManager now listening to active services");
+    startupLog("[SERVER] StateManager now listening to active services");
 
     await startRegisteredServices();
-    console.log("[SERVER] Registered services started, waiting for all ready...");
+    startupLog("[SERVER] Registered services started, waiting for all ready...");
     await serviceManager.waitForAllReady();
-    console.log("[SERVER] All services reported ready. Proceeding to bridge state and start secondary services.");
+    startupLog("[SERVER] All services reported ready. Proceeding to bridge state and start secondary services.");
 
     await bridgeStateToRelay();
-    console.log("[SERVER] bridgeStateToRelay() completed");
+    startupLog("[SERVER] bridgeStateToRelay() completed");
     await startSecondaryServices();
-    console.log("[SERVER] startSecondaryServices() completed");
+    startupLog("[SERVER] startSecondaryServices() completed");
+
+    if (healthTelemetryLogsEnabled) {
+      const healthTelemetryIntervalRaw = process.env.HEALTH_TELEMETRY_INTERVAL_MS;
+      const healthTelemetryIntervalMs = Number.parseInt(healthTelemetryIntervalRaw, 10);
+
+      if (Number.isFinite(healthTelemetryIntervalMs) && healthTelemetryIntervalMs > 0) {
+        setInterval(() => {
+          const signalKLastMessage = stateServiceForHealth?.connections?.signalK?.lastMessage;
+          const signalKMessageAgeMs = Number.isFinite(signalKLastMessage)
+            ? Date.now() - signalKLastMessage
+            : null;
+
+          const btScanning = bluetoothService?.scanning === true;
+          const btLastScanStartedAt = bluetoothService?.lastScanStartedAt;
+          const btScanAgeMs = btScanning && Number.isFinite(btLastScanStartedAt)
+            ? Date.now() - btLastScanStartedAt
+            : null;
+
+          console.log("[HEALTH] stream status", {
+            signalKConnected: stateServiceForHealth?.connections?.signalK?.connected === true,
+            signalKMessageAgeMs,
+            bluetoothScanning: btScanning,
+            bluetoothScanAgeMs: btScanAgeMs,
+            bluetoothScanCycleActive: bluetoothService?.scanCycleActive === true,
+          });
+        }, healthTelemetryIntervalMs);
+      } else {
+        console.warn("[HEALTH] HEALTH_TELEMETRY_LOGS=true but HEALTH_TELEMETRY_INTERVAL_MS is invalid; telemetry logs disabled");
+      }
+    }
 
     // 3. Build relay config
     const relayConfig = {
@@ -304,12 +343,12 @@ async function startServer() {
       throw new Error("RelayServer: vpsUrl must be set via env");
 
     // 4. Start relay server
-    console.log("[SERVER] Starting relay server with config:", relayConfig);
+    startupLog("[SERVER] Starting relay server with config:", relayConfig);
     await startRelayServer(stateManager, relayConfig);
-    console.log("[SERVER] Relay server started");
+    startupLog("[SERVER] Relay server started");
 
     // 5. Create and configure Express app for API endpoints
-    console.log("[SERVER] Creating Express app and configuring middleware...");
+    startupLog("[SERVER] Creating Express app and configuring middleware...");
     const app = express();
     app.use(express.json());
 
@@ -406,7 +445,7 @@ async function startServer() {
       }, 5000); // 5 second delay
     }
 
-    console.log(`[SERVER] About to call httpServer.listen on PORT=${PORT}...`);
+    startupLog(`[SERVER] About to call httpServer.listen on PORT=${PORT}...`);
     httpServer.listen(PORT, "0.0.0.0", () => {
       const host = `http://localhost:${PORT}`;
       console.log(`[SERVER] HTTP server listening on port ${PORT}`);

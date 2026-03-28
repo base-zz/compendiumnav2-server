@@ -23,6 +23,7 @@ const logWarn = debug('direct-server:warn');
 const logError = debug('direct-server:error');
 const logTrace = debug('direct-server:trace');
 const logState = debug('direct-server:state');
+const verboseDirectConnectionLogs = process.env.VERBOSE_DIRECT_CONNECTION_LOGS === 'true';
 
 /**
  * @param {Object} [options]
@@ -35,10 +36,11 @@ const logState = debug('direct-server:state');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-async function startDirectServer({ coordinator } = {}, options = {}) {
-  if (!coordinator) {
+async function startDirectServer(input = /** @type {{ coordinator?: unknown }} */ ({}), options = {}) {
+  if (!input.coordinator) {
     throw new Error('startDirectServer requires a ClientSyncCoordinator instance');
   }
+  const coordinator = /** @type {{ registerTransport: Function, broadcastInitialState: Function, handleClientMessage: Function }} */ (input.coordinator);
 
   const PORT = options.port || parseInt(process.env.DIRECT_WS_PORT, 10);
   if (!PORT) throw new Error("DIRECT_WS_PORT must be specified");
@@ -80,7 +82,9 @@ async function startDirectServer({ coordinator } = {}, options = {}) {
   
   // Add connection attempt listener to HTTP server
   httpServer.on('upgrade', (request, socket, head) => {
-    console.log(`[DIRECT] Upgrade request received from ${request.socket.remoteAddress}`);
+    if (verboseDirectConnectionLogs) {
+      console.log(`[DIRECT] Upgrade request received from ${request.socket.remoteAddress}`);
+    }
   });
   
   // Store the server instance for later use
@@ -113,38 +117,44 @@ async function startDirectServer({ coordinator } = {}, options = {}) {
     const origin = request.headers.origin || 'unknown';
     let isAlive = true;
     
-    console.log('');
-    console.log('🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌');
-    console.log('🔌  DIRECTSERVER: NEW CLIENT CONNECTED!  🔌');
-    console.log('🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌');
     console.log(`[DIRECT] Client ID: ${clientId}`);
     console.log(`[DIRECT] Client IP: ${clientIp}`);
     console.log(`[DIRECT] Origin: ${origin}`);
     console.log(`[DIRECT] Active clients: ${wss.clients.size}`);
-    console.log(`[DIRECT] Request URL: ${request.url}`);
-    console.log(`[DIRECT] Request headers:`, request.headers);
-    console.log('🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌🔌');
-    console.log('');
+    if (verboseDirectConnectionLogs) {
+      console.log(`[DIRECT] Request URL: ${request.url}`);
+      console.log(`[DIRECT] Request headers:`, request.headers);
+    }
     
-    console.log(`[DIRECT] Step 1: Starting setup for client ${clientId}`);
+    if (verboseDirectConnectionLogs) {
+      console.log(`[DIRECT] Step 1: Starting setup for client ${clientId}`);
+    }
     
     // Wrap everything in try-catch to see if there's an error
     try {
     
     // Log WebSocket state changes
-    console.log(`[DIRECT] Client ${clientId}: Setting up connection handlers...`);
+    if (verboseDirectConnectionLogs) {
+      console.log(`[DIRECT] Client ${clientId}: Setting up connection handlers...`);
+    }
     
     // Log WebSocket state changes
     ws.on('open', () => {
-      console.log(`[DIRECT] Client ${clientId}: WebSocket OPENED`);
+      if (verboseDirectConnectionLogs) {
+        console.log(`[DIRECT] Client ${clientId}: WebSocket OPENED`);
+      }
     });
     
     ws.on('close', (code, reason) => {
-      console.log(`[DIRECT] Client ${clientId}: WebSocket CLOSED (code: ${code}, reason: ${reason})`);
+      if (verboseDirectConnectionLogs) {
+        console.log(`[DIRECT] Client ${clientId}: WebSocket CLOSED (code: ${code}, reason: ${reason})`);
+      }
     });
     
     ws.on('error', (error) => {
-      console.log(`[DIRECT] Client ${clientId}: WebSocket ERROR:`, error);
+      if (verboseDirectConnectionLogs) {
+        console.log(`[DIRECT] Client ${clientId}: WebSocket ERROR:`, error);
+      }
     });
     
     // Send a test ping every 5 seconds to verify connection
@@ -158,7 +168,9 @@ async function startDirectServer({ coordinator } = {}, options = {}) {
           console.log(`[DIRECT] Client ${clientId}: Failed to send test ping:`, error);
         }
       } else {
-        console.log(`[DIRECT] Client ${clientId}: Cannot send test ping - connection not open (state: ${ws.readyState})`);
+        if (verboseDirectConnectionLogs) {
+          console.log(`[DIRECT] Client ${clientId}: Cannot send test ping - connection not open (state: ${ws.readyState})`);
+        }
       }
     }, 5000);
     
@@ -174,7 +186,9 @@ async function startDirectServer({ coordinator } = {}, options = {}) {
         if (!isAlive || ws.readyState !== ws.OPEN) return;
         try {
           const payload = JSON.stringify(message);
-          console.log(`[DIRECT] Sending initial state to client ${clientId} (${payload.length} bytes)`);
+          if (verboseDirectConnectionLogs) {
+            console.log(`[DIRECT] Sending initial state to client ${clientId} (${payload.length} bytes)`);
+          }
           ws.send(payload);
         } catch (error) {
           logError(`Error sending initial state to ${clientId}:`, error);
@@ -182,7 +196,9 @@ async function startDirectServer({ coordinator } = {}, options = {}) {
       });
     };
 
-    console.log(`[DIRECT] Registering message handler for client ${clientId}`);
+    if (verboseDirectConnectionLogs) {
+      console.log(`[DIRECT] Registering message handler for client ${clientId}`);
+    }
     
     // Handle incoming messages
     ws.on('message', (message) => {

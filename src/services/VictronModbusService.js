@@ -597,60 +597,69 @@ export class VictronModbusService extends ContinuousService {
   }
   
   async discoverBMV() {
-    console.log('[VictronModbus] Starting comprehensive Unit ID scan...');
-    
-    // Scan a wider range - Victron uses 0-247
-    const unitIdsToScan = [
-      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 
-      100, // System device
-      223, 225, 226, 227, 228, 229, 230, // Common USB devices
-    ];
-    
+    console.log('[VictronModbus] Starting BMV Unit ID discovery...');
+
+    const primaryUnitIdsToScan = [226, 227, 228, 229, 230, 225, 223, 100];
+    const fallbackUnitIdsToScan = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
     let foundDevices = [];
-    
-    for (const unitId of unitIdsToScan) {
-      try {
-        console.log(`[VictronModbus] Scanning Unit ID ${unitId}...`);
-        this.client.setID(unitId);
-        
-        // Try to read battery voltage (register 259)
-        const result = await this.client.readInputRegisters(259, 1);
-        
-        if (result && result.data && result.data.length > 0) {
-          const voltage = result.data[0] / 100;
-          console.log(`[VictronModbus] Unit ID ${unitId} responded: ${voltage}V`);
-          
-          // More lenient validation
-          if (voltage > 5 && voltage < 100) { // Wider range
-            foundDevices.push({ unitId, voltage });
-            
-            // Try to read SOC to confirm it's a battery monitor
-            const socResult = await this.client.readInputRegisters(266, 1);
-            if (socResult && socResult.data && socResult.data.length > 0) {
-              const soc = socResult.data[0] / 10;
-              console.log(`[VictronModbus] CONFIRMED BATTERY at Unit ID ${unitId}: ${voltage}V, ${soc}% SOC`);
-              const confirmedUnitId = unitId;
-              this.client.setID(this.unitId);
-              return confirmedUnitId; // Return first confirmed battery
+
+    const scanList = async (unitIdsToScan, label) => {
+      console.log(`[VictronModbus] Scanning ${label} Unit IDs: ${unitIdsToScan.join(', ')}`);
+      for (const unitId of unitIdsToScan) {
+        try {
+          this.client.setID(unitId);
+
+          const result = await this.client.readInputRegisters(259, 1);
+
+          if (result && result.data && result.data.length > 0) {
+            const voltage = result.data[0] / 100;
+
+            if (voltage > 5 && voltage < 100) {
+              foundDevices.push({ unitId, voltage });
+
+              const socResult = await this.client.readInputRegisters(266, 1);
+              if (socResult && socResult.data && socResult.data.length > 0) {
+                const soc = socResult.data[0] / 10;
+                console.log(`[VictronModbus] CONFIRMED BATTERY at Unit ID ${unitId}: ${voltage}V, ${soc}% SOC`);
+                const confirmedUnitId = unitId;
+                this.client.setID(this.unitId);
+                return confirmedUnitId;
+              }
             }
           }
-        }
-      } catch (error) {
-        // Log only if it's an interesting error
-        if (!error.message.includes('timeout') && !error.message.includes('not available')) {
-          console.log(`[VictronModbus] Unit ID ${unitId} error: ${error.message}`);
+        } catch (error) {
+          const message = error?.message || '';
+          if (
+            !message.includes('timeout') &&
+            !message.includes('not available') &&
+            !message.includes('Gateway path unavailable')
+          ) {
+            console.log(`[VictronModbus] Unit ID ${unitId} error: ${message}`);
+          }
         }
       }
+      return null;
+    };
+
+    const primaryMatch = await scanList(primaryUnitIdsToScan, 'primary');
+    if (primaryMatch != null) {
+      return primaryMatch;
     }
-    
+
+    const fallbackMatch = await scanList(fallbackUnitIdsToScan, 'fallback');
+    if (fallbackMatch != null) {
+      return fallbackMatch;
+    }
+
     // Report found devices
     if (foundDevices.length > 0) {
-      console.log('[VictronModbus] Found responding devices:',
+      console.log('[VictronModbus] Found responding battery-voltage devices:',
         foundDevices.map(d => `ID ${d.unitId} (${d.voltage}V)`).join(', '));
     } else {
       console.log('[VictronModbus] No devices responded to battery voltage read');
     }
-    
+
     this.client.setID(this.unitId);
     return null;
   }
