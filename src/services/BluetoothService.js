@@ -434,6 +434,24 @@ export class BluetoothService extends ContinuousService {
   scanTimeout = null;
 
   /**
+   * Watchdog timer for scan health checks
+   * @type {NodeJS.Timeout|null}
+   */
+  scanHealthTimer = null;
+
+  /**
+   * Last scan start timestamp (ms)
+   * @type {number|null}
+   */
+  lastScanStartedAt = null;
+
+  /**
+   * Last scan stop timestamp (ms)
+   * @type {number|null}
+   */
+  lastScanStoppedAt = null;
+
+  /**
    * Map of company IDs to company names
    * @type {Map<number, string>}
    */
@@ -513,8 +531,10 @@ export class BluetoothService extends ContinuousService {
     this.scanning = false;
     this.scanTimeout = null;
     this.scanTimer = null;
+    this.scanHealthTimer = null;
     this.companyMap = new Map();
     this.isStarting = false;
+    this.scanCycleActive = false;
 
     // Debounce properties for scan stop logging
     this.lastScanStopTime = 0;
@@ -617,9 +637,11 @@ export class BluetoothService extends ContinuousService {
       if (this.btReader) {
         await this.btReader.init();
         await this._startScanCycle();
+        this._startScanHealthWatchdog();
       } else {
         await this._initNoble();
         await this._startScanCycle();
+        this._startScanHealthWatchdog();
       }
     } catch (error) {
       this.logError(`Error starting Bluetooth scanning: ${error.message}`);
@@ -802,6 +824,7 @@ export class BluetoothService extends ContinuousService {
 
     try {
       // Stop any ongoing scans
+      this.scanCycleActive = false;
       if (this.scanning) {
         await this._stopScan();
       }
@@ -810,6 +833,16 @@ export class BluetoothService extends ContinuousService {
       if (this.scanTimer) {
         clearTimeout(this.scanTimer);
         this.scanTimer = null;
+      }
+
+      if (this.scanTimeout) {
+        clearTimeout(this.scanTimeout);
+        this.scanTimeout = null;
+      }
+
+      if (this.scanHealthTimer) {
+        clearInterval(this.scanHealthTimer);
+        this.scanHealthTimer = null;
       }
 
       // Clean up noble if we are using the noble backend directly
@@ -841,6 +874,11 @@ export class BluetoothService extends ContinuousService {
       if (this.scanTimeout) {
         clearTimeout(this.scanTimeout);
         this.scanTimeout = null;
+      }
+
+      if (this.scanHealthTimer) {
+        clearInterval(this.scanHealthTimer);
+        this.scanHealthTimer = null;
       }
 
       // Reset state
@@ -1021,6 +1059,7 @@ export class BluetoothService extends ContinuousService {
     this.log("✅ Bluetooth scan started - actively scanning for devices");
     this.scanning = true;
     this.isStarting = false;
+    this.lastScanStartedAt = Date.now();
     // No need to clear deviceUpdates as it's a Map that prevents duplicates by key
   }
 
@@ -1037,6 +1076,7 @@ export class BluetoothService extends ContinuousService {
     this.log("Bluetooth scan stopped");
     this.scanning = false;
     this.isStopping = false;
+    this.lastScanStoppedAt = Date.now();
 
     // Process all device updates at the end of the scan cycle
     if (this.deviceUpdates.size > 0 && this.deviceManager) {
@@ -1110,8 +1150,8 @@ export class BluetoothService extends ContinuousService {
     this.scanCycleActive = true;
     this.log("🔄 Starting BLE scan cycle");
 
-    const scanTime = this.scanTime || 10000; // 10 seconds
-    const restTime = this.restTime || 5000; // 5 seconds
+    const scanTime = this.scanDuration;
+    const restTime = this.scanInterval;
 
     const scanCycle = async () => {
       if (!this.scanCycleActive) {
@@ -1152,6 +1192,41 @@ export class BluetoothService extends ContinuousService {
 
     // Start the first scan cycle
     setImmediate(scanCycle);
+  }
+
+  _startScanHealthWatchdog() {
+    if (this.scanHealthTimer) {
+      clearInterval(this.scanHealthTimer);
+      this.scanHealthTimer = null;
+    }
+
+    if (!Number.isFinite(this.scanDuration) || this.scanDuration <= 0) {
+      return;
+    }
+
+    const healthIntervalMs = this.scanDuration;
+    this.scanHealthTimer = setInterval(async () => {
+      if (!this.isRunning || !this.scanCycleActive) {
+        return;
+      }
+
+      if (!this.scanning || !Number.isFinite(this.lastScanStartedAt)) {
+        return;
+      }
+
+      const maxScanAgeMs = this.scanDuration * 2;
+      const scanAgeMs = Date.now() - this.lastScanStartedAt;
+      if (scanAgeMs <= maxScanAgeMs) {
+        return;
+      }
+
+      this.logError(`Detected stuck Bluetooth scan (age ${scanAgeMs}ms, max ${maxScanAgeMs}ms). Forcing scan stop.`);
+      try {
+        await this._stopScan();
+      } catch (error) {
+        this.logError(`Error while forcing stuck scan stop: ${error.message}`);
+      }
+    }, healthIntervalMs);
   }
 
   /**

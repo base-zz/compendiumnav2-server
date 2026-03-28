@@ -79,6 +79,8 @@ class NewStateService extends ContinuousService {
     this._aisRefreshTimer = null;
     this._notificationPaths = new Set();
     this._notificationPathLoggingTimer = null;
+    this._signalKStaleWatchdogTimer = null;
+    this._signalKReconnectTimer = null;
     this.signalKAdapter = null;
     this.signalKWsUrl = null;
     this._positionService = null;
@@ -97,6 +99,8 @@ class NewStateService extends ContinuousService {
       websocket: false,
       signalK: {
         websocket: false,
+        connected: false,
+        reconnectAttempts: 0,
         lastMessage: null,
       },
     };
@@ -200,6 +204,16 @@ class NewStateService extends ContinuousService {
         clearInterval(this._aisRefreshTimer);
         this._aisRefreshTimer = null;
       }
+
+      if (this._signalKStaleWatchdogTimer) {
+        clearInterval(this._signalKStaleWatchdogTimer);
+        this._signalKStaleWatchdogTimer = null;
+      }
+
+      if (this._signalKReconnectTimer) {
+        clearTimeout(this._signalKReconnectTimer);
+        this._signalKReconnectTimer = null;
+      }
   
       // Clear any notification path logging
       if (this.notificationPathLoggingStarted) {
@@ -296,6 +310,7 @@ class NewStateService extends ContinuousService {
     // Start notification path logging when service initializes
     this.startNotificationPathLogging();
     await this._connectToSignalK();
+    this._startSignalKStaleWatchdog();
 
     try {
       const vesselsUrl = `${this.config.signalKBaseUrl.replace(
@@ -753,8 +768,14 @@ class NewStateService extends ContinuousService {
 
       socket.on("open", () => {
         this._debug("Connected to SignalK");
+        if (this._signalKReconnectTimer) {
+          clearTimeout(this._signalKReconnectTimer);
+          this._signalKReconnectTimer = null;
+        }
+        this.connections.signalK.websocket = true;
         this.connections.signalK.connected = true;
         this.connections.signalK.reconnectAttempts = 0;
+        this.connections.signalK.lastMessage = Date.now();
 
         socket.send(
           JSON.stringify({
@@ -783,10 +804,12 @@ class NewStateService extends ContinuousService {
           error,
           message: error.message,
         });
+        reject(error);
       });
 
       socket.on("close", () => {
         this._debug("Disconnected from SignalK");
+        this.connections.signalK.websocket = false;
         this.connections.signalK.connected = false;
         this.emit(this.EVENTS.DISCONNECTED, { source: "signalK" });
         this._reconnectToSignalK();
@@ -795,26 +818,66 @@ class NewStateService extends ContinuousService {
   }
 
   _reconnectToSignalK() {
-    if (
-      this.connections.signalK.reconnectAttempts >=
-      this.config.maxReconnectAttempts
-    ) {
-      this._debug("Max reconnect attempts reached, giving up");
-      this.emit(this.EVENTS.ERROR, {
-        source: "signalK",
-        message: "Max reconnect attempts reached",
-      });
+    if (this._signalKReconnectTimer) {
       return;
     }
 
     this.connections.signalK.reconnectAttempts++;
+    const reconnectAttempt = this.connections.signalK.reconnectAttempts;
+    const maxAttemptsForBackoff = Number.isFinite(this.config.maxReconnectAttempts)
+      ? this.config.maxReconnectAttempts
+      : reconnectAttempt;
+    const backoffMultiplier = Math.min(reconnectAttempt, Math.max(maxAttemptsForBackoff, 1));
+    const reconnectDelayMs = this.config.reconnectDelay * backoffMultiplier;
+
     this._debug(
-      `Reconnecting to SignalK (attempt ${this.connections.signalK.reconnectAttempts}/${this.config.maxReconnectAttempts})`
+      `Reconnecting to SignalK (attempt ${reconnectAttempt}, delay ${reconnectDelayMs}ms)`
     );
 
-    setTimeout(() => {
-      this._connectToSignalK().catch(() => {});
-    }, this.config.reconnectDelay);
+    this._signalKReconnectTimer = setTimeout(() => {
+      this._signalKReconnectTimer = null;
+      this._connectToSignalK().catch(() => {
+        this._reconnectToSignalK();
+      });
+    }, reconnectDelayMs);
+  }
+
+  _startSignalKStaleWatchdog() {
+    if (this._signalKStaleWatchdogTimer) {
+      clearInterval(this._signalKStaleWatchdogTimer);
+      this._signalKStaleWatchdogTimer = null;
+    }
+
+    const intervalMs = this.config?.updateInterval;
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+      return;
+    }
+
+    const staleThresholdMs = intervalMs * 10;
+    this._signalKStaleWatchdogTimer = setInterval(() => {
+      const isConnected = this.connections?.signalK?.connected === true;
+      const lastMessage = this.connections?.signalK?.lastMessage;
+
+      if (!isConnected || !Number.isFinite(lastMessage)) {
+        return;
+      }
+
+      const ageMs = Date.now() - lastMessage;
+      if (ageMs <= staleThresholdMs) {
+        return;
+      }
+
+      this._debug(`SignalK stale stream detected (last message ${ageMs}ms ago), forcing reconnect`);
+
+      const socket = this.connections?.signalK?.socket;
+      if (socket && typeof socket.terminate === 'function') {
+        socket.terminate();
+      } else if (socket && typeof socket.close === 'function') {
+        socket.close();
+      } else {
+        this._reconnectToSignalK();
+      }
+    }, intervalMs);
   }
 
   async _handleSignalKMessage(data) {
