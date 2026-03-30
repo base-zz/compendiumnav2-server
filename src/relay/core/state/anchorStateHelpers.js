@@ -28,6 +28,36 @@ function convertDistanceToMeters(value, units) {
 }
 
 /**
+ * Normalize speed measurements to knots for anchor filtering decisions.
+ * Returns null when units are unknown so callers can explicitly keep
+ * default behavior rather than guessing conversions.
+ */
+function convertSpeedToKnots(value, units) {
+  if (!Number.isFinite(value)) return null;
+  if (typeof units !== 'string') return null;
+
+  const normalizedUnits = units.trim().toLowerCase();
+
+  if (normalizedUnits === 'kts' || normalizedUnits === 'kt' || normalizedUnits === 'knot' || normalizedUnits === 'knots') {
+    return value;
+  }
+
+  if (normalizedUnits === 'm/s' || normalizedUnits === 'ms' || normalizedUnits === 'mps') {
+    return value * 1.94384;
+  }
+
+  if (normalizedUnits === 'mph') {
+    return value * 0.868976;
+  }
+
+  if (normalizedUnits === 'km/h' || normalizedUnits === 'kph' || normalizedUnits === 'kmh') {
+    return value * 0.539957;
+  }
+
+  return null;
+}
+
+/**
  * Append distance to fence history with 15-second sampling logic
  * @param {Object} fence - Fence object to update
  * @param {number} distance - Distance value in fence units
@@ -570,11 +600,74 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
 
   const previousFilteredBoatLat = anchor.filteredBoatPosition?.position?.latitude?.value;
   const previousFilteredBoatLon = anchor.filteredBoatPosition?.position?.longitude?.value;
-  const FILTER_ALPHA = 0.2;
-  const FILTER_DEADBAND_METERS = 3;
+  // Adaptive defaults for stable anchor display without client changes.
+  // These tune smoothing from observed position stability and vessel speed.
+  const DEFAULT_DEADBAND_METERS = 6;
+  const STATIONARY_DEADBAND_FLOOR_METERS = 8;
+  const ACCURACY_DEADBAND_MULTIPLIER = 1.5;
+  const DEFAULT_FILTER_ALPHA = 0.15;
+  const STATIONARY_FILTER_ALPHA = 0.05;
+  const UNDERWAY_FILTER_ALPHA = 0.25;
+  const STATIONARY_SOG_THRESHOLD_KNOTS = 0.2;
+  const UNDERWAY_SOG_THRESHOLD_KNOTS = 2;
+  const MOVEMENT_PERSIST_MS = 5000;
+  const JUMP_REJECTION_METERS = 40;
+
+  const stability = appState.position?.stability;
+  const stabilityWindowSize = stability?.windowSize;
+  const stabilityFilteredRadius95Meters = stability?.filteredRadius95Meters;
+  const stabilityRadius95Meters = stability?.radius95Meters;
+
+  // Use PositionService jitter diagnostics as an empirical accuracy estimate.
+  // Prefer filteredRadius95 when present; fall back to radius95.
+  let accuracyMeters = null;
+  if (
+    Number.isFinite(stabilityWindowSize) &&
+    stabilityWindowSize > 0 &&
+    Number.isFinite(stabilityFilteredRadius95Meters)
+  ) {
+    accuracyMeters = stabilityFilteredRadius95Meters;
+  } else if (
+    Number.isFinite(stabilityWindowSize) &&
+    stabilityWindowSize > 0 &&
+    Number.isFinite(stabilityRadius95Meters)
+  ) {
+    accuracyMeters = stabilityRadius95Meters;
+  }
+
+  const sogValue = appState.navigation?.speed?.sog?.value;
+  const sogUnits = appState.navigation?.speed?.sog?.units;
+  const sogKnots = convertSpeedToKnots(sogValue, sogUnits);
+
+  // Deadband expands with reported jitter, but never below the 6m baseline.
+  let filterDeadbandMeters;
+  if (Number.isFinite(accuracyMeters)) {
+    filterDeadbandMeters = Math.max(
+      DEFAULT_DEADBAND_METERS,
+      accuracyMeters * ACCURACY_DEADBAND_MULTIPLIER
+    );
+  } else {
+    filterDeadbandMeters = DEFAULT_DEADBAND_METERS;
+  }
+
+  // Alpha adapts with vessel speed:
+  // - stationary: stronger smoothing
+  // - underway: more responsiveness
+  let filterAlpha = DEFAULT_FILTER_ALPHA;
+  if (Number.isFinite(sogKnots)) {
+    if (sogKnots < STATIONARY_SOG_THRESHOLD_KNOTS) {
+      filterDeadbandMeters = Math.max(filterDeadbandMeters, STATIONARY_DEADBAND_FLOOR_METERS);
+      filterAlpha = STATIONARY_FILTER_ALPHA;
+    } else if (sogKnots > UNDERWAY_SOG_THRESHOLD_KNOTS) {
+      filterAlpha = UNDERWAY_FILTER_ALPHA;
+    }
+  }
 
   let filteredBoatLat = rawBoatLat;
   let filteredBoatLon = rawBoatLon;
+  const previousFilteredBoatTime = anchor.filteredBoatPosition?.time;
+  const sourcePositionTime = appState.navigation?.position?.timestamp ?? new Date().toISOString();
+  let nextFilteredBoatTime = sourcePositionTime;
 
   if (
     Number.isFinite(previousFilteredBoatLat) &&
@@ -587,19 +680,46 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
       rawBoatLon
     );
 
-    if (
-      Number.isFinite(deltaFromPreviousFilteredMeters) &&
-      deltaFromPreviousFilteredMeters <= FILTER_DEADBAND_METERS
-    ) {
-      filteredBoatLat = previousFilteredBoatLat;
-      filteredBoatLon = previousFilteredBoatLon;
-    } else {
-      filteredBoatLat = previousFilteredBoatLat + ((rawBoatLat - previousFilteredBoatLat) * FILTER_ALPHA);
-      filteredBoatLon = previousFilteredBoatLon + ((rawBoatLon - previousFilteredBoatLon) * FILTER_ALPHA);
+    if (Number.isFinite(deltaFromPreviousFilteredMeters)) {
+      // Reject abrupt one-sample teleports from noisy fixes.
+      if (deltaFromPreviousFilteredMeters > JUMP_REJECTION_METERS) {
+        filteredBoatLat = previousFilteredBoatLat;
+        filteredBoatLon = previousFilteredBoatLon;
+      // Hold within deadband to remove normal anchor jitter.
+      } else if (deltaFromPreviousFilteredMeters <= filterDeadbandMeters) {
+        filteredBoatLat = previousFilteredBoatLat;
+        filteredBoatLon = previousFilteredBoatLon;
+      } else {
+        const previousFilteredBoatTimeMs = Date.parse(previousFilteredBoatTime);
+        const sourcePositionTimeMs = Date.parse(sourcePositionTime);
+
+        if (
+          Number.isFinite(previousFilteredBoatTimeMs) &&
+          Number.isFinite(sourcePositionTimeMs) &&
+          (sourcePositionTimeMs - previousFilteredBoatTimeMs) < MOVEMENT_PERSIST_MS
+        ) {
+          // Time hysteresis: movement must persist before accepting drift.
+          filteredBoatLat = previousFilteredBoatLat;
+          filteredBoatLon = previousFilteredBoatLon;
+        } else {
+          filteredBoatLat = previousFilteredBoatLat + ((rawBoatLat - previousFilteredBoatLat) * filterAlpha);
+          filteredBoatLon = previousFilteredBoatLon + ((rawBoatLon - previousFilteredBoatLon) * filterAlpha);
+        }
+      }
     }
   }
 
-  const filteredBoatPositionTime = appState.navigation?.position?.timestamp ?? new Date().toISOString();
+  const filteredPositionChanged =
+    !Number.isFinite(previousFilteredBoatLat) ||
+    !Number.isFinite(previousFilteredBoatLon) ||
+    previousFilteredBoatLat !== filteredBoatLat ||
+    previousFilteredBoatLon !== filteredBoatLon;
+
+  if (!filteredPositionChanged && typeof previousFilteredBoatTime === 'string') {
+    nextFilteredBoatTime = previousFilteredBoatTime;
+  }
+
+  const filteredBoatPositionTime = nextFilteredBoatTime;
   const nextFilteredBoatPosition = {
     ...(updatedAnchor.filteredBoatPosition || {}),
     position: {
@@ -758,9 +878,11 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
 
     if (dropLat != null && dropLon != null) {
       if (Number.isFinite(criticalRangeMeters) && !isMonitoringSuppressed) {
+        // Dragging detection is intentionally evaluated from raw position
+        // to stay responsive even when display filtering is stronger.
         const distanceBoatFromDrop = calculateDistance(
-          filteredBoatLat,
-          filteredBoatLon,
+          rawBoatLat,
+          rawBoatLon,
           dropLat,
           dropLon
         );
