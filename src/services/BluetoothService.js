@@ -342,6 +342,9 @@ export class BluetoothService extends ContinuousService {
       minRssi: -100,
       allowedTypes: null,
     },
+    maxConsecutiveEmptyScansBeforeRecovery: 6,
+    maxSoftRecoveriesBeforeAdapterRestart: 3,
+    adapterRecoveryCooldownMs: 5 * 60 * 1000,
   });
 
   /**
@@ -504,6 +507,9 @@ export class BluetoothService extends ContinuousService {
       debug = defaults.debug,
       logLevel = defaults.logLevel,
       stateManager = null,
+      maxConsecutiveEmptyScansBeforeRecovery = defaults.maxConsecutiveEmptyScansBeforeRecovery,
+      maxSoftRecoveriesBeforeAdapterRestart = defaults.maxSoftRecoveriesBeforeAdapterRestart,
+      adapterRecoveryCooldownMs = defaults.adapterRecoveryCooldownMs,
     } = options;
 
     // Initialize ContinuousService
@@ -517,6 +523,9 @@ export class BluetoothService extends ContinuousService {
     this.debug = debug;
     this.logLevel = logLevel;
     this.stateManager = stateManager; // Store the state manager reference
+    this.maxConsecutiveEmptyScansBeforeRecovery = maxConsecutiveEmptyScansBeforeRecovery;
+    this.maxSoftRecoveriesBeforeAdapterRestart = maxSoftRecoveriesBeforeAdapterRestart;
+    this.adapterRecoveryCooldownMs = adapterRecoveryCooldownMs;
 
     /** @type {DeviceFilterOptions} */
     this.filters = {
@@ -544,6 +553,13 @@ export class BluetoothService extends ContinuousService {
     this.deviceUpdates = new Map(); // Map of device ID -> device info
     this.lastDbUpdateTime = Date.now();
     this.dbUpdateInterval = 5000; // Update database every 5 seconds
+    this.currentScanDiscoveredDevices = 0;
+    this.lastDeviceDiscoveredAt = null;
+    this.hasEverDiscoveredDevice = false;
+    this.consecutiveEmptyScans = 0;
+    this.softRecoveryAttempts = 0;
+    this.lastAdapterRecoveryAt = 0;
+    this.emptyScanRecoveryInProgress = false;
 
     if (process.platform === "linux") {
       this.btReader = new PiBluetoothReaderPlugin({
@@ -1060,6 +1076,7 @@ export class BluetoothService extends ContinuousService {
     this.scanning = true;
     this.isStarting = false;
     this.lastScanStartedAt = Date.now();
+    this.currentScanDiscoveredDevices = 0;
     // No need to clear deviceUpdates as it's a Map that prevents duplicates by key
   }
 
@@ -1077,6 +1094,13 @@ export class BluetoothService extends ContinuousService {
     this.scanning = false;
     this.isStopping = false;
     this.lastScanStoppedAt = Date.now();
+
+    if (this.currentScanDiscoveredDevices > 0) {
+      this.consecutiveEmptyScans = 0;
+      this.softRecoveryAttempts = 0;
+    } else {
+      this.consecutiveEmptyScans += 1;
+    }
 
     // Process all device updates at the end of the scan cycle
     if (this.deviceUpdates.size > 0 && this.deviceManager) {
@@ -1132,7 +1156,204 @@ export class BluetoothService extends ContinuousService {
       }
     }
 
+    if (
+      this.hasEverDiscoveredDevice &&
+      this.currentScanDiscoveredDevices === 0 &&
+      this.consecutiveEmptyScans >= this.maxConsecutiveEmptyScansBeforeRecovery
+    ) {
+      this._recoverFromConsecutiveEmptyScans().catch((error) => {
+        this.logError(`Empty scan recovery failed: ${error.message}`);
+      });
+    }
+
     this.emit("scanStop");
+  }
+
+  async _recoverFromConsecutiveEmptyScans() {
+    if (this.emptyScanRecoveryInProgress) {
+      return;
+    }
+
+    this.emptyScanRecoveryInProgress = true;
+    try {
+      this.logError(
+        `Detected ${this.consecutiveEmptyScans} consecutive empty Bluetooth scans. Starting recovery.`
+      );
+
+      this.softRecoveryAttempts += 1;
+      await this._terminateLinuxScannerHelpers();
+
+      const canEscalateToAdapterRestart =
+        process.platform === "linux" &&
+        this.softRecoveryAttempts >= this.maxSoftRecoveriesBeforeAdapterRestart;
+
+      if (canEscalateToAdapterRestart) {
+        const now = Date.now();
+        const sinceLastRecovery = now - this.lastAdapterRecoveryAt;
+        if (
+          !Number.isFinite(this.lastAdapterRecoveryAt) ||
+          sinceLastRecovery >= this.adapterRecoveryCooldownMs
+        ) {
+          await this._restartLinuxBluetoothAdapter();
+          this.lastAdapterRecoveryAt = now;
+          this.softRecoveryAttempts = 0;
+        } else {
+          this.log(
+            `Skipping adapter restart due to cooldown (${sinceLastRecovery}ms < ${this.adapterRecoveryCooldownMs}ms).`,
+            "warn"
+          );
+        }
+      }
+
+      this.consecutiveEmptyScans = 0;
+    } finally {
+      this.emptyScanRecoveryInProgress = false;
+    }
+  }
+
+  async _terminateLinuxScannerHelpers() {
+    if (process.platform !== "linux") {
+      return;
+    }
+
+    try {
+      if (this.btReader && typeof this.btReader.stopScan === "function") {
+        await this.btReader.stopScan();
+      }
+    } catch (error) {
+      this.logError(`Error stopping Linux scanner helper: ${error.message}`);
+    }
+
+    await this._runCommandWithTimeout(
+      "pkill",
+      ["-f", "test_bluetooth_bluez_dbus.py"],
+      5000,
+      true
+    );
+  }
+
+  async _restartLinuxBluetoothAdapter() {
+    if (process.platform !== "linux") {
+      return;
+    }
+
+    this.logError(
+      "Escalating Bluetooth recovery: restarting Linux bluetooth adapter service"
+    );
+
+    const restartViaSudo = await this._runCommandWithTimeout(
+      "sudo",
+      ["-n", "systemctl", "restart", "bluetooth"],
+      20000,
+      true
+    );
+    if (restartViaSudo.exitCode !== 0) {
+      await this._runCommandWithTimeout(
+        "systemctl",
+        ["restart", "bluetooth"],
+        20000,
+        true
+      );
+    }
+
+    await this._runCommandWithTimeout(
+      "sudo",
+      ["-n", "btmgmt", "-i", "hci0", "power", "off"],
+      8000,
+      true
+    );
+    await this._runCommandWithTimeout(
+      "sudo",
+      ["-n", "btmgmt", "-i", "hci0", "power", "on"],
+      8000,
+      true
+    );
+  }
+
+  async _runCommandWithTimeout(command, args, timeoutMs, allowFailure = false) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let stderr = "";
+
+      const child = spawn(command, args, {
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+
+      const timeout = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // Ignore kill errors during timeout handling
+        }
+
+        const timeoutError = new Error(
+          `Command timed out: ${command} ${(args || []).join(" ")}`
+        );
+        if (allowFailure) {
+          this.logError(timeoutError.message);
+          resolve({ exitCode: -1, stderr: timeoutError.message });
+          return;
+        }
+        reject(timeoutError);
+      }, timeoutMs);
+
+      if (child.stderr) {
+        child.stderr.on("data", (chunk) => {
+          if (typeof chunk === "string") {
+            stderr += chunk;
+          } else if (Buffer.isBuffer(chunk)) {
+            stderr += chunk.toString("utf8");
+          }
+        });
+      }
+
+      child.on("error", (error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        if (allowFailure) {
+          this.logError(
+            `Command failed: ${command} ${(args || []).join(" ")} (${error.message})`
+          );
+          resolve({ exitCode: -1, stderr: error.message });
+          return;
+        }
+        reject(error);
+      });
+
+      child.on("close", (code) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+
+        const exitCode = Number.isFinite(code) ? code : -1;
+        if (exitCode !== 0 && !allowFailure) {
+          reject(
+            new Error(
+              `Command failed (${exitCode}): ${command} ${(args || []).join(" ")} ${stderr}`
+            )
+          );
+          return;
+        }
+
+        if (exitCode !== 0 && allowFailure) {
+          this.logError(
+            `Command returned ${exitCode}: ${command} ${(args || []).join(" ")} ${stderr}`
+          );
+        }
+
+        resolve({ exitCode, stderr: stderr.trim() });
+      });
+    });
   }
 
   /**
@@ -1447,6 +1668,9 @@ export class BluetoothService extends ContinuousService {
       }
 
       // Update device in device manager
+      this.currentScanDiscoveredDevices += 1;
+      this.lastDeviceDiscoveredAt = Date.now();
+      this.hasEverDiscoveredDevice = true;
       await this.deviceManager.registerDevice(deviceInfo.id, deviceInfo);
       
       // Check if device is in selectedDevices Set
