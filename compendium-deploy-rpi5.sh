@@ -123,8 +123,10 @@ TARGET_VERSION="${COMPENDIUM_VERSION:-latest}"
 # Default ports
 DEFAULT_HTTP_PORT=8080
 DEFAULT_WS_PORT=3009
+DEFAULT_NATS_PORT=4222
 HTTP_PORT=$DEFAULT_HTTP_PORT
 WS_PORT=$DEFAULT_WS_PORT
+NATS_PORT=$DEFAULT_NATS_PORT
 
 # Raspberry Pi specific configuration
 DISABLE_BLUETOOTH="${DISABLE_BLUETOOTH:-false}"
@@ -137,6 +139,58 @@ check_root() {
         echo -e "${YELLOW}Running as non-root user. Some operations may require sudo privileges.${NC}"
         return 1
     fi
+    return 0
+}
+
+# Setup NATS service
+setup_nats_service() {
+    echo -e "${BLUE}Setting up NATS server service...${NC}"
+
+    if ! command_exists nats-server; then
+        echo -e "${YELLOW}nats-server binary is not installed. Skipping NATS service setup.${NC}" >&2
+        return 1
+    fi
+
+    run_with_sudo mkdir -p /etc/nats /var/lib/nats/jetstream
+    if id nats >/dev/null 2>&1; then
+        run_with_sudo chown -R nats:nats /var/lib/nats
+    fi
+
+    local nats_config_file="/etc/nats/nats-server.conf"
+    local temp_nats_config_file="/tmp/nats-server.conf.$$"
+
+    cat > "$temp_nats_config_file" << EOF
+port: $NATS_PORT
+http: 127.0.0.1:8222
+server_name: compendium-nats
+
+jetstream {
+  store_dir: /var/lib/nats/jetstream
+}
+EOF
+
+    run_with_sudo cp "$temp_nats_config_file" "$nats_config_file"
+    run_with_sudo chmod 644 "$nats_config_file"
+    rm -f "$temp_nats_config_file"
+
+    local nats_service=""
+    if systemctl list-unit-files | grep -q "^nats-server.service"; then
+        nats_service="nats-server.service"
+    elif systemctl list-unit-files | grep -q "^nats.service"; then
+        nats_service="nats.service"
+    fi
+
+    if [ -z "$nats_service" ]; then
+        echo -e "${YELLOW}Could not find a NATS systemd service unit. Configure it manually.${NC}" >&2
+        return 1
+    fi
+
+    run_with_sudo systemctl daemon-reload
+    run_with_sudo systemctl enable "$nats_service"
+    run_with_sudo systemctl restart "$nats_service"
+
+    echo -e "${GREEN}NATS service configured and running on port $NATS_PORT${NC}"
+    run_with_sudo systemctl status "$nats_service" --no-pager || true
     return 0
 }
 
@@ -305,13 +359,19 @@ initialize_ports() {
     echo -e "${BLUE}Checking port availability...${NC}"
     HTTP_PORT=$(find_available_port $DEFAULT_HTTP_PORT)
     WS_PORT=$(find_available_port $DEFAULT_WS_PORT)
+    NATS_PORT=$(find_available_port $DEFAULT_NATS_PORT)
     
     if [ "$HTTP_PORT" -eq "$WS_PORT" ]; then
         WS_PORT=$((WS_PORT+1))
         echo -e "${YELLOW}Adjusted WebSocket port to $WS_PORT to avoid conflict with HTTP port${NC}"
     fi
+
+    if [ "$NATS_PORT" -eq "$HTTP_PORT" ] || [ "$NATS_PORT" -eq "$WS_PORT" ]; then
+        NATS_PORT=$(find_available_port $((NATS_PORT+1)))
+        echo -e "${YELLOW}Adjusted NATS port to $NATS_PORT to avoid conflict with HTTP/WebSocket ports${NC}"
+    fi
     
-    echo -e "${GREEN}Using ports - HTTP: $HTTP_PORT, WebSocket: $WS_PORT${NC}"
+    echo -e "${GREEN}Using ports - HTTP: $HTTP_PORT, WebSocket: $WS_PORT, NATS: $NATS_PORT${NC}"
 }
 
 # Validate configuration
@@ -328,11 +388,21 @@ validate_config() {
         echo -e "${YELLOW}WebSocket port $WS_PORT is in use, will find another port${NC}"
         WS_PORT=$(find_available_port $WS_PORT)
     fi
+
+    if ! is_port_available $NATS_PORT; then
+        echo -e "${YELLOW}NATS port $NATS_PORT is in use, will find another port${NC}"
+        NATS_PORT=$(find_available_port $NATS_PORT)
+    fi
     
     # Ensure ports are different
     if [ "$HTTP_PORT" -eq "$WS_PORT" ]; then
         WS_PORT=$((WS_PORT+1))
         echo -e "${YELLOW}Adjusted WebSocket port to $WS_PORT to avoid conflict with HTTP port${NC}"
+    fi
+
+    if [ "$NATS_PORT" -eq "$HTTP_PORT" ] || [ "$NATS_PORT" -eq "$WS_PORT" ]; then
+        NATS_PORT=$(find_available_port $((NATS_PORT+1)))
+        echo -e "${YELLOW}Adjusted NATS port to $NATS_PORT to avoid conflict with HTTP/WebSocket ports${NC}"
     fi
     
     echo -e "${GREEN}Configuration validated${NC}"
@@ -385,6 +455,7 @@ install_dependencies() {
         build-essential
         python3
         python3-pip
+        nats-server
         libavahi-compat-libdnssd-dev
         libudev-dev
         libusb-1.0-0-dev
@@ -529,6 +600,12 @@ verify_repository() {
     set_env_var "MDNS_NAME" "$(hostname 2>/dev/null || echo "compendium")"
     set_env_var "MDNS_DOMAIN" "local"
     set_env_var "MDNS_SERVICE" "_compendium._tcp"
+
+    # NATS configuration
+    set_env_var "NATS_ENABLED" "true"
+    set_env_var "NATS_HOST" "127.0.0.1"
+    set_env_var "NATS_PORT" "$NATS_PORT"
+    set_env_var "NATS_URL" "nats://127.0.0.1:$NATS_PORT"
     
     # Log level
     set_env_var "LOG_LEVEL" "info"
@@ -1075,6 +1152,9 @@ configure_firewall() {
             if run_with_sudo ufw allow "$WS_PORT/tcp" 2>/dev/null; then
                 echo -e "${GREEN}Firewall configured to allow port $WS_PORT (WebSocket)${NC}"
             fi
+            if run_with_sudo ufw allow "$NATS_PORT/tcp" 2>/dev/null; then
+                echo -e "${GREEN}Firewall configured to allow port $NATS_PORT (NATS)${NC}"
+            fi
         # Check if firewalld is available
         elif command -v firewall-cmd >/dev/null 2>&1; then
             echo -e "${BLUE}Configuring firewalld...${NC}"
@@ -1086,6 +1166,10 @@ configure_firewall() {
                 run_with_sudo firewall-cmd --reload
                 echo -e "${GREEN}Firewall configured to allow port $WS_PORT (WebSocket)${NC}"
             fi
+            if run_with_sudo firewall-cmd --permanent --add-port="$NATS_PORT/tcp" 2>/dev/null; then
+                run_with_sudo firewall-cmd --reload
+                echo -e "${GREEN}Firewall configured to allow port $NATS_PORT (NATS)${NC}"
+            fi
         fi
     fi
     
@@ -1093,6 +1177,7 @@ configure_firewall() {
     echo -e "\n${YELLOW}IMPORTANT: Ensure the following ports are open in your firewall:${NC}"
     echo -e "- Port $HTTP_PORT/tcp (HTTP)"
     echo -e "- Port $WS_PORT/tcp (WebSocket)"
+    echo -e "- Port $NATS_PORT/tcp (NATS)"
     echo -e "\n${YELLOW}If you're behind a router, you may need to configure port forwarding.${NC}"
 }
 
@@ -1665,10 +1750,15 @@ install() {
         echo -e "${BLUE}Installing dotenv...${NC}"
         npm install dotenv
     fi
-    
+
     # Setup user systemd service
     if ! setup_systemd_service; then
         echo -e "${YELLOW}Warning: There were issues setting up the systemd service.${NC}" >&2
+    fi
+
+    # Setup NATS service
+    if ! setup_nats_service; then
+        echo -e "${YELLOW}Warning: There were issues setting up the NATS service.${NC}" >&2
     fi
     
     # Configure firewall (just informs user about required ports)
@@ -1696,8 +1786,11 @@ install() {
     echo -e "\n${YELLOW}To manage the service:${NC}"
     echo -e "  systemctl --user status compendium.service"
     echo -e "  systemctl --user restart compendium.service"
+    echo -e "  sudo systemctl status nats-server.service || sudo systemctl status nats.service"
+    echo -e "  sudo systemctl restart nats-server.service || sudo systemctl restart nats.service"
     echo -e "\n${YELLOW}To view logs:${NC}"
     echo -e "  journalctl --user -u compendium -f"
+    echo -e "  sudo journalctl -u nats-server -f || sudo journalctl -u nats -f"
     
     return 0
 }
@@ -1813,6 +1906,9 @@ update() {
         echo -e "${BLUE}Installing dotenv...${NC}"
         npm install dotenv
     fi
+
+    configure_environment || true
+    setup_nats_service || true
     
     # Set main server file path
     local main_server_file="src/mainServer.js"
