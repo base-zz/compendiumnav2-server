@@ -438,6 +438,9 @@ verify_repository() {
     set_env_var "NATS_HOST" "127.0.0.1"
     set_env_var "NATS_PORT" "$NATS_PORT"
     set_env_var "NATS_URL" "nats://127.0.0.1:$NATS_PORT"
+    set_env_var "NATS_STATE_SUBJECT_PREFIX" "state"
+    set_env_var "NATS_BROADCAST_KEYS" "position,environment,vessel,anchor,alerts,tides,forecast,bluetooth"
+    set_env_var "NATS_STATE_PATCH_SUBJECT" "state.patch"
     
     # Log level
     set_env_var "LOG_LEVEL" "info"

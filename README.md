@@ -16,6 +16,9 @@
   - `NATS_HOST=127.0.0.1`
   - `NATS_PORT=<selected-port>`
   - `NATS_URL=nats://127.0.0.1:<selected-port>`
+  - `NATS_STATE_SUBJECT_PREFIX=state`
+  - `NATS_BROADCAST_KEYS=position,environment,vessel,anchor,alerts,tides,forecast,bluetooth`
+  - `NATS_STATE_PATCH_SUBJECT=state.patch` (optional full patch stream)
 
 ### Service management on Pi
 
@@ -33,6 +36,9 @@
   - `NATS_HOST`
   - `NATS_PORT`
   - `NATS_URL`
+  - `NATS_STATE_SUBJECT_PREFIX`
+  - `NATS_BROADCAST_KEYS`
+  - `NATS_STATE_PATCH_SUBJECT`
 - Confirm listener on configured port:
   - `ss -ltn | grep ":4222"`
   - If your script selected a different port, replace `4222` with that value from `.env`.
