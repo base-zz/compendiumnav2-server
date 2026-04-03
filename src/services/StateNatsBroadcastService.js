@@ -217,27 +217,28 @@ export class StateNatsBroadcastService extends BaseService {
   }
 
   _seedBridgeCache() {
+    console.log('[StateNatsBroadcastService] _seedBridgeCache() called');
     if (!this._stateManager) {
-      this.log('Bridge: No state manager available');
+      console.log('[StateNatsBroadcastService] Bridge: No state manager available');
       return;
     }
 
     const state = this._stateManager.getState();
     if (!state) {
-      this.log('Bridge: No state available');
+      console.log('[StateNatsBroadcastService] Bridge: No state available');
       return;
     }
 
-    this.log(`Bridge: Seeding cache with keys: ${this.bridgeKeys.join(', ')}`);
+    console.log(`[StateNatsBroadcastService] Bridge: Seeding cache with keys: ${this.bridgeKeys.join(', ')}`);
     for (const key of this.bridgeKeys) {
       if (state[key]) {
         this._bridgeCache[key] = state[key];
-        this.log(`Bridge: Cached ${key}`);
+        console.log(`[StateNatsBroadcastService] Bridge: Cached ${key}`);
       } else {
-        this.log(`Bridge: Key ${key} not in state`);
+        console.log(`[StateNatsBroadcastService] Bridge: Key ${key} not in state`);
       }
     }
-    this.log(`Bridge: Cache after seed: ${JSON.stringify(Object.keys(this._bridgeCache))}`);
+    console.log(`[StateNatsBroadcastService] Bridge: Cache after seed: ${JSON.stringify(Object.keys(this._bridgeCache))}`);
   }
 
   _cacheBridgeData(topLevelKey, path, value) {
