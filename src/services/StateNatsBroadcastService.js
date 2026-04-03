@@ -128,14 +128,16 @@ export class StateNatsBroadcastService extends BaseService {
     }
 
     // Start periodic publishing for forecast (every 15 min)
-    if (this.bridgeEnabled && this._bridgeCache.forecast) {
+    // Always start interval - it will check for data availability internally
+    if (this.bridgeEnabled) {
       this._forecastInterval = setInterval(() => {
         this._publishForecast();
       }, 15 * 60 * 1000); // 15 minutes
     }
 
     // Start periodic publishing for tides (every 15 min)
-    if (this.bridgeEnabled && this._bridgeCache.tides) {
+    // Always start interval - it will check for data availability internally
+    if (this.bridgeEnabled) {
       this._tidesInterval = setInterval(() => {
         this._publishTides();
       }, 15 * 60 * 1000); // 15 minutes
@@ -199,8 +201,28 @@ export class StateNatsBroadcastService extends BaseService {
   }
 
   _cacheBridgeData(topLevelKey, path, value) {
-    // Store data by top-level key
-    this._bridgeCache[topLevelKey] = value;
+    // Parse the path to build nested structure
+    // path format: "/navigation/depth/belowTransducer/value"
+    const pathParts = path.split('/').filter(p => p);
+    
+    // Initialize the top-level object if not exists
+    if (!this._bridgeCache[topLevelKey]) {
+      this._bridgeCache[topLevelKey] = {};
+    }
+    
+    // Navigate/build the nested structure
+    let current = this._bridgeCache[topLevelKey];
+    for (let i = 1; i < pathParts.length - 1; i++) {
+      const part = pathParts[i];
+      if (!current[part]) {
+        current[part] = {};
+      }
+      current = current[part];
+    }
+    
+    // Set the final value
+    const finalKey = pathParts[pathParts.length - 1];
+    current[finalKey] = value;
   }
 
   _publishBridge() {
@@ -235,6 +257,9 @@ export class StateNatsBroadcastService extends BaseService {
         this.bridgeSubject,
         this._codec.encode(JSON.stringify(payload))
       );
+      this.log(`Published bridge message to ${this.bridgeSubject}`);
+    } else {
+      this.log('Bridge has no data to publish yet');
     }
   }
 
