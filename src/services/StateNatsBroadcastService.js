@@ -11,11 +11,23 @@ export class StateNatsBroadcastService extends BaseService {
     this.fullPatchSubject = options.fullPatchSubject;
     this.natsUrl = options.natsUrl;
     this.serverName = options.serverName;
+    this.boatId = options.boatId || "unknown";
+
+    this.bridgeEnabled = options.bridgeEnabled || false;
+    this.bridgeSubject = options.bridgeSubject || "state.bridge";
+    this.bridgeIntervalMs = options.bridgeIntervalMs || 5000;
+    this.bridgeKeys = options.bridgeKeys || ["position", "navigation", "forecast", "tides"];
 
     this._connection = null;
     this._codec = StringCodec();
     this._stateManager = null;
     this._statePatchHandler = null;
+
+    // Bridge cache for aggregated publishing
+    this._bridgeCache = {};
+    this._bridgeInterval = null;
+    this._forecastInterval = null;
+    this._tidesInterval = null;
   }
 
   async start() {
@@ -82,6 +94,11 @@ export class StateNatsBroadcastService extends BaseService {
           continue;
         }
 
+        // Cache data for bridge if enabled
+        if (this.bridgeEnabled && this.bridgeKeys.includes(topLevelKey)) {
+          this._cacheBridgeData(topLevelKey, patch.path, patch.value);
+        }
+
         if (!this.broadcastKeys.includes(topLevelKey)) {
           continue;
         }
@@ -89,6 +106,7 @@ export class StateNatsBroadcastService extends BaseService {
         touchedKeys.add(topLevelKey);
       }
 
+      // Publish per-key routing (original behavior)
       for (const key of touchedKeys) {
         const subject = `${this.subjectPrefix}.${key}`;
         this._connection.publish(subject, this._codec.encode(JSON.stringify(payload)));
@@ -101,15 +119,55 @@ export class StateNatsBroadcastService extends BaseService {
 
     this._stateManager.on("state:patch", this._statePatchHandler);
 
+    // Start periodic publishing for bridge (position/depth/wind)
+    if (this.bridgeEnabled) {
+      this._seedBridgeCache();
+      this._bridgeInterval = setInterval(() => {
+        this._publishBridge();
+      }, this.bridgeIntervalMs);
+    }
+
+    // Start periodic publishing for forecast (every 15 min)
+    if (this.bridgeEnabled && this._bridgeCache.forecast) {
+      this._forecastInterval = setInterval(() => {
+        this._publishForecast();
+      }, 15 * 60 * 1000); // 15 minutes
+    }
+
+    // Start periodic publishing for tides (every 15 min)
+    if (this.bridgeEnabled && this._bridgeCache.tides) {
+      this._tidesInterval = setInterval(() => {
+        this._publishTides();
+      }, 15 * 60 * 1000); // 15 minutes
+    }
+
     await super.start();
-    this.log(
-      `Broadcasting state patches to NATS subjects '${this.subjectPrefix}.<key>' via ${this.natsUrl}`
-    );
+
+    let logMsg = `Broadcasting state patches to NATS subjects '${this.subjectPrefix}.<key>' via ${this.natsUrl}`;
+    if (this.bridgeEnabled) {
+      logMsg += `; bridge aggregator to '${this.bridgeSubject}' every ${this.bridgeIntervalMs}ms`;
+    }
+    this.log(logMsg);
   }
 
   async stop() {
     if (!this.isRunning) {
       return;
+    }
+
+    if (this._bridgeInterval) {
+      clearInterval(this._bridgeInterval);
+      this._bridgeInterval = null;
+    }
+
+    if (this._forecastInterval) {
+      clearInterval(this._forecastInterval);
+      this._forecastInterval = null;
+    }
+
+    if (this._tidesInterval) {
+      clearInterval(this._tidesInterval);
+      this._tidesInterval = null;
     }
 
     if (this._stateManager && this._statePatchHandler) {
@@ -125,6 +183,93 @@ export class StateNatsBroadcastService extends BaseService {
     }
 
     await super.stop();
+  }
+
+  _seedBridgeCache() {
+    if (!this._stateManager) return;
+
+    const state = this._stateManager.getState();
+    if (!state) return;
+
+    for (const key of this.bridgeKeys) {
+      if (state[key]) {
+        this._bridgeCache[key] = state[key];
+      }
+    }
+  }
+
+  _cacheBridgeData(topLevelKey, path, value) {
+    // Store data by top-level key
+    this._bridgeCache[topLevelKey] = value;
+  }
+
+  _publishBridge() {
+    if (!this._connection) return;
+
+    const payload = {
+      type: "state:bridge",
+      boatId: this.boatId,
+      timestamp: Date.now(),
+      data: {},
+    };
+
+    // Bridge contains only rapidly changing data
+    // Position is top-level in state
+    if (this._bridgeCache.position) {
+      payload.data.position = this._bridgeCache.position;
+    }
+
+    // Depth is under navigation
+    if (this._bridgeCache.navigation?.depth) {
+      payload.data.depth = this._bridgeCache.navigation.depth;
+    }
+
+    // Wind is under navigation
+    if (this._bridgeCache.navigation?.wind) {
+      payload.data.wind = this._bridgeCache.navigation.wind;
+    }
+
+    // Only publish if we have data
+    if (Object.keys(payload.data).length > 0) {
+      this._connection.publish(
+        this.bridgeSubject,
+        this._codec.encode(JSON.stringify(payload))
+      );
+    }
+  }
+
+  _publishForecast() {
+    if (!this._connection) return;
+    if (!this._bridgeCache.forecast) return;
+
+    const payload = {
+      type: "state:forecast",
+      boatId: this.boatId,
+      timestamp: Date.now(),
+      data: this._bridgeCache.forecast,
+    };
+
+    this._connection.publish(
+      `${this.subjectPrefix}.forecast`,
+      this._codec.encode(JSON.stringify(payload))
+    );
+  }
+
+  _publishTides() {
+    if (!this._connection) return;
+    if (!this._bridgeCache.tides) return;
+
+    const payload = {
+      type: "state:tides",
+      boatId: this.boatId,
+      timestamp: Date.now(),
+      data: this._bridgeCache.tides,
+    };
+
+    this._connection.publish(
+      `${this.subjectPrefix}.tides`,
+      this._codec.encode(JSON.stringify(payload))
+    );
   }
 }
 

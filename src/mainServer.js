@@ -228,10 +228,15 @@ function buildServiceManifest() {
             broadcastKeys: natsBroadcastKeys,
             fullPatchSubject: natsStatePatchSubject,
             serverName: natsClientName,
+            boatId: getBoatInfo().boatId,
+            bridgeEnabled: process.env.NATS_BRIDGE_ENABLED === "true",
+            bridgeSubject: process.env.NATS_BRIDGE_SUBJECT || "state.bridge",
+            bridgeIntervalMs: parseInt(process.env.NATS_BRIDGE_INTERVAL_MS || "5000", 10),
+            bridgeKeys: process.env.NATS_BRIDGE_KEYS?.split(",").map(k => k.trim()).filter(Boolean) || ["position", "navigation", "forecast", "tides"],
           }),
       });
       startupLog(
-        "[SERVER] buildServiceManifest(): added state-nats-broadcast service"
+        "[SERVER] buildServiceManifest(): added state-nats-broadcast service (with bridge support)"
       );
     }
   }
