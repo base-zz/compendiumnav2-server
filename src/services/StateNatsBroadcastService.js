@@ -125,22 +125,23 @@ export class StateNatsBroadcastService extends BaseService {
       this._bridgeInterval = setInterval(() => {
         this._publishBridge();
       }, this.bridgeIntervalMs);
+      this.log(`Started bridge interval: every ${this.bridgeIntervalMs}ms to ${this.bridgeSubject}`);
     }
 
     // Start periodic publishing for forecast (every 15 min)
-    // Always start interval - it will check for data availability internally
     if (this.bridgeEnabled) {
       this._forecastInterval = setInterval(() => {
         this._publishForecast();
-      }, 15 * 60 * 1000); // 15 minutes
+      }, 15 * 60 * 1000);
+      this.log(`Started forecast interval: every 15min to ${this.subjectPrefix}.forecast`);
     }
 
     // Start periodic publishing for tides (every 15 min)
-    // Always start interval - it will check for data availability internally
     if (this.bridgeEnabled) {
       this._tidesInterval = setInterval(() => {
         this._publishTides();
-      }, 15 * 60 * 1000); // 15 minutes
+      }, 15 * 60 * 1000);
+      this.log(`Started tides interval: every 15min to ${this.subjectPrefix}.tides`);
     }
 
     await super.start();
@@ -188,16 +189,27 @@ export class StateNatsBroadcastService extends BaseService {
   }
 
   _seedBridgeCache() {
-    if (!this._stateManager) return;
+    if (!this._stateManager) {
+      this.log('Bridge: No state manager available');
+      return;
+    }
 
     const state = this._stateManager.getState();
-    if (!state) return;
+    if (!state) {
+      this.log('Bridge: No state available');
+      return;
+    }
 
+    this.log(`Bridge: Seeding cache with keys: ${this.bridgeKeys.join(', ')}`);
     for (const key of this.bridgeKeys) {
       if (state[key]) {
         this._bridgeCache[key] = state[key];
+        this.log(`Bridge: Cached ${key}`);
+      } else {
+        this.log(`Bridge: Key ${key} not in state`);
       }
     }
+    this.log(`Bridge: Cache after seed: ${JSON.stringify(Object.keys(this._bridgeCache))}`);
   }
 
   _cacheBridgeData(topLevelKey, path, value) {
@@ -226,7 +238,16 @@ export class StateNatsBroadcastService extends BaseService {
   }
 
   _publishBridge() {
-    if (!this._connection) return;
+    if (!this._connection) {
+      this.log('Bridge: No NATS connection');
+      return;
+    }
+
+    this.log(`Bridge: Cache keys: ${JSON.stringify(Object.keys(this._bridgeCache))}`);
+    this.log(`Bridge: Has position: ${!!this._bridgeCache.position}, navigation: ${!!this._bridgeCache.navigation}`);
+    if (this._bridgeCache.navigation) {
+      this.log(`Bridge: navigation.depth: ${!!this._bridgeCache.navigation?.depth}, navigation.wind: ${!!this._bridgeCache.navigation?.wind}`);
+    }
 
     const payload = {
       type: "state:bridge",
