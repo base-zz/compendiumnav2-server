@@ -253,11 +253,12 @@ export class StateNatsBroadcastService extends BaseService {
 
     // Only publish if we have data
     if (Object.keys(payload.data).length > 0) {
+      const encodedPayload = this._codec.encode(JSON.stringify(payload));
       this._connection.publish(
         this.bridgeSubject,
-        this._codec.encode(JSON.stringify(payload))
+        encodedPayload
       );
-      this.log(`Published bridge message to ${this.bridgeSubject}`);
+      this.log(`Published bridge message to ${this.bridgeSubject}: ${JSON.stringify(payload)}`);
     } else {
       this.log('Bridge has no data to publish yet');
     }
@@ -274,10 +275,12 @@ export class StateNatsBroadcastService extends BaseService {
       data: this._bridgeCache.forecast,
     };
 
+    const encodedPayload = this._codec.encode(JSON.stringify(payload));
     this._connection.publish(
       `${this.subjectPrefix}.forecast`,
-      this._codec.encode(JSON.stringify(payload))
+      encodedPayload
     );
+    this.log(`Published forecast message to ${this.subjectPrefix}.forecast: ${JSON.stringify(payload)}`);
   }
 
   _publishTides() {
@@ -291,10 +294,12 @@ export class StateNatsBroadcastService extends BaseService {
       data: this._bridgeCache.tides,
     };
 
+    const encodedPayload = this._codec.encode(JSON.stringify(payload));
     this._connection.publish(
       `${this.subjectPrefix}.tides`,
-      this._codec.encode(JSON.stringify(payload))
+      encodedPayload
     );
+    this.log(`Published tides message to ${this.subjectPrefix}.tides: ${JSON.stringify(payload)}`);
   }
 }
 
