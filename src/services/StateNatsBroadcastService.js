@@ -34,7 +34,7 @@ export class StateNatsBroadcastService extends BaseService {
   }
 
   async start() {
-    console.log(`[StateNatsBroadcastService] START called - isRunning=${this.isRunning}, natsUrl=${this.natsUrl}`);
+    console.log(`[StateNatsBroadcastService] START called - isRunning=${this.isRunning}, natsUrl=${this.natsUrl}, subjectPrefix=${this.subjectPrefix}`);
     
     if (this.isRunning) {
       console.log('[StateNatsBroadcastService] Already running, returning');
@@ -42,18 +42,21 @@ export class StateNatsBroadcastService extends BaseService {
     }
 
     if (!this.natsUrl) {
+      console.error('[StateNatsBroadcastService] ERROR: natsUrl is missing');
       throw new Error(
         "StateNatsBroadcastService requires NATS_URL to be defined"
       );
     }
 
     if (!this.subjectPrefix) {
+      console.error('[StateNatsBroadcastService] ERROR: subjectPrefix is missing');
       throw new Error(
         "StateNatsBroadcastService requires NATS_STATE_SUBJECT_PREFIX to be defined"
       );
     }
 
     if (!Array.isArray(this.broadcastKeys) || this.broadcastKeys.length === 0) {
+      console.error('[StateNatsBroadcastService] ERROR: broadcastKeys is empty or not an array:', this.broadcastKeys);
       throw new Error(
         "StateNatsBroadcastService requires NATS_BROADCAST_KEYS to be defined"
       );
@@ -61,11 +64,14 @@ export class StateNatsBroadcastService extends BaseService {
 
     this._stateManager = getStateManager();
     if (!this._stateManager) {
+      console.error('[StateNatsBroadcastService] ERROR: No state manager available');
       throw new Error(
         "StateNatsBroadcastService requires a StateManager instance"
       );
     }
 
+    console.log('[StateNatsBroadcastService] Connecting to NATS...');
+    
     const connectionConfig = {
       servers: this.natsUrl,
     };
@@ -73,7 +79,13 @@ export class StateNatsBroadcastService extends BaseService {
       connectionConfig.name = this.serverName;
     }
 
-    this._connection = await connect(connectionConfig);
+    try {
+      this._connection = await connect(connectionConfig);
+      console.log('[StateNatsBroadcastService] NATS connection established');
+    } catch (err) {
+      console.error('[StateNatsBroadcastService] ERROR connecting to NATS:', err);
+      throw err;
+    }
 
     this._statePatchHandler = (event) => {
       if (!event || !this._connection) {
