@@ -87,6 +87,8 @@ export class StateNatsBroadcastService extends BaseService {
       throw err;
     }
 
+    console.log('[StateNatsBroadcastService] Setting up state patch handler...');
+
     this._statePatchHandler = (event) => {
       if (!event || !this._connection) {
         return;
@@ -136,9 +138,12 @@ export class StateNatsBroadcastService extends BaseService {
     };
 
     this._stateManager.on("state:patch", this._statePatchHandler);
+    console.log('[StateNatsBroadcastService] State patch handler registered');
 
     // Start periodic publishing for bridge (position/depth/wind)
+    console.log(`[StateNatsBroadcastService] Checking bridgeEnabled: ${this.bridgeEnabled}`);
     if (this.bridgeEnabled) {
+      console.log('[StateNatsBroadcastService] Starting bridge intervals...');
       this._seedBridgeCache();
       this._bridgeInterval = setInterval(() => {
         this._publishBridge();
@@ -148,6 +153,7 @@ export class StateNatsBroadcastService extends BaseService {
 
     // Start periodic publishing for forecast (every 15 min)
     if (this.bridgeEnabled) {
+      console.log('[StateNatsBroadcastService] Starting forecast interval...');
       this._forecastInterval = setInterval(() => {
         this._publishForecast();
       }, 15 * 60 * 1000);
@@ -156,13 +162,17 @@ export class StateNatsBroadcastService extends BaseService {
 
     // Start periodic publishing for tides (every 15 min)
     if (this.bridgeEnabled) {
+      console.log('[StateNatsBroadcastService] Starting tides interval...');
       this._tidesInterval = setInterval(() => {
         this._publishTides();
       }, 15 * 60 * 1000);
       this.log(`Started tides interval: every 15min to ${this.subjectPrefix}.tides`);
     }
 
+    console.log('[StateNatsBroadcastService] Calling super.start()...');
     await super.start();
+
+    console.log('[StateNatsBroadcastService] super.start() completed, isRunning=' + this.isRunning);
 
     let logMsg = `Broadcasting state patches to NATS subjects '${this.subjectPrefix}.<key>' via ${this.natsUrl}`;
     if (this.bridgeEnabled) {
