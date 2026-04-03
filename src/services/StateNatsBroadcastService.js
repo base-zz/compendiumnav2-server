@@ -28,10 +28,16 @@ export class StateNatsBroadcastService extends BaseService {
     this._bridgeInterval = null;
     this._forecastInterval = null;
     this._tidesInterval = null;
+
+    // Log constructor to verify instantiation
+    console.log(`[StateNatsBroadcastService] CONSTRUCTOR called - bridgeEnabled=${this.bridgeEnabled}, bridgeSubject=${this.bridgeSubject}, natsUrl=${this.natsUrl}`);
   }
 
   async start() {
+    console.log(`[StateNatsBroadcastService] START called - isRunning=${this.isRunning}, natsUrl=${this.natsUrl}`);
+    
     if (this.isRunning) {
+      console.log('[StateNatsBroadcastService] Already running, returning');
       return;
     }
 
