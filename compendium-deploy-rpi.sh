@@ -817,6 +817,8 @@ setup_nats_service() {
 
     local nats_config_file="/etc/nats/nats-server.conf"
     local temp_nats_config_file="/tmp/nats-server.conf.$$"
+    local repo_nats_service_file="${APP_DIR}/deploy/systemd/nats-server.service"
+    local system_nats_service_file="/etc/systemd/system/nats-server.service"
 
     cat > "$temp_nats_config_file" << EOF
 port: $NATS_PORT
@@ -832,24 +834,29 @@ EOF
     run_with_sudo chmod 644 "$nats_config_file"
     rm -f "$temp_nats_config_file"
 
-    local nats_service=""
-    if systemctl list-unit-files | grep -q "^nats-server.service"; then
-        nats_service="nats-server.service"
-    elif systemctl list-unit-files | grep -q "^nats.service"; then
-        nats_service="nats.service"
-    fi
-
-    if [ -z "$nats_service" ]; then
-        echo -e "${YELLOW}Could not find a NATS systemd service unit. Configure it manually.${NC}" >&2
+    if [ ! -f "$repo_nats_service_file" ]; then
+        echo -e "${YELLOW}Missing versioned NATS service file at $repo_nats_service_file${NC}" >&2
         return 1
     fi
 
+    run_with_sudo cp "$repo_nats_service_file" "$system_nats_service_file"
+    run_with_sudo chmod 644 "$system_nats_service_file"
+
     run_with_sudo systemctl daemon-reload
-    run_with_sudo systemctl enable "$nats_service"
-    run_with_sudo systemctl restart "$nats_service"
+    run_with_sudo systemctl enable nats-server.service
+    run_with_sudo systemctl restart nats-server.service
 
     echo -e "${GREEN}NATS service configured and running on port $NATS_PORT${NC}"
-    run_with_sudo systemctl status "$nats_service" --no-pager || true
+    run_with_sudo systemctl status nats-server.service --no-pager || true
+
+    if command_exists nc; then
+        if ! nc -z 127.0.0.1 "$NATS_PORT"; then
+            echo -e "${YELLOW}NATS health check failed on 127.0.0.1:$NATS_PORT${NC}" >&2
+            return 1
+        fi
+    fi
+
+    echo -e "${GREEN}NATS health check passed (127.0.0.1:$NATS_PORT)${NC}"
     return 0
 }
 

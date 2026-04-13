@@ -17,6 +17,7 @@ import {
 import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
 import { registerVpsRoutes } from "./server/vps/registration.js";
 import { registerVictronRoutes } from "./server/api/victron.js";
+import { registerRouteImportRoutes } from "./server/api/routes.js";
 import debug from "debug";
 import {
   bootstrapServices,
@@ -436,6 +437,7 @@ async function startServer() {
     // Register API routes
     registerBoatInfoRoutes(app);
     registerVpsRoutes(app, { vpsUrl: relayConfig.vpsUrl });
+    registerRouteImportRoutes(app);
 
     // Register Victron routes (victronModbusService will be set after initialization)
     if (global.victronModbusService) {
@@ -504,6 +506,7 @@ async function startServer() {
       console.log(`  - ${host}/api/boat-info - Get boat information`);
       console.log(`  - ${host}/api/vps/health - VPS connection health`);
       console.log(`  - ${host}/api/vps/register - Register with VPS`);
+      console.log(`  - ${host}/api/routes/import - Import GPX route`);
       console.log(`  - ${host}/health - Server health check`);
     });
 

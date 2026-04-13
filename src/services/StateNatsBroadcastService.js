@@ -301,6 +301,11 @@ export class StateNatsBroadcastService extends BaseService {
       payload.data.wind = this._bridgeCache.navigation.wind;
     }
 
+    // Speed over ground (SOG) is under navigation.speed.sog
+    if (this._bridgeCache.navigation?.speed?.sog) {
+      payload.data.speedOverGround = this._bridgeCache.navigation.speed.sog;
+    }
+
     // Only publish if we have data
     if (Object.keys(payload.data).length > 0) {
       const encodedPayload = this._codec.encode(JSON.stringify(payload));
