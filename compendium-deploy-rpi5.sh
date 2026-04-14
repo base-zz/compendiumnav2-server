@@ -1671,7 +1671,8 @@ EOL
   "type": "module",
   "dependencies": {
     "node-forge": "^1.3.1",
-    "node-fetch": "^2.6.7"
+    "node-fetch": "^2.6.7",
+    "debug": "^4.3.4"
   }
 }
 EOL
