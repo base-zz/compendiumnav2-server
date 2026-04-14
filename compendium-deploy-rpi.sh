@@ -1011,20 +1011,32 @@ health_check() {
         has_warnings=1
     fi
     
-    # 3. Check disk space
-    echo -e "\n${BLUE}3. Checking disk space...${NC}"
-    df -h . | grep -v "^Filesystem" | while read -r line; do
-        local usage_percent=$(echo "$line" | awk '{print $5}' | tr -d '%')
-        local mount_point=$(echo "$line" | awk '{print $NF}')
+    # 3. Disk Usage
+    echo -e "\n${BLUE}3. Disk Usage:${NC}"
+    df -h | tail -n +2 | grep -v '^tmpfs\|^udev\|^/dev/loop' | while read -r line; do
+        # Skip empty lines
+        [ -z "$line" ] && continue
         
-        if [ "$usage_percent" -gt 90 ]; then
-            echo -e "${RED}✗ Low disk space on $mount_point ($usage_percent% used)${NC}" >&2
-            has_errors=1
-        elif [ "$usage_percent" -gt 75 ]; then
-            echo -e "${YELLOW}⚠ Moderate disk usage on $mount_point ($usage_percent% used)${NC}"
-            has_warnings=1
+        local fs=$(echo $line | awk '{print $1}')
+        local size=$(echo $line | awk '{print $2}')
+        local used=$(echo $line | awk '{print $3}')
+        local avail=$(echo $line | awk '{print $4}')
+        local use_pct=$(echo $line | awk '{print $5}' | tr -d '%')
+        local mount=$(echo $line | awk '{print $6}')
+        
+        # Check if use_pct is a valid number
+        if [[ "$use_pct" =~ ^[0-9]+$ ]]; then
+            if [ $use_pct -gt 90 ]; then
+                echo -e "${RED}• $mount (${fs}):${NC} ${used}/${size} used, ${avail} available (${use_pct}%)"
+                has_errors=1
+            elif [ $use_pct -gt 75 ]; then
+                echo -e "${YELLOW}• $mount (${fs}):${NC} ${used}/${size} used, ${avail} available (${use_pct}%)"
+                has_warnings=1
+            else
+                echo -e "${GREEN}• $mount (${fs}):${NC} ${used}/${size} used, ${avail} available (${use_pct}%)"
+            fi
         else
-            echo -e "${GREEN}✓ Good disk space on $mount_point ($usage_percent% used)${NC}"
+            echo -e "${YELLOW}• $mount (${fs}):${NC} ${used}/${size} used, ${avail} available (usage: ${use_pct})"
         fi
     done
     

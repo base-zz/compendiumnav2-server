@@ -1339,7 +1339,10 @@ health_check() {
     
     # 3. Disk Usage
     echo -e "\n${BLUE}3. Disk Usage:${NC}"
-    df -h | grep -v '^tmpfs\|^udev\|^/dev/loop' | awk 'NR==1 || /\/$/ || /\/home$/' | while read -r line; do
+    df -h | tail -n +2 | grep -v '^tmpfs\|^udev\|^/dev/loop' | while read -r line; do
+        # Skip empty lines
+        [ -z "$line" ] && continue
+        
         local fs=$(echo $line | awk '{print $1}')
         local size=$(echo $line | awk '{print $2}')
         local used=$(echo $line | awk '{print $3}')
