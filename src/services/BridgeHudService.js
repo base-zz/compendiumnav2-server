@@ -75,38 +75,53 @@ export class BridgeHudService extends BaseService {
       throw new Error("BridgeHudService requires a StateManager instance");
     }
 
-    // Connect to NATS
-    console.log('[BridgeHudService] Connecting to NATS...');
-    this._connection = await connect({ servers: this.natsUrl });
-    console.log('[BridgeHudService] Connected to NATS');
-
-    // Initialize database
-    await this._initDatabase();
-
-    // Load bridges
-    this._loadBridges();
-
-    // Load route
-    await this._loadRoute();
-
-    // Initialize tide service
-    this._tideService = new NexusTideService({
-      dbPath: this.dbPath,
-      spatiaLitePath: this.spatiaLitePath
-    });
-
-    // Fetch user configuration from storage
-    await this._fetchUserConfig();
-
-    // Subscribe to bridge data from StateNatsBroadcastService
-    this._bridgeSub = this._connection.subscribe(NATS_SUBJECTS.INPUT.BRIDGE);
-    console.log(`[BridgeHudService] Subscribed to ${NATS_SUBJECTS.INPUT.BRIDGE}`);
-
-    // Start processing loop
-    this._startProcessing();
-
+    // Mark service as ready first, then do heavy initialization in background
     await super.start();
-    this.log(`Bridge HUD service started, publishing to ${NATS_SUBJECTS.UI.HEADER}, ${NATS_SUBJECTS.UI.NEXT_BRIDGE}, ${NATS_SUBJECTS.UI.ALERT}, ${NATS_SUBJECTS.UI.NOTIFICATION}`);
+    this.log(`Bridge HUD service starting initialization in background`);
+
+    // Do heavy initialization asynchronously
+    this._initializeAsync().catch(err => {
+      console.error('[BridgeHudService] Background initialization failed:', err);
+    });
+  }
+
+  async _initializeAsync() {
+    try {
+      // Connect to NATS
+      console.log('[BridgeHudService] Connecting to NATS...');
+      this._connection = await connect({ servers: this.natsUrl });
+      console.log('[BridgeHudService] Connected to NATS');
+
+      // Initialize database
+      await this._initDatabase();
+
+      // Load bridges
+      this._loadBridges();
+
+      // Load route
+      await this._loadRoute();
+
+      // Initialize tide service
+      this._tideService = new NexusTideService({
+        dbPath: this.dbPath,
+        spatiaLitePath: this.spatiaLitePath
+      });
+
+      // Fetch user configuration from storage
+      await this._fetchUserConfig();
+
+      // Subscribe to bridge data from StateNatsBroadcastService
+      this._bridgeSub = this._connection.subscribe(NATS_SUBJECTS.INPUT.BRIDGE);
+      console.log(`[BridgeHudService] Subscribed to ${NATS_SUBJECTS.INPUT.BRIDGE}`);
+
+      // Start processing loop
+      this._startProcessing();
+
+      this.log(`Bridge HUD service fully initialized, publishing to ${NATS_SUBJECTS.UI.HEADER}, ${NATS_SUBJECTS.UI.NEXT_BRIDGE}, ${NATS_SUBJECTS.UI.ALERT}, ${NATS_SUBJECTS.UI.NOTIFICATION}`);
+    } catch (err) {
+      console.error('[BridgeHudService] Initialization failed:', err);
+      throw err;
+    }
   }
 
   async stop() {
