@@ -1292,7 +1292,10 @@ health_check() {
         echo -e "${GREEN}• CPU Frequency:${NC} ${freq_cur} MHz (Max: ${freq_max} MHz)"
         echo -e "${GREEN}• CPU Governor:${NC} $governor"
         
-        if [ "$IS_RPI5" = true ] && [ "$governor" != "ondemand" ]; then
+        # Set default value for IS_RPI5 if not set
+        local is_rpi5="${IS_RPI5:-false}"
+        
+        if [ "$is_rpi5" = true ] && [ "$governor" != "ondemand" ]; then
             echo -e "${YELLOW}  Note: Consider using 'ondemand' governor for better power efficiency${NC}"
             recommendations+=("Set CPU governor to 'ondemand' for better power efficiency: echo ondemand | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor")
         fi
@@ -1927,7 +1930,6 @@ update() {
         npm install dotenv
     fi
 
-    configure_environment || true
     setup_nats_service || true
     
     # Set main server file path

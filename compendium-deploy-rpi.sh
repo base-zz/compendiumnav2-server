@@ -1477,7 +1477,6 @@ update() {
         npm install dotenv
     fi
 
-    configure_environment || true
     setup_nats_service || true
     
     # Set main server file path
