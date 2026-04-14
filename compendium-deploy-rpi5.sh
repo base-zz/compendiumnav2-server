@@ -154,6 +154,10 @@ setup_nats_service() {
     run_with_sudo mkdir -p /etc/nats /var/lib/nats/jetstream
     if id nats >/dev/null 2>&1; then
         run_with_sudo chown -R nats:nats /var/lib/nats
+        run_with_sudo chmod -R 755 /var/lib/nats
+    else
+        run_with_sudo chown -R $USER:$USER /var/lib/nats
+        run_with_sudo chmod -R 755 /var/lib/nats
     fi
 
     local nats_config_file="/etc/nats/nats-server.conf"
