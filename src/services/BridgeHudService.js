@@ -56,7 +56,7 @@ export class BridgeHudService extends BaseService {
   }
 
   async start() {
-    console.log(`[BridgeHudService] START called - isRunning=${this.isRunning}`);
+    console.log(`[BridgeHudService] START called - isRunning=${this.isRunning}, spatiaLitePath=${this.spatiaLitePath}`);
     
     if (this.isRunning) {
       console.log('[BridgeHudService] Already running, returning');
