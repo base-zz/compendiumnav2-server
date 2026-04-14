@@ -1451,6 +1451,12 @@ update() {
         echo -e "${YELLOW}Warning: Repository update failed, but continuing with existing files...${NC}" >&2
     fi
     
+    # Install/update system dependencies
+    echo -e "${BLUE}Installing/updating system dependencies...${NC}"
+    if ! install_dependencies; then
+        echo -e "${YELLOW}Warning: Some dependencies might not have been installed. Continuing anyway...${NC}" >&2
+    fi
+    
     # Update dependencies
     echo -e "${BLUE}Updating npm dependencies...${NC}"
     if ! npm install --no-optional; then
