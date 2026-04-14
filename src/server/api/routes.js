@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
-import storageService from '../../bluetooth/services/storage/storageService.js';
+import storageService from "../../bluetooth/services/storage/storageService.js";
 
 console.log('[ROUTES] routes import module loaded');
 
@@ -141,6 +141,204 @@ function parseConfiguredMaxGpxBytes() {
 }
 
 export function registerRouteImportRoutes(app) {
+  // GET /api/routes - List all imported routes
+  app.get('/api/routes', async (req, res) => {
+    try {
+      console.log('[ROUTES] GET /api/routes request received');
+      
+      if (!storageService.initialize) {
+        console.log('[ROUTES] List rejected: storageService.initialize unavailable');
+        return res.status(500).json({ success: false, error: 'Storage service not available' });
+      }
+      
+      await storageService.initialize();
+      console.log('[ROUTES] storageService initialized for route list');
+      
+      const importedRoutes = await storageService.getSetting('importedRoutes');
+      const activeRouteId = await storageService.getSetting('activeRouteId');
+      
+      const routes = Array.isArray(importedRoutes) ? importedRoutes : [];
+      
+      return res.status(200).json({
+        success: true,
+        routes: routes.map(r => ({
+          routeId: r.routeId,
+          name: r.name,
+          source: r.source,
+          createdAt: r.createdAt,
+          waypoints: r.waypoints?.length || 0,
+          isActive: r.routeId === activeRouteId
+        })),
+        activeRouteId
+      });
+    } catch (error) {
+      console.error('[ROUTES] Error listing routes:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to list routes'
+      });
+    }
+  });
+
+  // GET /api/routes/active - Get currently active route
+  app.get('/api/routes/active', async (req, res) => {
+    try {
+      console.log('[ROUTES] GET /api/routes/active request received');
+      
+      if (!storageService.initialize) {
+        console.log('[ROUTES] Get active rejected: storageService.initialize unavailable');
+        return res.status(500).json({ success: false, error: 'Storage service not available' });
+      }
+      
+      await storageService.initialize();
+      
+      const activeRouteId = await storageService.getSetting('activeRouteId');
+      if (!activeRouteId) {
+        return res.status(200).json({ success: true, activeRoute: null });
+      }
+      
+      const importedRoutes = await storageService.getSetting('importedRoutes');
+      const routes = Array.isArray(importedRoutes) ? importedRoutes : [];
+      const activeRoute = routes.find(r => r.routeId === activeRouteId);
+      
+      if (!activeRoute) {
+        return res.status(200).json({ success: true, activeRoute: null, activeRouteId });
+      }
+      
+      return res.status(200).json({
+        success: true,
+        activeRoute: {
+          routeId: activeRoute.routeId,
+          name: activeRoute.name,
+          source: activeRoute.source,
+          createdAt: activeRoute.createdAt,
+          waypoints: activeRoute.waypoints?.length || 0
+        }
+      });
+    } catch (error) {
+      console.error('[ROUTES] Error getting active route:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to get active route'
+      });
+    }
+  });
+
+  // PUT /api/routes/active - Set active route
+  app.put('/api/routes/active', async (req, res) => {
+    try {
+      console.log('[ROUTES] PUT /api/routes/active request received');
+      
+      const { routeId } = req.body;
+      if (!routeId) {
+        console.log('[ROUTES] Set active rejected: routeId missing');
+        return res.status(400).json({ success: false, error: 'routeId is required' });
+      }
+      
+      if (!storageService.initialize) {
+        console.log('[ROUTES] Set active rejected: storageService.initialize unavailable');
+        return res.status(500).json({ success: false, error: 'Storage service not available' });
+      }
+      
+      await storageService.initialize();
+      
+      // Verify route exists
+      const importedRoutes = await storageService.getSetting('importedRoutes');
+      const routes = Array.isArray(importedRoutes) ? importedRoutes : [];
+      const route = routes.find(r => r.routeId === routeId);
+      
+      if (!route) {
+        console.log('[ROUTES] Set active rejected: route not found');
+        return res.status(404).json({ success: false, error: 'Route not found' });
+      }
+      
+      // Set active route
+      const persisted = await storageService.setSetting('activeRouteId', routeId);
+      if (!persisted) {
+        console.log('[ROUTES] Set active failed: unable to persist');
+        return res.status(500).json({ success: false, error: 'Failed to set active route' });
+      }
+      
+      console.log(`[ROUTES] Set active route: ${routeId} (${route.name})`);
+      
+      return res.status(200).json({
+        success: true,
+        action: 'route:activated',
+        routeId,
+        routeName: route.name
+      });
+    } catch (error) {
+      console.error('[ROUTES] Error setting active route:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to set active route'
+      });
+    }
+  });
+
+  // DELETE /api/routes/:routeId - Delete a route
+  app.delete('/api/routes/:routeId', async (req, res) => {
+    try {
+      const { routeId } = req.params;
+      console.log(`[ROUTES] DELETE /api/routes/${routeId} request received`);
+      
+      if (!routeId) {
+        console.log('[ROUTES] Delete rejected: routeId missing');
+        return res.status(400).json({ success: false, error: 'routeId is required' });
+      }
+      
+      if (!storageService.initialize) {
+        console.log('[ROUTES] Delete rejected: storageService.initialize unavailable');
+        return res.status(500).json({ success: false, error: 'Storage service not available' });
+      }
+      
+      await storageService.initialize();
+      
+      // Get current routes
+      const importedRoutes = await storageService.getSetting('importedRoutes');
+      const routes = Array.isArray(importedRoutes) ? importedRoutes : [];
+      
+      // Find and remove route
+      const routeIndex = routes.findIndex(r => r.routeId === routeId);
+      if (routeIndex === -1) {
+        console.log('[ROUTES] Delete rejected: route not found');
+        return res.status(404).json({ success: false, error: 'Route not found' });
+      }
+      
+      const deletedRoute = routes[routeIndex];
+      routes.splice(routeIndex, 1);
+      
+      // Persist updated routes
+      const persisted = await storageService.setSetting('importedRoutes', routes);
+      if (!persisted) {
+        console.log('[ROUTES] Delete failed: unable to persist');
+        return res.status(500).json({ success: false, error: 'Failed to delete route' });
+      }
+      
+      // If deleted route was active, clear activeRouteId
+      const activeRouteId = await storageService.getSetting('activeRouteId');
+      if (activeRouteId === routeId) {
+        await storageService.setSetting('activeRouteId', null);
+        console.log(`[ROUTES] Cleared activeRouteId (deleted route was active)`);
+      }
+      
+      console.log(`[ROUTES] Deleted route: ${routeId} (${deletedRoute.name})`);
+      
+      return res.status(200).json({
+        success: true,
+        action: 'route:deleted',
+        routeId,
+        routeName: deletedRoute.name
+      });
+    } catch (error) {
+      console.error('[ROUTES] Error deleting route:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to delete route'
+      });
+    }
+  });
+
   app.post('/api/routes/import', async (req, res) => {
     try {
       console.log('[ROUTES] /api/routes/import request received');

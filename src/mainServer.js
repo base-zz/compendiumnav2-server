@@ -28,6 +28,7 @@ import { requireService } from "./services/serviceLocator.js";
 import { NewStateService } from "./services/NewStateService.js";
 import { PositionService } from "./services/PositionService.js";
 import { TidalService } from "./services/TidalService.js";
+import { BridgeHudService } from "./services/BridgeHudService.js";
 import { WeatherService } from "./services/WeatherService.js";
 import { BluetoothService } from "./services/BluetoothService.js";
 import { VictronModbusService } from "./services/VictronModbusService.js";
@@ -232,13 +233,43 @@ function buildServiceManifest() {
             boatId: getBoatInfo().boatId,
             bridgeEnabled: process.env.NATS_BRIDGE_ENABLED === "true",
             bridgeSubject: process.env.NATS_BRIDGE_SUBJECT || "state.bridge",
-            bridgeIntervalMs: parseInt(process.env.NATS_BRIDGE_INTERVAL_MS || "5000", 10),
+            bridgeIntervalMs: parseInt(process.env.NATS_BRIDGE_INTERVAL_MS || "1000", 10),
             bridgeKeys: process.env.NATS_BRIDGE_KEYS?.split(",").map(k => k.trim()).filter(Boolean) || ["position", "navigation", "forecast", "tides"],
           }),
       });
       startupLog(
         "[SERVER] buildServiceManifest(): added state-nats-broadcast service (with bridge support)"
       );
+    }
+
+    // Add BridgeHudService if enabled
+    const bridgeHudEnabled = process.env.BRIDGE_HUD_ENABLED === "true";
+    const bridgeDbPath = process.env.BRIDGE_DB_PATH;
+
+    if (bridgeHudEnabled) {
+      if (!natsUrl) {
+        console.warn(
+          "[SERVER] BRIDGE_HUD_ENABLED=true but NATS_URL is undefined. Set NATS_URL to enable BridgeHudService."
+        );
+      } else if (!bridgeDbPath) {
+        console.warn(
+          "[SERVER] BRIDGE_HUD_ENABLED=true but BRIDGE_DB_PATH is undefined. Set BRIDGE_DB_PATH to enable BridgeHudService."
+        );
+      } else {
+        manifest.push({
+          name: "bridge-hud",
+          create: () =>
+            new BridgeHudService({
+              natsUrl,
+              boatId: getBoatInfo().boatId,
+              dbPath: bridgeDbPath,
+              spatiaLitePath: process.env.SPATIALITE_PATH || "/usr/lib/aarch64-linux-gnu/mod_spatialite.so",
+            }),
+        });
+        startupLog(
+          "[SERVER] buildServiceManifest(): added bridge-hud service"
+        );
+      }
     }
   }
 
