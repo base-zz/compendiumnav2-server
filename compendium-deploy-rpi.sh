@@ -833,9 +833,12 @@ setup_nats_service() {
     if [ ! -f "$nats_tls_dir/server.crt" ] || [ ! -f "$nats_tls_dir/server.key" ]; then
         echo -e "${BLUE}Generating self-signed TLS certificate for NATS...${NC}"
         run_with_sudo openssl req -x509 -newkey rsa:4096 -keyout "$nats_tls_dir/server.key" -out "$nats_tls_dir/server.crt" -days 365 -nodes -subj "/CN=compendium.local"
-        run_with_sudo chmod 600 "$nats_tls_dir/server.key"
-        run_with_sudo chmod 644 "$nats_tls_dir/server.crt"
     fi
+    
+    # Set correct permissions for NATS server
+    run_with_sudo chmod 644 "$nats_tls_dir/server.crt"
+    run_with_sudo chmod 644 "$nats_tls_dir/server.key"
+    run_with_sudo chown root:root "$nats_tls_dir" "$nats_tls_dir/server.crt" "$nats_tls_dir/server.key"
 
     cat > "$temp_nats_config_file" << EOF
 port: $NATS_PORT
