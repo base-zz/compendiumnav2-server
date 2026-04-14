@@ -18,6 +18,7 @@ export class BridgeHudService extends BaseService {
     
     // SpatiaLite extension path
     this.spatiaLitePath = options.spatiaLitePath || '/usr/lib/aarch64-linux-gnu/mod_spatialite.so';
+    console.log(`[BridgeHudService] spatiaLitePath from options: ${options.spatiaLitePath}, final: ${this.spatiaLitePath}`);
 
     // User configuration (fetched from storage)
     this._storageService = storageService;
