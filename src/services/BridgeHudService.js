@@ -103,6 +103,11 @@ export class BridgeHudService extends BaseService {
       await this._loadRoute();
 
       // Initialize tide service
+      console.log(`[BridgeHudService] Creating NexusTideService with:`, {
+        dbPath: this.dbPath,
+        spatiaLitePath: this.spatiaLitePath,
+        requestTimeoutMs: 10000
+      });
       this._tideService = new NexusTideService({
         dbPath: this.dbPath,
         spatiaLitePath: this.spatiaLitePath,
