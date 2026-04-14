@@ -104,7 +104,8 @@ export class BridgeHudService extends BaseService {
       // Initialize tide service
       this._tideService = new NexusTideService({
         dbPath: this.dbPath,
-        spatiaLitePath: this.spatiaLitePath
+        spatiaLitePath: this.spatiaLitePath,
+        requestTimeoutMs: 10000
       });
 
       // Fetch user configuration from storage
