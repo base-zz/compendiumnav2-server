@@ -168,6 +168,10 @@ setup_nats_service() {
     cat > "$temp_nats_config_file" << EOF
 port: $NATS_PORT
 http: 127.0.0.1:8222
+websocket {
+  port: 9222
+  allow_origin: "*"
+}
 server_name: compendium-nats
 
 jetstream {
@@ -618,6 +622,7 @@ verify_repository() {
     set_env_var "NATS_HOST" "127.0.0.1"
     set_env_var "NATS_PORT" "$NATS_PORT"
     set_env_var "NATS_URL" "nats://127.0.0.1:$NATS_PORT"
+    set_env_var "NATS_WS_URL" "ws://127.0.0.1:9222"
     set_env_var "NATS_STATE_SUBJECT_PREFIX" "state"
     set_env_var "NATS_BROADCAST_KEYS" "position,environment,vessel,anchor,alerts,tides,forecast,bluetooth"
     set_env_var "NATS_STATE_PATCH_SUBJECT" "state.patch"
@@ -1170,6 +1175,9 @@ configure_firewall() {
             if run_with_sudo ufw allow "$NATS_PORT/tcp" 2>/dev/null; then
                 echo -e "${GREEN}Firewall configured to allow port $NATS_PORT (NATS)${NC}"
             fi
+            if run_with_sudo ufw allow "9222/tcp" 2>/dev/null; then
+                echo -e "${GREEN}Firewall configured to allow port 9222 (NATS WebSocket)${NC}"
+            fi
         # Check if firewalld is available
         elif command -v firewall-cmd >/dev/null 2>&1; then
             echo -e "${BLUE}Configuring firewalld...${NC}"
@@ -1185,6 +1193,10 @@ configure_firewall() {
                 run_with_sudo firewall-cmd --reload
                 echo -e "${GREEN}Firewall configured to allow port $NATS_PORT (NATS)${NC}"
             fi
+            if run_with_sudo firewall-cmd --permanent --add-port="9222/tcp" 2>/dev/null; then
+                run_with_sudo firewall-cmd --reload
+                echo -e "${GREEN}Firewall configured to allow port 9222 (NATS WebSocket)${NC}"
+            fi
         fi
     fi
     
@@ -1193,6 +1205,7 @@ configure_firewall() {
     echo -e "- Port $HTTP_PORT/tcp (HTTP)"
     echo -e "- Port $WS_PORT/tcp (WebSocket)"
     echo -e "- Port $NATS_PORT/tcp (NATS)"
+    echo -e "- Port 9222/tcp (NATS WebSocket for browser clients)"
     echo -e "\n${YELLOW}If you're behind a router, you may need to configure port forwarding.${NC}"
 }
 
