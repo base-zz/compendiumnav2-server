@@ -1347,15 +1347,20 @@ health_check() {
         local use_pct=$(echo $line | awk '{print $5}' | tr -d '%')
         local mount=$(echo $line | awk '{print $6}')
         
-        if [ $use_pct -gt 90 ]; then
-            echo -e "${RED}• $mount (${fs}):${NC} ${used}/${size} used, ${avail} available (${use_pct}%)"
-            recommendations+=("Disk space on $mount is critically low (${use_pct}% used). Free up space or expand storage.")
-            has_warnings=1
-        elif [ $use_pct -gt 75 ]; then
-            echo -e "${YELLOW}• $mount (${fs}):${NC} ${used}/${size} used, ${avail} available (${use_pct}%)"
-            recommendations+=("Monitor disk space on $mount (${use_pct}% used). Consider cleaning up unnecessary files.")
+        # Check if use_pct is a valid number
+        if [[ "$use_pct" =~ ^[0-9]+$ ]]; then
+            if [ $use_pct -gt 90 ]; then
+                echo -e "${RED}• $mount (${fs}):${NC} ${used}/${size} used, ${avail} available (${use_pct}%)"
+                recommendations+=("Disk space on $mount is critically low (${use_pct}% used). Free up space or expand storage.")
+                has_warnings=1
+            elif [ $use_pct -gt 75 ]; then
+                echo -e "${YELLOW}• $mount (${fs}):${NC} ${used}/${size} used, ${avail} available (${use_pct}%)"
+                recommendations+=("Monitor disk space on $mount (${use_pct}% used). Consider cleaning up unnecessary files.")
+            else
+                echo -e "${GREEN}• $mount (${fs}):${NC} ${used}/${size} used, ${avail} available (${use_pct}%)"
+            fi
         else
-            echo -e "${GREEN}• $mount (${fs}):${NC} ${used}/${size} used, ${avail} available (${use_pct}%)"
+            echo -e "${YELLOW}• $mount (${fs}):${NC} ${used}/${size} used, ${avail} available (usage: ${use_pct})"
         fi
     done
     
@@ -1435,21 +1440,22 @@ health_check() {
     fi
     
     # Check VPS connectivity if configured
-    if [ -n "$VPS_HOST" ]; then
+    local vps_host="${VPS_HOST:-}"
+    if [ -n "$vps_host" ]; then
         echo -e "\n${BLUE}6. VPS Connectivity:${NC}"
         
         # Check if we can resolve the VPS hostname
-        if host "$VPS_HOST" &> /dev/null; then
+        if host "$vps_host" &> /dev/null; then
             echo -e "${GREEN}• VPS DNS Resolution:${NC} Success"
             
             # Try to connect to VPS on port 443 (HTTPS)
-            if nc -z -w 2 "$VPS_HOST" 443 &> /dev/null; then
+            if nc -z -w 2 "$vps_host" 443 &> /dev/null; then
                 echo -e "${GREEN}• VPS Connection (HTTPS):${NC} Port 443 is open"
                 
                 # Check if we can establish a WebSocket connection
                 if command -v curl &> /dev/null; then
-                    local ws_url="wss://$VPS_HOST"
-                    local ws_test=$(timeout 5 curl -s -I -X GET -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Host: $VPS_HOST" -H "Origin: https://$VPS_HOST" "$ws_url" 2>&1 || true)
+                    local ws_url="wss://$vps_host"
+                    local ws_test=$(timeout 5 curl -s -I -X GET -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Host: $vps_host" -H "Origin: https://$vps_host" "$ws_url" 2>&1 || true)
                     
                     if echo "$ws_test" | grep -q "101 Switching Protocols"; then
                         echo -e "  ${GREEN}WebSocket Connection:${NC} Success"
@@ -1460,19 +1466,20 @@ health_check() {
                     fi
                 fi
             else
-                echo -e "${RED}• VPS Connection:${NC} Cannot connect to $VPS_HOST:443"
+                echo -e "${RED}• VPS Connection:${NC} Cannot connect to $vps_host:443"
                 recommendations+=("Cannot connect to VPS on port 443. Check firewall rules and network connectivity.")
                 has_warnings=1
             fi
         else
-            echo -e "${RED}• VPS DNS Resolution:${NC} Failed to resolve $VPS_HOST"
+            echo -e "${RED}• VPS DNS Resolution:${NC} Failed to resolve $vps_host"
             recommendations+=("Failed to resolve VPS hostname. Check DNS settings and network connectivity.")
             has_warnings=1
         fi
     fi
     
     # 7. Raspberry Pi Specific Checks
-    if [ "$IS_RASPBERRY_PI" = true ]; then
+    local is_raspberry_pi="${IS_RASPBERRY_PI:-false}"
+    if [ "$is_raspberry_pi" = true ]; then
         echo -e "\n${BLUE}7. Raspberry Pi Specific Checks:${NC}"
         
         # Check power supply
