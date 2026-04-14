@@ -29,7 +29,7 @@ export class BridgeHudService extends BaseService {
 
     this._connection = null;
     this._codec = StringCodec();
-    this._stateManager = null;
+    this._stateManager = getStateManager();
     this._statePatchHandler = null;
 
     // Database and data
@@ -117,12 +117,18 @@ export class BridgeHudService extends BaseService {
       // Fetch user configuration from storage
       await this._fetchUserConfig();
 
-      // Subscribe to bridge data from StateNatsBroadcastService
-      this._bridgeSub = this._connection.subscribe(NATS_SUBJECTS.INPUT.BRIDGE);
-      console.log(`[BridgeHudService] Subscribed to ${NATS_SUBJECTS.INPUT.BRIDGE}`);
+      // Listen to state:patch events from state manager
+      this._statePatchHandler = (event) => {
+        if (!event || !event.data) {
+          return;
+        }
+        this._processStatePatch(event.data);
+      };
+      this._stateManager.on("state:patch", this._statePatchHandler);
+      console.log('[BridgeHudService] State patch handler registered');
 
-      // Start processing loop
-      this._startProcessing();
+      // Seed boat state from current state
+      this._seedBoatState();
 
       this.log(`Bridge HUD service fully initialized, publishing to ${NATS_SUBJECTS.UI.HEADER}, ${NATS_SUBJECTS.UI.NEXT_BRIDGE}, ${NATS_SUBJECTS.UI.ALERT}, ${NATS_SUBJECTS.UI.NOTIFICATION}`);
     } catch (err) {
@@ -136,10 +142,10 @@ export class BridgeHudService extends BaseService {
       return;
     }
 
-    if (this._bridgeSub) {
-      this._bridgeSub.unsubscribe();
-      this._bridgeSub = null;
+    if (this._stateManager && this._statePatchHandler) {
+      this._stateManager.off("state:patch", this._statePatchHandler);
     }
+    this._statePatchHandler = null;
 
     if (this._connection) {
       await this._connection.close();
@@ -152,6 +158,46 @@ export class BridgeHudService extends BaseService {
     }
 
     await super.stop();
+  }
+
+  _seedBoatState() {
+    if (!this._stateManager) {
+      console.log('[BridgeHudService] No state manager available for seeding');
+      return;
+    }
+
+    const state = this._stateManager.getState();
+    if (!state) {
+      console.log('[BridgeHudService] No state available for seeding');
+      return;
+    }
+
+    console.log('[BridgeHudService] Seeding boat state from current state');
+    this._processStatePatch(state);
+  }
+
+  _processStatePatch(stateData) {
+    const { position, speedOverGround, courseOverGround, depthBelowTransducer, windSpeedOverGround } = stateData;
+
+    if (position?.gps) {
+      this._boatState.position = {
+        latitude: position.gps.latitude,
+        longitude: position.gps.longitude,
+        heading: position.gps.heading || position.heading || null
+      };
+      this._boatState.sog = speedOverGround?.value;
+      this._boatState.cog = courseOverGround?.value;
+
+      // Publish header data
+      this._publishHeader(depthBelowTransducer, windSpeedOverGround);
+
+      // Find next bridge (throttled to every 1 second)
+      const now = Date.now();
+      if (!this._boatState.lastBridgeCheck || (now - this._boatState.lastBridgeCheck) > 1000) {
+        this._boatState.lastBridgeCheck = now;
+        this._findAndPublishNextBridge();
+      }
+    }
   }
 
   async _initDatabase() {
@@ -260,49 +306,6 @@ export class BridgeHudService extends BaseService {
       console.warn('[BridgeHudService] Failed to load route:', err.message);
       this._routePoints = [];
       this._routeWithDistances = [];
-    }
-  }
-
-  async _startProcessing() {
-    console.log('[BridgeHudService] Starting message processing loop...');
-    
-    (async () => {
-      for await (const msg of this._bridgeSub) {
-        try {
-          const bridgeMessage = JSON.parse(this._codec.decode(msg.data));
-          
-          if (bridgeMessage.type === 'state:bridge' && bridgeMessage.data) {
-            await this._handleBridgeMessage(bridgeMessage);
-          }
-        } catch (err) {
-          console.error('[BridgeHudService] Error processing message:', err.message);
-        }
-      }
-    })();
-  }
-
-  async _handleBridgeMessage(bridgeMessage) {
-    const { position, depth, wind, speedOverGround } = bridgeMessage.data;
-    
-    // Update boat state
-    if (position?.gps) {
-      this._boatState.position = {
-        latitude: position.gps.latitude,
-        longitude: position.gps.longitude,
-        heading: position.gps.heading || position.heading || null
-      };
-      this._boatState.sog = speedOverGround?.value;
-      this._boatState.cog = bridgeMessage.data.courseOverGround?.value;
-
-      // Publish header data
-      this._publishHeader(depth, wind);
-
-      // Find next bridge (throttled to every 1 second)
-      const now = Date.now();
-      if (!this._boatState.lastBridgeCheck || (now - this._boatState.lastBridgeCheck) > 1000) {
-        this._boatState.lastBridgeCheck = now;
-        await this._findAndPublishNextBridge();
-      }
     }
   }
 
