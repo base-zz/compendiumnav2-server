@@ -477,6 +477,7 @@ install_dependencies() {
         avahi-daemon     # For mDNS support
         libnss-mdns      # For .local resolution
         avahi-utils      # For avahi-publish
+        libsqlite3-mod-spatialite  # For BridgeHudService spatial queries
     )
     
     if ! run_with_sudo apt-get install -y "${packages[@]}"; then
