@@ -439,6 +439,7 @@ verify_repository() {
     set_env_var "NATS_HOST" "127.0.0.1"
     set_env_var "NATS_PORT" "$NATS_PORT"
     set_env_var "NATS_URL" "nats://127.0.0.1:$NATS_PORT"
+    set_env_var "NATS_WS_URL" "wss://127.0.0.1:9222"
     set_env_var "NATS_STATE_SUBJECT_PREFIX" "state"
     set_env_var "NATS_BROADCAST_KEYS" "position,environment,vessel,anchor,alerts,tides,forecast,bluetooth"
     set_env_var "NATS_STATE_PATCH_SUBJECT" "state.patch"
@@ -825,9 +826,31 @@ setup_nats_service() {
     local repo_nats_service_file="${APP_DIR}/deploy/systemd/nats-server.service"
     local system_nats_service_file="/etc/systemd/system/nats-server.service"
 
+    # Generate self-signed TLS certificate for NATS WebSocket
+    local nats_tls_dir="/etc/nats/tls"
+    run_with_sudo mkdir -p "$nats_tls_dir"
+    
+    if [ ! -f "$nats_tls_dir/server.crt" ] || [ ! -f "$nats_tls_dir/server.key" ]; then
+        echo -e "${BLUE}Generating self-signed TLS certificate for NATS...${NC}"
+        run_with_sudo openssl req -x509 -newkey rsa:4096 -keyout "$nats_tls_dir/server.key" -out "$nats_tls_dir/server.crt" -days 365 -nodes -subj "/CN=compendium.local"
+        run_with_sudo chmod 600 "$nats_tls_dir/server.key"
+        run_with_sudo chmod 644 "$nats_tls_dir/server.crt"
+    fi
+
     cat > "$temp_nats_config_file" << EOF
 port: $NATS_PORT
 http: 127.0.0.1:8222
+websocket {
+  port: 9222
+  tls {
+    cert_file: $nats_tls_dir/server.crt
+    key_file: $nats_tls_dir/server.key
+  }
+}
+tls {
+  cert_file: $nats_tls_dir/server.crt
+  key_file: $nats_tls_dir/server.key
+}
 server_name: compendium-nats
 
 jetstream {
@@ -931,6 +954,9 @@ configure_firewall() {
             if run_with_sudo ufw allow "$NATS_PORT/tcp" 2>/dev/null; then
                 echo -e "${GREEN}Firewall configured to allow port $NATS_PORT (NATS)${NC}"
             fi
+            if run_with_sudo ufw allow "9222/tcp" 2>/dev/null; then
+                echo -e "${GREEN}Firewall configured to allow port 9222 (NATS WebSocket)${NC}"
+            fi
         # Check if firewalld is available
         elif command -v firewall-cmd >/dev/null 2>&1; then
             echo -e "${BLUE}Configuring firewalld...${NC}"
@@ -946,6 +972,10 @@ configure_firewall() {
                 run_with_sudo firewall-cmd --reload
                 echo -e "${GREEN}Firewall configured to allow port $NATS_PORT (NATS)${NC}"
             fi
+            if run_with_sudo firewall-cmd --permanent --add-port="9222/tcp" 2>/dev/null; then
+                run_with_sudo firewall-cmd --reload
+                echo -e "${GREEN}Firewall configured to allow port 9222 (NATS WebSocket)${NC}"
+            fi
         fi
     fi
     
@@ -954,6 +984,7 @@ configure_firewall() {
     echo -e "- Port $HTTP_PORT/tcp (HTTP)"
     echo -e "- Port $WS_PORT/tcp (WebSocket)"
     echo -e "- Port $NATS_PORT/tcp (NATS)"
+    echo -e "- Port 9222/tcp (NATS WebSocket for browser clients)"
     echo -e "\n${YELLOW}If you're behind a router, you may need to configure port forwarding.${NC}"
 }
 
