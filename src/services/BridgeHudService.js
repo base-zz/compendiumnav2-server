@@ -164,11 +164,15 @@ export class BridgeHudService extends BaseService {
         this._db.loadExtension(this.spatiaLitePath);
         console.log('[BridgeHudService] SpatiaLite loaded');
         
-        // Initialize spatial metadata
+        // Initialize spatial metadata only if not already present
         try {
-          this._db.exec(`SELECT InitSpatialMetaData(1);`);
+          const checkTable = this._db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='spatial_ref_sys'`);
+          const tableExists = checkTable.get();
+          if (!tableExists) {
+            this._db.exec(`SELECT InitSpatialMetaData(1);`);
+          }
         } catch (err) {
-          // Table already exists, ignore
+          // Ignore errors - metadata may already exist
         }
       } catch (err) {
         console.warn('[BridgeHudService] SpatiaLite not available:', err.message);
