@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 
 export class NexusTideService {
   constructor(options) {
+    console.log(`[NexusTideService] Constructor called with options:`, options);
     if (!options || typeof options !== "object") {
       throw new Error("NexusTideService options are required");
     }
@@ -11,6 +12,12 @@ export class NexusTideService {
     }
 
     if (!Object.prototype.hasOwnProperty.call(options, "spatialitePath") || typeof options.spatialitePath !== "string" || !options.spatialitePath.trim()) {
+      console.error(`[NexusTideService] spatialitePath check failed:`, {
+        hasOwnProperty: Object.prototype.hasOwnProperty.call(options, "spatialitePath"),
+        type: typeof options.spatialitePath,
+        value: options.spatialitePath,
+        trimmed: options.spatialitePath?.trim()
+      });
       throw new Error("NexusTideService requires options.spatialitePath");
     }
 
