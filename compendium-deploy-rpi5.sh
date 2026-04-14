@@ -165,33 +165,11 @@ setup_nats_service() {
     local repo_nats_service_file="${APP_DIR}/deploy/systemd/nats-server.service"
     local system_nats_service_file="/etc/systemd/system/nats-server.service"
 
-    # Generate self-signed TLS certificate for NATS WebSocket
-    local nats_tls_dir="/etc/nats/tls"
-    run_with_sudo mkdir -p "$nats_tls_dir"
-    
-    if [ ! -f "$nats_tls_dir/server.crt" ] || [ ! -f "$nats_tls_dir/server.key" ]; then
-        echo -e "${BLUE}Generating self-signed TLS certificate for NATS...${NC}"
-        run_with_sudo openssl req -x509 -newkey rsa:4096 -keyout "$nats_tls_dir/server.key" -out "$nats_tls_dir/server.crt" -days 365 -nodes -subj "/CN=compendium.local"
-    fi
-    
-    # Set correct permissions for NATS server
-    run_with_sudo chmod 644 "$nats_tls_dir/server.crt"
-    run_with_sudo chmod 644 "$nats_tls_dir/server.key"
-    run_with_sudo chown root:root "$nats_tls_dir" "$nats_tls_dir/server.crt" "$nats_tls_dir/server.key"
-
     cat > "$temp_nats_config_file" << EOF
 port: $NATS_PORT
 http: 127.0.0.1:8222
 websocket {
   port: 9222
-  tls {
-    cert_file: $nats_tls_dir/server.crt
-    key_file: $nats_tls_dir/server.key
-  }
-}
-tls {
-  cert_file: $nats_tls_dir/server.crt
-  key_file: $nats_tls_dir/server.key
 }
 server_name: compendium-nats
 
@@ -643,7 +621,7 @@ verify_repository() {
     set_env_var "NATS_HOST" "127.0.0.1"
     set_env_var "NATS_PORT" "$NATS_PORT"
     set_env_var "NATS_URL" "nats://127.0.0.1:$NATS_PORT"
-    set_env_var "NATS_WS_URL" "wss://127.0.0.1:9222"
+    set_env_var "NATS_WS_URL" "ws://127.0.0.1:9222"
     set_env_var "NATS_STATE_SUBJECT_PREFIX" "state"
     set_env_var "NATS_BROADCAST_KEYS" "position,environment,vessel,anchor,alerts,tides,forecast,bluetooth"
     set_env_var "NATS_STATE_PATCH_SUBJECT" "state.patch"
