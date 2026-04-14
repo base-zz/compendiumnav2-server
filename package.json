@@ -12,6 +12,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
+    "@abandonware/bluetooth-hci-socket": "^0.5.2-1",
     "@abandonware/noble": "^1.9.2-15",
     "@capacitor/app": "^7.0.1",
     "@capacitor/push-notifications": "^7.0.1",
