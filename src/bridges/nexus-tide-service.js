@@ -11,9 +11,8 @@ export class NexusTideService {
       throw new Error("NexusTideService requires options.dbPath");
     }
 
-    if (!Object.prototype.hasOwnProperty.call(options, "spatialitePath") || typeof options.spatialitePath !== "string" || !options.spatialitePath.trim()) {
+    if (!options.spatialitePath || typeof options.spatialitePath !== "string" || !options.spatialitePath.trim()) {
       console.error(`[NexusTideService] spatialitePath check failed:`, {
-        hasOwnProperty: Object.prototype.hasOwnProperty.call(options, "spatialitePath"),
         type: typeof options.spatialitePath,
         value: options.spatialitePath,
         trimmed: options.spatialitePath?.trim()
