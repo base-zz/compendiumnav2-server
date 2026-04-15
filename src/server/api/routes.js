@@ -7,12 +7,24 @@ console.log('[ROUTES] routes import module loaded');
 
 function parseGPXWaypoints(gpxData) {
   try {
+    console.log('[ROUTES] Starting GPX parsing...');
     const gpx = parseGPX(gpxData);
+    console.log('[ROUTES] GPX parsed, structure:', JSON.stringify({
+      hasRoutes: !!gpx.routes,
+      hasTracks: !!gpx.tracks,
+      hasWaypoints: !!gpx.waypoints,
+      routesCount: gpx.routes?.length || 0,
+      tracksCount: gpx.tracks?.length || 0,
+      waypointsCount: gpx.waypoints?.length || 0
+    }));
+    
     const waypoints = [];
     
     // Extract waypoints from routes (rtept)
     if (gpx.routes) {
+      console.log('[ROUTES] Processing routes...');
       for (const route of gpx.routes) {
+        console.log('[ROUTES] Route has points:', !!route.points, 'count:', route.points?.length || 0);
         if (route.points) {
           for (const point of route.points) {
             waypoints.push({
@@ -27,6 +39,7 @@ function parseGPXWaypoints(gpxData) {
     
     // Extract waypoints from tracks (trkpt)
     if (gpx.tracks) {
+      console.log('[ROUTES] Processing tracks...');
       for (const track of gpx.tracks) {
         if (track.segments) {
           for (const segment of track.segments) {
@@ -46,6 +59,7 @@ function parseGPXWaypoints(gpxData) {
     
     // Extract waypoints from waypoints (wpt)
     if (gpx.waypoints) {
+      console.log('[ROUTES] Processing waypoints...');
       for (const point of gpx.waypoints) {
         waypoints.push({
           lat: point.lat,
@@ -55,6 +69,7 @@ function parseGPXWaypoints(gpxData) {
       }
     }
     
+    console.log('[ROUTES] Total waypoints extracted:', waypoints.length);
     return waypoints;
   } catch (error) {
     console.error('[ROUTES] Error parsing GPX:', error);
