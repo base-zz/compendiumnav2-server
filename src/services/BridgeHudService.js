@@ -304,8 +304,14 @@ export class BridgeHudService extends BaseService {
       timestamp: Date.now()
     };
 
-    this._emitHudUpdate({ header: headerData });
-    console.log(`[BridgeHudService] Emitted header: SOG=${headerData.sog}, COG=${headerData.cog}`);
+    this._stateManager.emit('state:patch', {
+      type: 'state:patch',
+      path: 'bridges.hud.header',
+      value: headerData,
+      source: 'bridge-hud',
+      timestamp: Date.now()
+    });
+    console.log(`[BridgeHudService] Patched header state: SOG=${headerData.sog}, COG=${headerData.cog}`);
   }
 
   async _findAndPublishNextBridge() {
@@ -410,8 +416,14 @@ export class BridgeHudService extends BaseService {
       nextBridgeData.can_pass_closed = bridge.closed_height_mhw >= this._safeAirDraft;
     }
 
-    this._emitHudUpdate({ nextBridge: nextBridgeData });
-    console.log(`[BridgeHudService] Emitted next bridge: ${bridge.name} (${bridge.distance_nm.toFixed(2)}nm)`);
+    this._stateManager.emit('state:patch', {
+      type: 'state:patch',
+      path: 'bridges.hud.nextBridge',
+      value: nextBridgeData,
+      source: 'bridge-hud',
+      timestamp: Date.now()
+    });
+    console.log(`[BridgeHudService] Patched next bridge state: ${bridge.name} (${bridge.distance_nm.toFixed(2)}nm)`);
 
     // Publish alert if clearance is tight
     if (clearanceMargin !== null && clearanceMargin < 5) {
@@ -469,8 +481,14 @@ export class BridgeHudService extends BaseService {
       timestamp: Date.now()
     };
 
-    this._emitHudUpdate({ alert: alertData });
-    console.log(`[BridgeHudService] Emitted alert: ${alert.message}`);
+    this._stateManager.emit('state:patch', {
+      type: 'state:patch',
+      path: 'bridges.hud.alert',
+      value: alertData,
+      source: 'bridge-hud',
+      timestamp: Date.now()
+    });
+    console.log(`[BridgeHudService] Patched alert state: ${alert.message}`);
   }
 
   _publishNotification(notification) {
@@ -479,19 +497,13 @@ export class BridgeHudService extends BaseService {
       timestamp: Date.now()
     };
 
-    this._emitHudUpdate({ notification: notificationData });
-    console.log(`[BridgeHudService] Emitted notification: ${notification.message}`);
-  }
-
-  _emitHudUpdate(data) {
-    if (!this._stateManager) {
-      console.warn('[BridgeHudService] No state manager available to emit event');
-      return;
-    }
-    this._stateManager.emit('bridges:hud-update', {
-      ...data,
-      boatId: this.boatId,
+    this._stateManager.emit('state:patch', {
+      type: 'state:patch',
+      path: 'bridges.hud.notification',
+      value: notificationData,
+      source: 'bridge-hud',
       timestamp: Date.now()
     });
+    console.log(`[BridgeHudService] Patched notification state: ${notification.message}`);
   }
 }
