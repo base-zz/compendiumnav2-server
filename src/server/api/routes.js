@@ -321,6 +321,21 @@ export function registerRouteImportRoutes(app) {
         return res.status(500).json({ success: false, error: 'Failed to set active route' });
       }
       
+      // Update state manager with active route info
+      const { getStateManager } = await import("../../relay/core/state/StateManager.js");
+      const stateManager = getStateManager();
+      if (stateManager) {
+        const activeRouteData = {
+          routeId: route.routeId,
+          routeName: route.name
+        };
+        const patch = [{ op: "replace", path: "/routes/activeRoute", value: activeRouteData }];
+        stateManager.applyPatchAndForward(patch);
+        console.log(`[ROUTES] Updated state with active route: ${routeId} (${route.name})`);
+      } else {
+        console.log('[ROUTES] State manager not available, skipping state update');
+      }
+      
       console.log(`[ROUTES] Successfully set active route: ${routeId} (${route.name})`);
       
       return res.status(200).json({
@@ -381,11 +396,22 @@ export function registerRouteImportRoutes(app) {
       
       console.log(`[ROUTES] Route count after deletion: ${routes.length}`);
       
-      // If deleted route was active, clear activeRouteId
+      // If deleted route was active, clear activeRouteId and state
       const activeRouteId = await storageService.getSetting('activeRouteId');
       if (activeRouteId === routeId) {
         await storageService.setSetting('activeRouteId', null);
         console.log(`[ROUTES] Cleared activeRouteId (deleted route was active)`);
+        
+        // Clear active route in state manager
+        const { getStateManager } = await import("../../relay/core/state/StateManager.js");
+        const stateManager = getStateManager();
+        if (stateManager) {
+          const patch = [{ op: "replace", path: "/routes/activeRoute", value: { routeId: null, routeName: null } }];
+          stateManager.applyPatchAndForward(patch);
+          console.log(`[ROUTES] Cleared active route in state`);
+        } else {
+          console.log('[ROUTES] State manager not available, skipping state update');
+        }
       }
       
       console.log(`[ROUTES] Successfully deleted route: ${routeId} (${deletedRoute.name})`);

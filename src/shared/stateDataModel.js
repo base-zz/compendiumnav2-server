@@ -1065,6 +1065,12 @@ export function createStateDataModel(unitPreferences = UNIT_PRESETS.IMPERIAL) {
         notifications: [],
       },
     },
+    routes: {
+      activeRoute: {
+        routeId: null,
+        routeName: null,
+      },
+    },
     bluetooth: {
       enabled: true,
       discovering: false,
