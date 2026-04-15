@@ -247,11 +247,7 @@ function buildServiceManifest() {
     const bridgeDbPath = process.env.BRIDGE_DB_PATH;
 
     if (bridgeHudEnabled) {
-      if (!natsUrl) {
-        console.warn(
-          "[SERVER] BRIDGE_HUD_ENABLED=true but NATS_URL is undefined. Set NATS_URL to enable BridgeHudService."
-        );
-      } else if (!bridgeDbPath) {
+      if (!bridgeDbPath) {
         console.warn(
           "[SERVER] BRIDGE_HUD_ENABLED=true but BRIDGE_DB_PATH is undefined. Set BRIDGE_DB_PATH to enable BridgeHudService."
         );
@@ -260,7 +256,6 @@ function buildServiceManifest() {
           name: "bridge-hud",
           create: () =>
             new BridgeHudService({
-              natsUrl,
               boatId: getBoatInfo().boatId,
               dbPath: bridgeDbPath,
               spatiaLitePath: process.env.SPATIALITE_PATH || "/usr/lib/aarch64-linux-gnu/mod_spatialite.so",

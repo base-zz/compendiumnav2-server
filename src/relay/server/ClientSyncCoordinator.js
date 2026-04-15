@@ -33,6 +33,7 @@ export class ClientSyncCoordinator {
     this._tideHandler = this._handleTideUpdate.bind(this);
     this._weatherHandler = this._handleWeatherUpdate.bind(this);
     this._alertsHandler = this._handleAlertsUpdate.bind(this);
+    this._bridgesHudHandler = this._handleBridgesHudUpdate.bind(this);
 
     this._registerStateListeners();
 
@@ -47,6 +48,7 @@ export class ClientSyncCoordinator {
     this.stateManager.on('tide:update', this._tideHandler);
     this.stateManager.on('weather:update', this._weatherHandler);
     this.stateManager.on('alerts:updated', this._alertsHandler);
+    this.stateManager.on('bridges:hud-update', this._bridgesHudHandler);
   }
 
   _handleStateEvent(payload) {
@@ -96,6 +98,20 @@ export class ClientSyncCoordinator {
       });
     } catch (error) {
       logError('Failed to forward alerts update:', error);
+    }
+  }
+
+  _handleBridgesHudUpdate(data) {
+    try {
+      console.log('[ClientSyncCoordinator] Received bridges HUD update, forwarding to clients');
+      this._publish({
+        type: 'bridges:hud-update',
+        data,
+        boatId: this.stateManager.boatId,
+        timestamp: Date.now(),
+      });
+    } catch (error) {
+      logError('Failed to forward bridges HUD update:', error);
     }
   }
 

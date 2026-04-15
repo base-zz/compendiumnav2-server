@@ -1,8 +1,6 @@
 import BaseService from "./BaseService.js";
-import { connect, StringCodec } from "nats";
 import { getStateManager } from "../relay/core/state/StateManager.js";
 import Database from 'better-sqlite3';
-import { NATS_SUBJECTS } from '../bridges/messages.js';
 import { parseGPXRoute, calculateRouteDistances, findClosestRoutePoint } from '../bridges/gpx-route-parser.js';
 import { queryBridgesAlongRoute } from '../bridges/route-queries.js';
 import { NexusTideService } from '../bridges/nexus-tide-service.js';
@@ -12,7 +10,6 @@ export class BridgeHudService extends BaseService {
   constructor(options = {}) {
     super("bridge-hud", "continuous");
 
-    this.natsUrl = options.natsUrl;
     this.boatId = options.boatId || "unknown";
     this.dbPath = options.dbPath;
     
@@ -27,8 +24,6 @@ export class BridgeHudService extends BaseService {
     this._activeRouteId = null; // will be fetched from storage
     this._routeGpxData = null; // will be fetched from storage
 
-    this._connection = null;
-    this._codec = StringCodec();
     this._stateManager = getStateManager();
     this._statePatchHandler = null;
 
@@ -52,7 +47,7 @@ export class BridgeHudService extends BaseService {
     // Subscriptions
     this._bridgeSub = null;
 
-    console.log(`[BridgeHudService] CONSTRUCTOR called - natsUrl=${this.natsUrl}, dbPath=${this.dbPath}`);
+    console.log(`[BridgeHudService] CONSTRUCTOR called - dbPath=${this.dbPath}`);
   }
 
   async start() {
@@ -61,10 +56,6 @@ export class BridgeHudService extends BaseService {
     if (this.isRunning) {
       console.log('[BridgeHudService] Already running, returning');
       return;
-    }
-
-    if (!this.natsUrl) {
-      throw new Error("BridgeHudService requires NATS_URL to be defined");
     }
 
     if (!this.dbPath) {
@@ -88,11 +79,6 @@ export class BridgeHudService extends BaseService {
 
   async _initializeAsync() {
     try {
-      // Connect to NATS
-      console.log('[BridgeHudService] Connecting to NATS...');
-      this._connection = await connect({ servers: this.natsUrl });
-      console.log('[BridgeHudService] Connected to NATS');
-
       // Initialize database
       await this._initDatabase();
 
@@ -130,7 +116,7 @@ export class BridgeHudService extends BaseService {
       // Seed boat state from current state
       this._seedBoatState();
 
-      this.log(`Bridge HUD service fully initialized, publishing to ${NATS_SUBJECTS.UI.HEADER}, ${NATS_SUBJECTS.UI.NEXT_BRIDGE}, ${NATS_SUBJECTS.UI.ALERT}, ${NATS_SUBJECTS.UI.NOTIFICATION}`);
+      this.log(`Bridge HUD service fully initialized, emitting bridge:hud-update events`);
     } catch (err) {
       console.error('[BridgeHudService] Initialization failed:', err);
       throw err;
@@ -318,8 +304,8 @@ export class BridgeHudService extends BaseService {
       timestamp: Date.now()
     };
 
-    this._connection.publish(NATS_SUBJECTS.UI.HEADER, this._codec.encode(JSON.stringify(headerData)));
-    console.log(`[BridgeHudService] Published header: SOG=${headerData.sog}, COG=${headerData.cog}`);
+    this._emitHudUpdate({ header: headerData });
+    console.log(`[BridgeHudService] Emitted header: SOG=${headerData.sog}, COG=${headerData.cog}`);
   }
 
   async _findAndPublishNextBridge() {
@@ -424,8 +410,8 @@ export class BridgeHudService extends BaseService {
       nextBridgeData.can_pass_closed = bridge.closed_height_mhw >= this._safeAirDraft;
     }
 
-    this._connection.publish(NATS_SUBJECTS.UI.NEXT_BRIDGE, this._codec.encode(JSON.stringify(nextBridgeData)));
-    console.log(`[BridgeHudService] Published next bridge: ${bridge.name} (${bridge.distance_nm.toFixed(2)}nm)`);
+    this._emitHudUpdate({ nextBridge: nextBridgeData });
+    console.log(`[BridgeHudService] Emitted next bridge: ${bridge.name} (${bridge.distance_nm.toFixed(2)}nm)`);
 
     // Publish alert if clearance is tight
     if (clearanceMargin !== null && clearanceMargin < 5) {
@@ -483,8 +469,8 @@ export class BridgeHudService extends BaseService {
       timestamp: Date.now()
     };
 
-    this._connection.publish(NATS_SUBJECTS.UI.ALERT, this._codec.encode(JSON.stringify(alertData)));
-    console.log(`[BridgeHudService] Published alert: ${alert.message}`);
+    this._emitHudUpdate({ alert: alertData });
+    console.log(`[BridgeHudService] Emitted alert: ${alert.message}`);
   }
 
   _publishNotification(notification) {
@@ -493,7 +479,19 @@ export class BridgeHudService extends BaseService {
       timestamp: Date.now()
     };
 
-    this._connection.publish(NATS_SUBJECTS.UI.NOTIFICATION, this._codec.encode(JSON.stringify(notificationData)));
-    console.log(`[BridgeHudService] Published notification: ${notification.message}`);
+    this._emitHudUpdate({ notification: notificationData });
+    console.log(`[BridgeHudService] Emitted notification: ${notification.message}`);
+  }
+
+  _emitHudUpdate(data) {
+    if (!this._stateManager) {
+      console.warn('[BridgeHudService] No state manager available to emit event');
+      return;
+    }
+    this._stateManager.emit('bridges:hud-update', {
+      ...data,
+      boatId: this.boatId,
+      timestamp: Date.now()
+    });
   }
 }
