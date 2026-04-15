@@ -1057,6 +1057,14 @@ export function createStateDataModel(unitPreferences = UNIT_PRESETS.IMPERIAL) {
     },
     tides: {},
     forecast: {},
+    bridges: {
+      hud: {
+        header: null,
+        nextBridge: null,
+        alert: null,
+        notification: null,
+      },
+    },
     bluetooth: {
       enabled: true,
       discovering: false,
