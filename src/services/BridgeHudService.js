@@ -44,6 +44,12 @@ export class BridgeHudService extends BaseService {
     // Tide service
     this._tideService = null;
 
+    // Active bridge alerts (array for multiple simultaneous alerts)
+    this._activeAlerts = [];
+
+    // Active bridge notifications (array for multiple simultaneous notifications)
+    this._activeNotifications = [];
+
     // Subscriptions
     this._bridgeSub = null;
 
@@ -425,15 +431,48 @@ export class BridgeHudService extends BaseService {
     });
     console.log(`[BridgeHudService] Patched next bridge state: ${bridge.name} (${bridge.distance_nm.toFixed(2)}nm)`);
 
-    // Publish alert if clearance is tight
-    if (clearanceMargin !== null && clearanceMargin < 5) {
-      this._publishAlert({
+    // Update alert for this bridge (add or remove based on clearance)
+    this._updateBridgeAlert(bridge, clearanceMargin, dynamicClearance);
+  }
+
+  _updateBridgeAlert(bridge, clearanceMargin, dynamicClearance) {
+    const alertIndex = this._activeAlerts.findIndex(a => a.bridge_id === bridge.external_id);
+    const hasLowClearance = clearanceMargin !== null && clearanceMargin < 5;
+
+    if (hasLowClearance) {
+      const alertData = {
         type: 'CLEARANCE_WARNING',
         message: `Low clearance at ${bridge.name}: ${dynamicClearance.toFixed(1)}ft (margin: ${clearanceMargin.toFixed(1)}ft)`,
         severity: clearanceMargin < 0 ? 'CRITICAL' : 'WARNING',
-        bridge_id: bridge.external_id
-      });
+        bridge_id: bridge.external_id,
+        timestamp: Date.now()
+      };
+
+      if (alertIndex >= 0) {
+        // Update existing alert
+        this._activeAlerts[alertIndex] = alertData;
+      } else {
+        // Add new alert
+        this._activeAlerts.push(alertData);
+      }
+    } else if (alertIndex >= 0) {
+      // Remove resolved alert
+      this._activeAlerts.splice(alertIndex, 1);
     }
+
+    // Publish full alerts array
+    this._publishAlerts();
+  }
+
+  _publishAlerts() {
+    this._stateManager.emit('state:patch', {
+      type: 'state:patch',
+      path: 'bridges.hud.alerts',
+      value: [...this._activeAlerts],
+      source: 'bridge-hud',
+      timestamp: Date.now()
+    });
+    console.log(`[BridgeHudService] Patched alerts array: ${this._activeAlerts.length} active`);
   }
 
   _calculateNextOpening(bridge) {
@@ -475,35 +514,40 @@ export class BridgeHudService extends BaseService {
     };
   }
 
-  _publishAlert(alert) {
-    const alertData = {
-      ...alert,
-      timestamp: Date.now()
-    };
-
-    this._stateManager.emit('state:patch', {
-      type: 'state:patch',
-      path: 'bridges.hud.alert',
-      value: alertData,
-      source: 'bridge-hud',
-      timestamp: Date.now()
-    });
-    console.log(`[BridgeHudService] Patched alert state: ${alert.message}`);
-  }
-
-  _publishNotification(notification) {
+  _addNotification(notification) {
     const notificationData = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       ...notification,
       timestamp: Date.now()
     };
 
+    this._activeNotifications.push(notificationData);
+    this._publishNotifications();
+    console.log(`[BridgeHudService] Added notification: ${notification.message}`);
+
+    // Auto-remove notification after 30 seconds
+    setTimeout(() => {
+      this._removeNotification(notificationData.id);
+    }, 30000);
+  }
+
+  _removeNotification(id) {
+    const index = this._activeNotifications.findIndex(n => n.id === id);
+    if (index >= 0) {
+      this._activeNotifications.splice(index, 1);
+      this._publishNotifications();
+      console.log(`[BridgeHudService] Removed notification: ${id}`);
+    }
+  }
+
+  _publishNotifications() {
     this._stateManager.emit('state:patch', {
       type: 'state:patch',
-      path: 'bridges.hud.notification',
-      value: notificationData,
+      path: 'bridges.hud.notifications',
+      value: [...this._activeNotifications],
       source: 'bridge-hud',
       timestamp: Date.now()
     });
-    console.log(`[BridgeHudService] Patched notification state: ${notification.message}`);
+    console.log(`[BridgeHudService] Patched notifications array: ${this._activeNotifications.length} active`);
   }
 }

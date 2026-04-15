@@ -1061,8 +1061,8 @@ export function createStateDataModel(unitPreferences = UNIT_PRESETS.IMPERIAL) {
       hud: {
         header: null,
         nextBridge: null,
-        alert: null,
-        notification: null,
+        alerts: [],
+        notifications: [],
       },
     },
     bluetooth: {
