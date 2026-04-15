@@ -1,8 +1,66 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import storageService from "../../bluetooth/services/storage/storageService.js";
+import { parseGPX } from '@we-gold/gpxjs';
 
 console.log('[ROUTES] routes import module loaded');
+
+function parseGPXWaypoints(gpxData) {
+  try {
+    const gpx = parseGPX(gpxData);
+    const waypoints = [];
+    
+    // Extract waypoints from routes (rtept)
+    if (gpx.routes) {
+      for (const route of gpx.routes) {
+        if (route.points) {
+          for (const point of route.points) {
+            waypoints.push({
+              lat: point.lat,
+              lon: point.lon,
+              name: point.name || ''
+            });
+          }
+        }
+      }
+    }
+    
+    // Extract waypoints from tracks (trkpt)
+    if (gpx.tracks) {
+      for (const track of gpx.tracks) {
+        if (track.segments) {
+          for (const segment of track.segments) {
+            if (segment.points) {
+              for (const point of segment.points) {
+                waypoints.push({
+                  lat: point.lat,
+                  lon: point.lon,
+                  name: point.name || ''
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Extract waypoints from waypoints (wpt)
+    if (gpx.waypoints) {
+      for (const point of gpx.waypoints) {
+        waypoints.push({
+          lat: point.lat,
+          lon: point.lon,
+          name: point.name || ''
+        });
+      }
+    }
+    
+    return waypoints;
+  } catch (error) {
+    console.error('[ROUTES] Error parsing GPX:', error);
+    return null;
+  }
+}
 
 function extractBearerToken(authorizationHeader) {
   if (typeof authorizationHeader !== 'string') {
@@ -443,14 +501,26 @@ export function registerRouteImportRoutes(app) {
         });
       }
 
-      if (!Object.prototype.hasOwnProperty.call(body, 'waypoints') || !Array.isArray(body.waypoints)) {
-        console.log('[ROUTES] Import rejected: waypoints missing/not-array');
-        return res.status(400).json({ success: false, action: 'validation:error', error: 'waypoints is required and must be an array' });
+      // Parse waypoints from GPX if not provided in request body
+      let waypoints = body.waypoints;
+      if (!Array.isArray(waypoints)) {
+        console.log('[ROUTES] waypoints not provided, parsing from GPX data');
+        waypoints = parseGPXWaypoints(body.gpxData);
+        if (!waypoints || waypoints.length === 0) {
+          console.log('[ROUTES] Import rejected: failed to parse waypoints from GPX');
+          return res.status(400).json({ 
+            success: false, 
+            action: 'validation:error', 
+            error: 'No waypoints found in GPX data or waypoints array is required' 
+          });
+        }
+        console.log(`[ROUTES] Parsed ${waypoints.length} waypoints from GPX`);
+      } else {
+        console.log(`[ROUTES] waypoints count=${waypoints.length}`);
       }
-      console.log(`[ROUTES] waypoints count=${body.waypoints.length}`);
 
-      for (let i = 0; i < body.waypoints.length; i += 1) {
-        if (!isValidWaypoint(body.waypoints[i])) {
+      for (let i = 0; i < waypoints.length; i += 1) {
+        if (!isValidWaypoint(waypoints[i])) {
           console.log(`[ROUTES] Import rejected: invalid waypoint at index=${i}`);
           return res.status(400).json({
             success: false,
