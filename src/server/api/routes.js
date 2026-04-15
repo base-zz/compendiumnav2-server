@@ -27,24 +27,24 @@ function verifyJwtToken(token) {
     return null;
   }
 
-  const tokenSecret = process.env.TOKEN_SECRET;
+  const routeImportSecret = process.env.ROUTE_IMPORT_TOKEN_SECRET;
   const publicKey = process.env.ROUTE_IMPORT_JWT_PUBLIC_KEY;
   const sharedSecret = process.env.ROUTE_IMPORT_JWT_SECRET;
 
-  // Check for TOKEN_SECRET first, then fall back to ROUTE_IMPORT_JWT_PUBLIC_KEY/SECRET
-  if ((typeof tokenSecret !== 'string' || !tokenSecret.trim()) && 
+  // Check for ROUTE_IMPORT_TOKEN_SECRET first, then fall back to ROUTE_IMPORT_JWT_PUBLIC_KEY/SECRET
+  if ((typeof routeImportSecret !== 'string' || !routeImportSecret.trim()) && 
       (typeof publicKey !== 'string' || !publicKey.trim()) && 
       (typeof sharedSecret !== 'string' || !sharedSecret.trim())) {
     return {
       ok: false,
-      error: 'Route import auth is not configured. Set TOKEN_SECRET, ROUTE_IMPORT_JWT_PUBLIC_KEY, or ROUTE_IMPORT_JWT_SECRET.'
+      error: 'Route import auth is not configured. Set ROUTE_IMPORT_TOKEN_SECRET, ROUTE_IMPORT_JWT_PUBLIC_KEY, or ROUTE_IMPORT_JWT_SECRET.'
     };
   }
 
   try {
-    // Try TOKEN_SECRET first (HS256)
-    if (typeof tokenSecret === 'string' && tokenSecret.trim()) {
-      const verified = jwt.verify(token, tokenSecret, { algorithms: ['HS256'] });
+    // Try ROUTE_IMPORT_TOKEN_SECRET first (HS256)
+    if (typeof routeImportSecret === 'string' && routeImportSecret.trim()) {
+      const verified = jwt.verify(token, routeImportSecret, { algorithms: ['HS256'] });
       if (!verified || typeof verified !== 'object') {
         return { ok: false, error: 'Invalid bearer token payload' };
       }
