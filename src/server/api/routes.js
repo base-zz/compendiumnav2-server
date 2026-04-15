@@ -27,17 +27,31 @@ function verifyJwtToken(token) {
     return null;
   }
 
+  const deviceToken = process.env.DEVICE_TOKEN;
   const publicKey = process.env.ROUTE_IMPORT_JWT_PUBLIC_KEY;
   const sharedSecret = process.env.ROUTE_IMPORT_JWT_SECRET;
 
-  if ((typeof publicKey !== 'string' || !publicKey.trim()) && (typeof sharedSecret !== 'string' || !sharedSecret.trim())) {
+  // Check for DEVICE_TOKEN first, then fall back to ROUTE_IMPORT_JWT_PUBLIC_KEY/SECRET
+  if ((typeof deviceToken !== 'string' || !deviceToken.trim()) && 
+      (typeof publicKey !== 'string' || !publicKey.trim()) && 
+      (typeof sharedSecret !== 'string' || !sharedSecret.trim())) {
     return {
       ok: false,
-      error: 'Route import auth is not configured. Set ROUTE_IMPORT_JWT_PUBLIC_KEY or ROUTE_IMPORT_JWT_SECRET.'
+      error: 'Route import auth is not configured. Set DEVICE_TOKEN, ROUTE_IMPORT_JWT_PUBLIC_KEY, or ROUTE_IMPORT_JWT_SECRET.'
     };
   }
 
   try {
+    // Try DEVICE_TOKEN first (HS256)
+    if (typeof deviceToken === 'string' && deviceToken.trim()) {
+      const verified = jwt.verify(token, deviceToken, { algorithms: ['HS256'] });
+      if (!verified || typeof verified !== 'object') {
+        return { ok: false, error: 'Invalid bearer token payload' };
+      }
+      return { ok: true, payload: verified };
+    }
+
+    // Fall back to ROUTE_IMPORT_JWT_PUBLIC_KEY (RS256)
     if (typeof publicKey === 'string' && publicKey.trim()) {
       const verified = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
       if (!verified || typeof verified !== 'object') {
@@ -46,13 +60,19 @@ function verifyJwtToken(token) {
       return { ok: true, payload: verified };
     }
 
+    // Fall back to ROUTE_IMPORT_JWT_SECRET (HS256)
     const verified = jwt.verify(token, sharedSecret, { algorithms: ['HS256'] });
     if (!verified || typeof verified !== 'object') {
       return { ok: false, error: 'Invalid bearer token payload' };
     }
-
     return { ok: true, payload: verified };
   } catch (error) {
+    if (error.name === 'JsonWebTokenError') {
+      return { ok: false, error: 'Invalid bearer token format' };
+    }
+    if (error.name === 'TokenExpiredError') {
+      return { ok: false, error: 'Bearer token has expired' };
+    }
     return { ok: false, error: 'Bearer token verification failed' };
   }
 }
