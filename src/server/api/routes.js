@@ -535,7 +535,7 @@ export function registerRouteImportRoutes(app) {
         routeId,
         name: body.name,
         gpxData: body.gpxData,
-        waypoints: body.waypoints,
+        waypoints: waypoints,
         source: body.source,
         createdAt: nowIso,
         importedBy
