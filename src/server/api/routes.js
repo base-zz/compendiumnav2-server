@@ -155,22 +155,24 @@ export function registerRouteImportRoutes(app) {
       console.log('[ROUTES] storageService initialized for route list');
       
       const importedRoutes = await storageService.getSetting('importedRoutes');
-      const activeRouteId = await storageService.getSetting('activeRouteId');
-      
       const routes = Array.isArray(importedRoutes) ? importedRoutes : [];
       
-      return res.status(200).json({
-        success: true,
-        routes: routes.map(r => ({
-          routeId: r.routeId,
-          name: r.name,
-          source: r.source,
-          createdAt: r.createdAt,
-          waypoints: r.waypoints?.length || 0,
-          isActive: r.routeId === activeRouteId
-        })),
-        activeRouteId
+      console.log(`[ROUTES] Found ${routes.length} route(s) to return`);
+      routes.forEach(r => {
+        console.log(`[ROUTES]   - ${r.routeId}: ${r.name} (${r.source}, ${r.waypoints?.length || 0} waypoints)`);
       });
+      
+      const response = routes.map(r => ({
+        routeId: r.routeId,
+        name: r.name,
+        source: r.source,
+        waypoints: r.waypoints || [],
+        note: r.note || null,
+        createdAt: r.createdAt
+      }));
+      
+      console.log('[ROUTES] GET /api/routes: Success, returning', response.length, 'route(s)');
+      return res.status(200).json(response);
     } catch (error) {
       console.error('[ROUTES] Error listing routes:', error);
       return res.status(500).json({
@@ -194,16 +196,22 @@ export function registerRouteImportRoutes(app) {
       
       const activeRouteId = await storageService.getSetting('activeRouteId');
       if (!activeRouteId) {
+        console.log('[ROUTES] No active route set');
         return res.status(200).json({ success: true, activeRoute: null });
       }
+      
+      console.log(`[ROUTES] Active route ID: ${activeRouteId}`);
       
       const importedRoutes = await storageService.getSetting('importedRoutes');
       const routes = Array.isArray(importedRoutes) ? importedRoutes : [];
       const activeRoute = routes.find(r => r.routeId === activeRouteId);
       
       if (!activeRoute) {
+        console.log(`[ROUTES] Active route ${activeRouteId} not found in imported routes`);
         return res.status(200).json({ success: true, activeRoute: null, activeRouteId });
       }
+      
+      console.log(`[ROUTES] Active route found: ${activeRoute.name} (${activeRoute.source}, ${activeRoute.waypoints?.length || 0} waypoints)`);
       
       return res.status(200).json({
         success: true,
@@ -235,6 +243,8 @@ export function registerRouteImportRoutes(app) {
         return res.status(400).json({ success: false, error: 'routeId is required' });
       }
       
+      console.log(`[ROUTES] Attempting to set active route: ${routeId}`);
+      
       if (!storageService.initialize) {
         console.log('[ROUTES] Set active rejected: storageService.initialize unavailable');
         return res.status(500).json({ success: false, error: 'Storage service not available' });
@@ -248,9 +258,11 @@ export function registerRouteImportRoutes(app) {
       const route = routes.find(r => r.routeId === routeId);
       
       if (!route) {
-        console.log('[ROUTES] Set active rejected: route not found');
+        console.log(`[ROUTES] Set active rejected: route ${routeId} not found`);
         return res.status(404).json({ success: false, error: 'Route not found' });
       }
+      
+      console.log(`[ROUTES] Route found: ${route.name} (${route.source})`);
       
       // Set active route
       const persisted = await storageService.setSetting('activeRouteId', routeId);
@@ -259,7 +271,7 @@ export function registerRouteImportRoutes(app) {
         return res.status(500).json({ success: false, error: 'Failed to set active route' });
       }
       
-      console.log(`[ROUTES] Set active route: ${routeId} (${route.name})`);
+      console.log(`[ROUTES] Successfully set active route: ${routeId} (${route.name})`);
       
       return res.status(200).json({
         success: true,
@@ -297,15 +309,17 @@ export function registerRouteImportRoutes(app) {
       // Get current routes
       const importedRoutes = await storageService.getSetting('importedRoutes');
       const routes = Array.isArray(importedRoutes) ? importedRoutes : [];
+      console.log(`[ROUTES] Current route count before deletion: ${routes.length}`);
       
       // Find and remove route
       const routeIndex = routes.findIndex(r => r.routeId === routeId);
       if (routeIndex === -1) {
-        console.log('[ROUTES] Delete rejected: route not found');
+        console.log(`[ROUTES] Delete rejected: route ${routeId} not found`);
         return res.status(404).json({ success: false, error: 'Route not found' });
       }
       
       const deletedRoute = routes[routeIndex];
+      console.log(`[ROUTES] Found route to delete: ${deletedRoute.name} (${deletedRoute.source}, ${deletedRoute.waypoints?.length || 0} waypoints)`);
       routes.splice(routeIndex, 1);
       
       // Persist updated routes
@@ -315,6 +329,8 @@ export function registerRouteImportRoutes(app) {
         return res.status(500).json({ success: false, error: 'Failed to delete route' });
       }
       
+      console.log(`[ROUTES] Route count after deletion: ${routes.length}`);
+      
       // If deleted route was active, clear activeRouteId
       const activeRouteId = await storageService.getSetting('activeRouteId');
       if (activeRouteId === routeId) {
@@ -322,14 +338,9 @@ export function registerRouteImportRoutes(app) {
         console.log(`[ROUTES] Cleared activeRouteId (deleted route was active)`);
       }
       
-      console.log(`[ROUTES] Deleted route: ${routeId} (${deletedRoute.name})`);
+      console.log(`[ROUTES] Successfully deleted route: ${routeId} (${deletedRoute.name})`);
       
-      return res.status(200).json({
-        success: true,
-        action: 'route:deleted',
-        routeId,
-        routeName: deletedRoute.name
-      });
+      return res.status(204).send();
     } catch (error) {
       console.error('[ROUTES] Error deleting route:', error);
       return res.status(500).json({
@@ -456,6 +467,7 @@ export function registerRouteImportRoutes(app) {
 
       const routeId = crypto.randomUUID();
       const nowIso = new Date().toISOString();
+      console.log(`[ROUTES] Generated routeId: ${routeId}`);
 
       const routeRecord = {
         routeId,
@@ -471,13 +483,17 @@ export function registerRouteImportRoutes(app) {
         routeRecord.note = body.note;
       }
 
+      console.log(`[ROUTES] Route record created: ${routeRecord.name} (${routeRecord.source}), ${routeRecord.waypoints.length} waypoints`);
+
       const existingRoutes = await storageService.getSetting('importedRoutes');
       let routesToPersist;
 
       if (Array.isArray(existingRoutes)) {
         routesToPersist = [...existingRoutes, routeRecord];
+        console.log(`[ROUTES] Adding to existing routes (existing: ${existingRoutes.length}, new total: ${routesToPersist.length})`);
       } else {
         routesToPersist = [routeRecord];
+        console.log(`[ROUTES] Creating new routes collection (total: ${routesToPersist.length})`);
       }
 
       const persisted = await storageService.setSetting('importedRoutes', routesToPersist);
@@ -486,12 +502,15 @@ export function registerRouteImportRoutes(app) {
         return res.status(500).json({ success: false, action: 'storage:write-failed', error: 'Failed to store imported route' });
       }
 
-      console.log(`[ROUTES] Imported route ${routeId} from source=${body.source}, waypoints=${body.waypoints.length}, totalStored=${routesToPersist.length}`);
+      console.log(`[ROUTES] Successfully imported route ${routeId}: ${body.name} (${body.source}, ${body.waypoints.length} waypoints, totalStored=${routesToPersist.length})`);
 
       return res.status(201).json({
-        success: true,
-        action: 'route:imported',
-        routeId
+        routeId: routeRecord.routeId,
+        name: routeRecord.name,
+        source: routeRecord.source,
+        waypoints: routeRecord.waypoints,
+        note: routeRecord.note || null,
+        createdAt: routeRecord.createdAt
       });
     } catch (error) {
       console.error('[ROUTES] Error importing route:', error);
