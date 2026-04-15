@@ -564,7 +564,7 @@ export function registerRouteImportRoutes(app) {
         return res.status(500).json({ success: false, action: 'storage:write-failed', error: 'Failed to store imported route' });
       }
 
-      console.log(`[ROUTES] Successfully imported route ${routeId}: ${body.name} (${body.source}, ${body.waypoints.length} waypoints, totalStored=${routesToPersist.length})`);
+      console.log(`[ROUTES] Successfully imported route ${routeId}: ${body.name} (${body.source}, ${waypoints.length} waypoints, totalStored=${routesToPersist.length})`);
 
       return res.status(201).json({
         routeId: routeRecord.routeId,
