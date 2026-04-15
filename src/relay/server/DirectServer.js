@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import debug from 'debug';
+import fetch from 'node-fetch';
 
 /**
  * @typedef {import('ws').WebSocket} WebSocket
@@ -52,11 +53,53 @@ async function startDirectServer(input = /** @type {{ coordinator?: unknown }} *
   log(`Binding WebSocket server to ${HOST}:${PORT}`);
   
   // Create HTTP server
-  const httpServer = createServer((req, res) => {
-    // Respond to HTTP requests (optional)
-    res.writeHead(200);
-    res.end('Compendium Navigation Server\n');
+  const httpServer = createServer(async (req, res) => {
+    const MAIN_SERVER_PORT = process.env.PORT || 3001;
+    
+    // Proxy API requests to main server
+    if (req.url.startsWith('/api/')) {
+      try {
+        const targetUrl = `http://localhost:${MAIN_SERVER_PORT}${req.url}`;
+        console.log(`[DIRECT] Proxying ${req.method} ${req.url} to ${targetUrl}`);
+        
+        const response = await fetch(targetUrl, {
+          method: req.method,
+          headers: {
+            'Content-Type': 'application/json',
+            ...req.headers
+          },
+          body: req.method !== 'GET' ? await getRequestBody(req) : undefined
+        });
+        
+        // Forward status and headers
+        res.writeHead(response.status, {
+          'Content-Type': response.headers.get('Content-Type') || 'application/json'
+        });
+        
+        // Forward body
+        const body = await response.text();
+        res.end(body);
+      } catch (error) {
+        console.error(`[DIRECT] Error proxying API request:`, error);
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Failed to proxy request to main server' }));
+      }
+    } else {
+      // Respond to non-API HTTP requests
+      res.writeHead(200);
+      res.end('Compendium Navigation Server\n');
+    }
   });
+
+  // Helper to get request body
+  async function getRequestBody(req) {
+    return new Promise((resolve, reject) => {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => resolve(body));
+      req.on('error', reject);
+    });
+  }
 
   // WebSocket server options
   /** @type {import('ws').ServerOptions} */
