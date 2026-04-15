@@ -1,72 +1,29 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import storageService from "../../bluetooth/services/storage/storageService.js";
-import { parseGPX } from '@we-gold/gpxjs';
 
 console.log('[ROUTES] routes import module loaded');
 
 function parseGPXWaypoints(gpxData) {
   try {
     console.log('[ROUTES] Starting GPX parsing...');
-    const gpx = parseGPX(gpxData);
-    console.log('[ROUTES] GPX parsed, structure:', JSON.stringify({
-      hasRoutes: !!gpx.routes,
-      hasTracks: !!gpx.tracks,
-      hasWaypoints: !!gpx.waypoints,
-      routesCount: gpx.routes?.length || 0,
-      tracksCount: gpx.tracks?.length || 0,
-      waypointsCount: gpx.waypoints?.length || 0
-    }));
+    
+    // Simple regex-based parsing for rtept elements (route points)
+    const rteptRegex = /<rtept\s+lat="([^"]+)"\s+lon="([^"]+)">/g;
+    const nameRegex = /<name>([^<]+)<\/name>/g;
     
     const waypoints = [];
-    
-    // Extract waypoints from routes (rtept)
-    if (gpx.routes) {
-      console.log('[ROUTES] Processing routes...');
-      for (const route of gpx.routes) {
-        console.log('[ROUTES] Route has points:', !!route.points, 'count:', route.points?.length || 0);
-        if (route.points) {
-          for (const point of route.points) {
-            waypoints.push({
-              lat: point.lat,
-              lon: point.lon,
-              name: point.name || ''
-            });
-          }
-        }
-      }
-    }
-    
-    // Extract waypoints from tracks (trkpt)
-    if (gpx.tracks) {
-      console.log('[ROUTES] Processing tracks...');
-      for (const track of gpx.tracks) {
-        if (track.segments) {
-          for (const segment of track.segments) {
-            if (segment.points) {
-              for (const point of segment.points) {
-                waypoints.push({
-                  lat: point.lat,
-                  lon: point.lon,
-                  name: point.name || ''
-                });
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    // Extract waypoints from waypoints (wpt)
-    if (gpx.waypoints) {
-      console.log('[ROUTES] Processing waypoints...');
-      for (const point of gpx.waypoints) {
-        waypoints.push({
-          lat: point.lat,
-          lon: point.lon,
-          name: point.name || ''
-        });
-      }
+    let match;
+    while ((match = rteptRegex.exec(gpxData)) !== null) {
+      const lat = parseFloat(match[1]);
+      const lon = parseFloat(match[2]);
+      
+      // Try to extract name from the nearby context
+      const context = gpxData.substring(match.index, match.index + 200);
+      const nameMatch = nameRegex.exec(context);
+      const name = nameMatch ? nameMatch[1] : '';
+      
+      waypoints.push({ lat, lon, name });
     }
     
     console.log('[ROUTES] Total waypoints extracted:', waypoints.length);
