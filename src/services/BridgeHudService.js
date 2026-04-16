@@ -434,8 +434,9 @@ export class BridgeHudService extends BaseService {
 
     this._stateManager.emit('state:patch', {
       type: 'state:patch',
-      path: 'bridges.hud.header',
-      value: headerData,
+      data: [
+        { op: 'replace', path: '/bridges/hud/header', value: headerData }
+      ],
       source: 'bridge-hud',
       timestamp: Date.now()
     });
@@ -589,8 +590,9 @@ export class BridgeHudService extends BaseService {
 
     this._stateManager.emit('state:patch', {
       type: 'state:patch',
-      path: 'bridges.hud.nextBridge',
-      value: nextBridgeData,
+      data: [
+        { op: 'replace', path: '/bridges/hud/nextBridge', value: nextBridgeData }
+      ],
       source: 'bridge-hud',
       timestamp: Date.now()
     });
@@ -647,8 +649,9 @@ export class BridgeHudService extends BaseService {
   _publishAlerts() {
     this._stateManager.emit('state:patch', {
       type: 'state:patch',
-      path: 'bridges.hud.alerts',
-      value: [...this._activeAlerts],
+      data: [
+        { op: 'replace', path: '/bridges/hud/alerts', value: [...this._activeAlerts] }
+      ],
       source: 'bridge-hud',
       timestamp: Date.now()
     });
@@ -723,8 +726,9 @@ export class BridgeHudService extends BaseService {
   _publishNotifications() {
     this._stateManager.emit('state:patch', {
       type: 'state:patch',
-      path: 'bridges.hud.notifications',
-      value: [...this._activeNotifications],
+      data: [
+        { op: 'replace', path: '/bridges/hud/notifications', value: [...this._activeNotifications] }
+      ],
       source: 'bridge-hud',
       timestamp: Date.now()
     });
