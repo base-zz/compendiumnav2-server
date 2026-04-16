@@ -424,6 +424,7 @@ export class BridgeHudService extends BaseService {
     const nextBridge = this._findNextBridgeOnRoute(latitude, longitude);
 
     if (nextBridge) {
+      console.log('[BridgeHudService] Bridge found, publishing:', nextBridge);
       await this._publishNextBridge(nextBridge);
     } else {
       console.log('[BridgeHudService] No bridge found on route');
@@ -462,6 +463,8 @@ export class BridgeHudService extends BaseService {
           maxDistanceNM: 2
         }
       );
+
+      console.log(`[BridgeHudService] queryBridgesAlongRoute returned ${bridgesAhead?.length || 0} bridges`);
 
       // Clean up temp file
       fs.unlinkSync(tempFile);
