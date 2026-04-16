@@ -415,8 +415,13 @@ export class BridgeHudService extends BaseService {
 
   async _findAndPublishNextBridge() {
     const { latitude, longitude } = this._boatState.position;
-    
+
     if (!latitude || !longitude) {
+      return;
+    }
+
+    // Only find bridges if there's an active route loaded
+    if (!this._routeWithDistances || this._routeWithDistances.length === 0) {
       return;
     }
 
