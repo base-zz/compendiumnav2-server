@@ -422,9 +422,11 @@ export class BridgeHudService extends BaseService {
 
     // Find next bridge on route
     const nextBridge = this._findNextBridgeOnRoute(latitude, longitude);
-    
+
     if (nextBridge) {
       await this._publishNextBridge(nextBridge);
+    } else {
+      console.log('[BridgeHudService] No bridge found on route');
     }
   }
 
@@ -449,70 +451,102 @@ export class BridgeHudService extends BaseService {
     const os = await import('os');
     const tempDir = os.tmpdir();
     const tempFile = path.join(tempDir, `route-query-${Date.now()}.gpx`);
-    fs.writeFileSync(tempFile, this._routeGpxData || '');
-    
-    const bridgesAhead = await queryBridgesAlongRoute(
-      tempFile,
-      {
-        dbPath: this.dbPath,
-        maxDistanceNM: 2
+
+    try {
+      fs.writeFileSync(tempFile, this._routeGpxData || '');
+
+      const bridgesAhead = await queryBridgesAlongRoute(
+        tempFile,
+        {
+          dbPath: this.dbPath,
+          maxDistanceNM: 2
+        }
+      );
+
+      // Clean up temp file
+      fs.unlinkSync(tempFile);
+
+      if (!bridgesAhead || bridgesAhead.length === 0) {
+        console.log('[BridgeHudService] No bridges found ahead on route');
+        return null;
       }
-    );
-    
-    // Clean up temp file
-    fs.unlinkSync(tempFile);
-    
-    if (!bridgesAhead || bridgesAhead.length === 0) {
+
+      const bridge = bridgesAhead[0];
+      if (bridge) {
+        const distanceStr = bridge.distance_nm !== undefined ? bridge.distance_nm.toFixed(2) : 'unknown';
+        console.log(`[BridgeHudService] Found next bridge: ${bridge.name || 'Unknown'} at ${distanceStr}nm`);
+      }
+      return bridge;
+    } catch (err) {
+      console.error('[BridgeHudService] Error finding bridges on route:', err.message);
+      // Clean up temp file if it exists
+      try {
+        fs.unlinkSync(tempFile);
+      } catch (cleanupErr) {
+        // Ignore cleanup errors
+      }
       return null;
     }
-    
-    // Return the closest bridge ahead
-    return bridgesAhead[0];
   }
 
   async _publishNextBridge(bridge) {
+    if (!bridge) {
+      console.warn('[BridgeHudService] Cannot publish next bridge - bridge is null/undefined');
+      return;
+    }
+
     // Get tide data for bridge location
     let tideData = null;
-    try {
-      tideData = await this._tideService.getEnvironmentalData(bridge.latitude, bridge.longitude);
-    } catch (err) {
-      console.warn('[BridgeHudService] Failed to get tide data:', err.message);
+    if (bridge.latitude !== undefined && bridge.longitude !== undefined) {
+      try {
+        tideData = await this._tideService.getEnvironmentalData(bridge.latitude, bridge.longitude);
+      } catch (err) {
+        console.warn('[BridgeHudService] Failed to get tide data:', err.message);
+      }
+    } else {
+      console.warn('[BridgeHudService] Bridge missing latitude/longitude, skipping tide data');
     }
 
     // Calculate dynamic clearance
     let dynamicClearance = null;
     let clearanceMargin = null;
-    
-    if (tideData && tideData.tide && 'height' in tideData.tide && typeof tideData.tide.height === 'number') {
+
+    if (tideData && tideData.tide && 'height' in tideData.tide && typeof tideData.tide.height === 'number' && bridge.closed_height_mhw !== undefined && this._safeAirDraft !== undefined) {
       dynamicClearance = bridge.closed_height_mhw - tideData.tide.height;
       clearanceMargin = dynamicClearance - this._safeAirDraft;
     }
 
     const nextBridgeData = {
-      id: bridge.external_id,
-      name: bridge.name,
-      latitude: bridge.latitude,
-      longitude: bridge.longitude,
-      distance_nm: bridge.distance_nm,
-      charted_clearance_ft: bridge.closed_height_mhw,
+      id: bridge.external_id || null,
+      name: bridge.name || 'Unknown Bridge',
+      latitude: bridge.latitude !== undefined ? bridge.latitude : null,
+      longitude: bridge.longitude !== undefined ? bridge.longitude : null,
+      distance_nm: bridge.distance_nm !== undefined ? bridge.distance_nm : null,
+      charted_clearance_ft: bridge.closed_height_mhw !== undefined ? bridge.closed_height_mhw : null,
       dynamic_clearance_ft: dynamicClearance,
       clearance_margin_ft: clearanceMargin,
-      schedule_type: bridge.schedule_type,
-      vhf_channel: bridge.vhf_channel,
-      tier: bridge.tier,
+      schedule_type: bridge.schedule_type || null,
+      vhf_channel: bridge.vhf_channel || null,
+      tier: bridge.tier || null,
       timestamp: Date.now()
     };
 
     // Add schedule-specific data
     if (bridge.schedule_type === 'SCHEDULED' && bridge.opening_intervals) {
       nextBridgeData.opening_intervals = bridge.opening_intervals;
-      nextBridgeData.next_opening = this._calculateNextOpening(bridge);
+      try {
+        nextBridgeData.next_opening = this._calculateNextOpening(bridge);
+      } catch (err) {
+        console.warn('[BridgeHudService] Failed to calculate next opening:', err.message);
+      }
     } else if (bridge.schedule_type === 'ON_DEMAND') {
       nextBridgeData.on_demand = true;
-      nextBridgeData.should_hail = bridge.distance_nm <= 1.0;
+      nextBridgeData.should_hail = bridge.distance_nm !== undefined && bridge.distance_nm <= 1.0;
     } else if (bridge.schedule_type === 'FIXED') {
       nextBridgeData.fixed = true;
-      nextBridgeData.can_pass_closed = bridge.closed_height_mhw >= this._safeAirDraft;
+      if (bridge.closed_height_mhw !== undefined && this._safeAirDraft !== undefined) {
+        nextBridgeData.can_pass_closed = bridge.closed_height_mhw >= this._safeAirDraft;
+      }
     }
 
     this._stateManager.emit('state:patch', {
@@ -522,22 +556,37 @@ export class BridgeHudService extends BaseService {
       source: 'bridge-hud',
       timestamp: Date.now()
     });
-    console.log(`[BridgeHudService] Patched next bridge state: ${bridge.name} (${bridge.distance_nm.toFixed(2)}nm)`);
+    const distanceStr = bridge.distance_nm !== undefined ? bridge.distance_nm.toFixed(2) : 'unknown';
+    const bridgeName = bridge.name || 'Unknown Bridge';
+    console.log(`[BridgeHudService] Patched next bridge state: ${bridgeName} (${distanceStr}nm)`);
 
     // Update alert for this bridge (add or remove based on clearance)
-    this._updateBridgeAlert(bridge, clearanceMargin, dynamicClearance);
+    if (bridge.external_id) {
+      this._updateBridgeAlert(bridge, clearanceMargin, dynamicClearance);
+    } else {
+      console.warn('[BridgeHudService] Cannot update alert - bridge missing external_id');
+    }
   }
 
   _updateBridgeAlert(bridge, clearanceMargin, dynamicClearance) {
+    if (!bridge.external_id) {
+      console.warn('[BridgeHudService] Cannot update alert - bridge missing external_id');
+      return;
+    }
+
     const alertIndex = this._activeAlerts.findIndex(a => a.bridge_id === bridge.external_id);
     const hasLowClearance = clearanceMargin !== null && clearanceMargin < 5;
 
-    if (hasLowClearance) {
+    if (hasLowClearance && dynamicClearance !== null) {
+      const bridgeName = bridge.name || 'Unknown Bridge';
       const alertData = {
         type: 'CLEARANCE_WARNING',
-        message: `Low clearance at ${bridge.name}: ${dynamicClearance.toFixed(1)}ft (margin: ${clearanceMargin.toFixed(1)}ft)`,
+        message: `Low clearance at ${bridgeName}: ${dynamicClearance.toFixed(1)}ft (margin: ${clearanceMargin.toFixed(1)}ft)`,
         severity: clearanceMargin < 0 ? 'CRITICAL' : 'WARNING',
         bridge_id: bridge.external_id,
+        bridge_name: bridgeName,
+        bridge_latitude: bridge.latitude,
+        bridge_longitude: bridge.longitude,
         timestamp: Date.now()
       };
 
