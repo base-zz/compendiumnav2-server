@@ -540,7 +540,9 @@ export const stateData = {
       alerts: this.alerts,
       tides: this.tides,
       forecast: this.forecast,
-      bluetooth: this.bluetooth
+      bluetooth: this.bluetooth,
+      routes: this.routes, 
+      bridges: this.bridges,
     };
   },
 
