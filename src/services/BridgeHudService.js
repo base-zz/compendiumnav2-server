@@ -278,9 +278,20 @@ export class BridgeHudService extends BaseService {
     }
 
     if (positionSource) {
+      const latitude = typeof positionSource.latitude === 'number'
+        ? positionSource.latitude
+        : positionSource.latitude?.value;
+      const longitude = typeof positionSource.longitude === 'number'
+        ? positionSource.longitude
+        : positionSource.longitude?.value;
+
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        return;
+      }
+
       this._boatState.position = {
-        latitude: positionSource.latitude,
-        longitude: positionSource.longitude,
+        latitude,
+        longitude,
         heading: positionSource.heading || null
       };
       this._boatState.sog = navigation?.speed?.sog?.value;
@@ -434,7 +445,7 @@ export class BridgeHudService extends BaseService {
   async _findAndPublishNextBridge() {
     const { latitude, longitude } = this._boatState.position;
 
-    if (!latitude || !longitude) {
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
       return;
     }
 
