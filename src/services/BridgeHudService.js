@@ -91,7 +91,10 @@ export class BridgeHudService extends BaseService {
       // Load bridges
       this._loadBridges();
 
-      // Load route
+      // Fetch user configuration from storage
+      await this._fetchUserConfig();
+
+      // Load route (after fetching user config so route data is available)
       await this._loadRoute();
 
       // Initialize tide service
@@ -105,9 +108,6 @@ export class BridgeHudService extends BaseService {
         spatialitePath: this.spatiaLitePath,
         requestTimeoutMs: 10000
       });
-
-      // Fetch user configuration from storage
-      await this._fetchUserConfig();
 
       // Listen to state:patch events from state manager
       this._statePatchHandler = (event) => {
@@ -277,8 +277,11 @@ export class BridgeHudService extends BaseService {
       const now = Date.now();
       if (!this._boatState.lastBridgeCheck || (now - this._boatState.lastBridgeCheck) > 1000) {
         this._boatState.lastBridgeCheck = now;
-        console.log(`[BridgeHudService] Finding next bridge`);
-        this._findAndPublishNextBridge();
+        // Only find bridges if there's an active route loaded
+        if (this._routeWithDistances && this._routeWithDistances.length > 0) {
+          console.log(`[BridgeHudService] Finding next bridge`);
+          this._findAndPublishNextBridge();
+        }
       }
     } else {
       console.log(`[BridgeHudService] No position source available, skipping boat state update`);
@@ -335,7 +338,7 @@ export class BridgeHudService extends BaseService {
       if (activeRouteId) {
         this._activeRouteId = activeRouteId;
         console.log(`[BridgeHudService] Fetched activeRouteId from storage: ${activeRouteId}`);
-        
+
         // Fetch the route data
         const importedRoutes = await this._storageService.getSetting('importedRoutes');
         if (Array.isArray(importedRoutes)) {
@@ -343,8 +346,19 @@ export class BridgeHudService extends BaseService {
           if (activeRoute && activeRoute.gpxData) {
             this._routeGpxData = activeRoute.gpxData;
             console.log(`[BridgeHudService] Fetched GPX data for active route: ${activeRoute.name}`);
+          } else {
+            // Clear route data if no active route or no GPX data
+            this._routeGpxData = null;
+            this._routeWithDistances = [];
+            this._routePoints = [];
           }
         }
+      } else {
+        // Clear route data if no active route
+        this._activeRouteId = null;
+        this._routeGpxData = null;
+        this._routeWithDistances = [];
+        this._routePoints = [];
       }
     } catch (err) {
       console.warn('[BridgeHudService] Failed to fetch user config from storage:', err.message);
@@ -424,6 +438,8 @@ export class BridgeHudService extends BaseService {
     if (!this._routeWithDistances || this._routeWithDistances.length === 0) {
       return;
     }
+
+    console.log(`[BridgeHudService] Finding next bridge (route points: ${this._routeWithDistances.length}, active route: ${this._activeRouteId})`);
 
     // Find next bridge on route
     const nextBridge = this._findNextBridgeOnRoute(latitude, longitude);
