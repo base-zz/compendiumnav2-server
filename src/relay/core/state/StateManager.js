@@ -464,13 +464,49 @@ export class StateManager extends EventEmitter {
         return operation;
       });
 
+      const activeRouteOperation = patchForEmit.find(
+        (operation) => operation?.path === "/routes/activeRoute"
+      );
+
+      const eventTimestamp = Date.now();
+
       // Always emit patch events for direct server
       const patchPayload = {
         type: "state:patch",
         data: patchForEmit,
         boatId: this._boatId,
-        timestamp: Date.now(),
+        timestamp: eventTimestamp,
       };
+
+      const bridgeRelevantPatchData = patchForEmit.filter((operation) => {
+        const path = operation?.path;
+        return (
+          typeof path === "string" &&
+          (path.startsWith("/routes/") ||
+            path.startsWith("/position/") ||
+            path.startsWith("/navigation/"))
+        );
+      });
+
+      if (bridgeRelevantPatchData.length > 0) {
+        this.emit("state:bridge-patch", {
+          type: "state:bridge-patch",
+          data: bridgeRelevantPatchData,
+          boatId: this._boatId,
+          timestamp: eventTimestamp,
+        });
+      }
+
+      if (activeRouteOperation) {
+        this.emit("state:active-route", {
+          type: "state:active-route",
+          boatId: this._boatId,
+          op: activeRouteOperation.op,
+          routeId: activeRouteOperation?.value?.routeId || null,
+          routeName: activeRouteOperation?.value?.routeName || null,
+          timestamp: eventTimestamp,
+        });
+      }
 
       const windAngleOps = patchForEmit.filter((op) => {
         if (!op || typeof op !== "object") return false;
