@@ -189,13 +189,13 @@ export class BridgeHudService extends BaseService {
     this._statePatchHandler = null;
   }
 
-  _handleActiveRouteEvent(event) {
+  async _handleActiveRouteEvent(event) {
     const newRouteId = event?.routeId || null;
 
     if (newRouteId && newRouteId !== this._activeRouteId) {
       this._activeRouteId = newRouteId;
-      this._fetchUserConfig();
-      this._loadRoute();
+      await this._fetchUserConfig();
+      await this._loadRoute();
       this._registerStatePatchHandler();
       return;
     }
@@ -438,10 +438,14 @@ export class BridgeHudService extends BaseService {
       return;
     }
 
+    if (!this._routeWithDistances || this._routeWithDistances.length === 0) {
+      return;
+    }
+
     console.log(`[BridgeHudService] Finding next bridge (route points: ${this._routeWithDistances.length}, active route: ${this._activeRouteId})`);
 
     // Find next bridge on route
-    const nextBridge = this._findNextBridgeOnRoute(latitude, longitude);
+    const nextBridge = await this._findNextBridgeOnRoute(latitude, longitude);
 
     if (nextBridge) {
       console.log('[BridgeHudService] Bridge found, publishing:', nextBridge);
