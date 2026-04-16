@@ -164,21 +164,14 @@ export class BridgeHudService extends BaseService {
       return;
     }
 
-    console.log('[BridgeHudService] Seeding boat state from current state');
     this._processStatePatch(state);
   }
 
   _processStatePatch(patchData) {
-    console.log(`[BridgeHudService] _processStatePatch called, type: ${Array.isArray(patchData) ? 'array' : typeof patchData}`);
-    
     if (!Array.isArray(patchData)) {
-      // If it's not an array, it might be a full state object (from seeding)
-      console.log(`[BridgeHudService] Processing full state object`);
       this._processFullState(patchData);
       return;
     }
-
-    console.log(`[BridgeHudService] Processing ${patchData.length} patch operations`);
 
     // Process individual patch operations
     let routeChanged = false;
