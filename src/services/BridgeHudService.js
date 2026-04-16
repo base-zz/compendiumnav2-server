@@ -277,11 +277,7 @@ export class BridgeHudService extends BaseService {
       const now = Date.now();
       if (!this._boatState.lastBridgeCheck || (now - this._boatState.lastBridgeCheck) > 1000) {
         this._boatState.lastBridgeCheck = now;
-        // Only find bridges if there's an active route loaded
-        if (this._routeWithDistances && this._routeWithDistances.length > 0) {
-          console.log(`[BridgeHudService] Finding next bridge`);
-          this._findAndPublishNextBridge();
-        }
+        this._findAndPublishNextBridge();
       }
     } else {
       console.log(`[BridgeHudService] No position source available, skipping boat state update`);
@@ -359,6 +355,7 @@ export class BridgeHudService extends BaseService {
         this._routeGpxData = null;
         this._routeWithDistances = [];
         this._routePoints = [];
+        console.log('[BridgeHudService] No active route in storage, cleared route data');
       }
     } catch (err) {
       console.warn('[BridgeHudService] Failed to fetch user config from storage:', err.message);
@@ -378,6 +375,7 @@ export class BridgeHudService extends BaseService {
 
   async _loadRoute() {
     try {
+      console.log(`[BridgeHudService] _loadRoute called: _routeGpxData=${this._routeGpxData ? 'present' : 'null'}, _routeWithDistances.length=${this._routeWithDistances.length}`);
       if (this._routeGpxData) {
         console.log('[BridgeHudService] Loading route from storage GPX data...');
         // Parse GPX data directly from string (parseGPXRoute expects a file path, need to adapt)
@@ -388,16 +386,16 @@ export class BridgeHudService extends BaseService {
         const tempDir = os.tmpdir();
         const tempFile = path.join(tempDir, `route-${Date.now()}.gpx`);
         fs.writeFileSync(tempFile, this._routeGpxData);
-        
+
         this._routePoints = await parseGPXRoute(tempFile);
         this._routeWithDistances = calculateRouteDistances(this._routePoints);
-        
+
         // Clean up temp file
         fs.unlinkSync(tempFile);
-        
+
         console.log(`[BridgeHudService] Route loaded: ${this._routePoints.length} points, ${this._routeWithDistances[this._routeWithDistances.length-1]?.distanceFromStart?.toFixed(1)}nm total`);
       } else {
-        console.warn('[BridgeHudService] No GPX data available from storage');
+        console.warn('[BridgeHudService] No GPX data available from storage, clearing route data');
         this._routePoints = [];
         this._routeWithDistances = [];
       }
