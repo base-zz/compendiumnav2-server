@@ -241,15 +241,30 @@ export class BridgeHudService extends BaseService {
     console.log(`[BridgeHudService] _updateBoatState called`);
     const { position, navigation } = state;
 
-    console.log(`[BridgeHudService] Position available: ${!!position}, GPS available: ${!!position?.gps}`);
+    console.log(`[BridgeHudService] Position available: ${!!position}, Position keys: ${position ? Object.keys(position) : 'none'}`);
     console.log(`[BridgeHudService] Navigation available: ${!!navigation}`);
     console.log(`[BridgeHudService] SOG: ${navigation?.speed?.sog?.value}, COG: ${navigation?.course?.cog?.value}`);
 
-    if (position?.gps) {
+    // Position is a dynamic object with source names as keys (e.g., signalk, gps, ais)
+    // Check for any position source that has latitude/longitude
+    let positionSource = null;
+    if (position) {
+      // Try to find a position source (signalk, gps, etc.)
+      const sources = Object.keys(position);
+      for (const source of sources) {
+        if (position[source] && position[source].latitude !== undefined && position[source].longitude !== undefined) {
+          positionSource = position[source];
+          console.log(`[BridgeHudService] Found position source: ${source}`);
+          break;
+        }
+      }
+    }
+
+    if (positionSource) {
       this._boatState.position = {
-        latitude: position.gps.latitude,
-        longitude: position.gps.longitude,
-        heading: position.gps.heading || position.heading || null
+        latitude: positionSource.latitude,
+        longitude: positionSource.longitude,
+        heading: positionSource.heading || null
       };
       this._boatState.sog = navigation?.speed?.sog?.value;
       this._boatState.cog = navigation?.course?.cog?.value;
@@ -266,7 +281,7 @@ export class BridgeHudService extends BaseService {
         this._findAndPublishNextBridge();
       }
     } else {
-      console.log(`[BridgeHudService] No GPS position available, skipping boat state update`);
+      console.log(`[BridgeHudService] No position source available, skipping boat state update`);
     }
   }
 
