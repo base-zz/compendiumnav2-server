@@ -169,11 +169,16 @@ export class BridgeHudService extends BaseService {
   }
 
   _processStatePatch(patchData) {
+    console.log(`[BridgeHudService] _processStatePatch called, type: ${Array.isArray(patchData) ? 'array' : typeof patchData}`);
+    
     if (!Array.isArray(patchData)) {
       // If it's not an array, it might be a full state object (from seeding)
+      console.log(`[BridgeHudService] Processing full state object`);
       this._processFullState(patchData);
       return;
     }
+
+    console.log(`[BridgeHudService] Processing ${patchData.length} patch operations`);
 
     // Process individual patch operations
     let routeChanged = false;
@@ -181,8 +186,10 @@ export class BridgeHudService extends BaseService {
     let navigationUpdated = false;
 
     for (const patch of patchData) {
+      console.log(`[BridgeHudService] Patch: op=${patch.op}, path=${patch.path}`);
       if (patch.path === '/routes/activeRoute') {
         const newRouteId = patch.value?.routeId;
+        console.log(`[BridgeHudService] Route patch: routeId=${newRouteId}, routeName=${patch.value?.routeName}`);
         if (newRouteId && newRouteId !== this._activeRouteId) {
           console.log(`[BridgeHudService] Route activated: ${newRouteId} (${patch.value?.routeName})`);
           this._activeRouteId = newRouteId;
@@ -196,11 +203,13 @@ export class BridgeHudService extends BaseService {
     }
 
     if (routeChanged) {
+      console.log(`[BridgeHudService] Route changed, reloading data`);
       this._fetchUserConfig(); // Reload route data
       this._loadRoute();
     }
 
     if (positionUpdated || navigationUpdated) {
+      console.log(`[BridgeHudService] Position/navigation updated, updating boat state`);
       // Get current state to update boat state
       const state = this._stateManager.getState();
       if (state) {
@@ -229,7 +238,12 @@ export class BridgeHudService extends BaseService {
   }
 
   _updateBoatState(state) {
+    console.log(`[BridgeHudService] _updateBoatState called`);
     const { position, navigation } = state;
+
+    console.log(`[BridgeHudService] Position available: ${!!position}, GPS available: ${!!position?.gps}`);
+    console.log(`[BridgeHudService] Navigation available: ${!!navigation}`);
+    console.log(`[BridgeHudService] SOG: ${navigation?.speed?.sog?.value}, COG: ${navigation?.course?.cog?.value}`);
 
     if (position?.gps) {
       this._boatState.position = {
@@ -240,6 +254,7 @@ export class BridgeHudService extends BaseService {
       this._boatState.sog = navigation?.speed?.sog?.value;
       this._boatState.cog = navigation?.course?.cog?.value;
 
+      console.log(`[BridgeHudService] Publishing header data: SOG=${this._boatState.sog}, COG=${this._boatState.cog}`);
       // Publish header data
       this._publishHeader(navigation?.depth?.belowTransducer, navigation?.wind?.apparent?.speed);
 
@@ -247,8 +262,11 @@ export class BridgeHudService extends BaseService {
       const now = Date.now();
       if (!this._boatState.lastBridgeCheck || (now - this._boatState.lastBridgeCheck) > 1000) {
         this._boatState.lastBridgeCheck = now;
+        console.log(`[BridgeHudService] Finding next bridge`);
         this._findAndPublishNextBridge();
       }
+    } else {
+      console.log(`[BridgeHudService] No GPS position available, skipping boat state update`);
     }
   }
 
