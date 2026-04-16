@@ -41,6 +41,8 @@ export class BridgeHudService extends BaseService {
       lastBridgeCheck: null
     };
 
+    this._lastHeaderData = null;
+
     // Tide service
     this._tideService = null;
 
@@ -424,11 +426,27 @@ export class BridgeHudService extends BaseService {
   }
 
   _publishHeader(depth, wind) {
-    const headerData = {
+    const nextHeaderData = {
       sog: this._boatState.sog,
       cog: this._boatState.cog,
       depth: depth?.belowTransducer?.value,
-      wind: wind?.speedOverGround?.value,
+      wind: wind?.speedOverGround?.value
+    };
+
+    if (
+      this._lastHeaderData &&
+      this._lastHeaderData.sog === nextHeaderData.sog &&
+      this._lastHeaderData.cog === nextHeaderData.cog &&
+      this._lastHeaderData.depth === nextHeaderData.depth &&
+      this._lastHeaderData.wind === nextHeaderData.wind
+    ) {
+      return;
+    }
+
+    this._lastHeaderData = { ...nextHeaderData };
+
+    const headerData = {
+      ...nextHeaderData,
       timestamp: Date.now()
     };
 
