@@ -241,6 +241,11 @@ export class BridgeHudService extends BaseService {
   }
 
   _updateBoatState(state) {
+    // Only update boat state if there's an active route
+    if (!this._activeRouteId) {
+      return;
+    }
+
     console.log(`[BridgeHudService] _updateBoatState called`);
     const { position, navigation } = state;
 
@@ -280,10 +285,7 @@ export class BridgeHudService extends BaseService {
       const now = Date.now();
       if (!this._boatState.lastBridgeCheck || (now - this._boatState.lastBridgeCheck) > 1000) {
         this._boatState.lastBridgeCheck = now;
-        // Only find bridges if there's an active route
-        if (this._activeRouteId) {
-          this._findAndPublishNextBridge();
-        }
+        this._findAndPublishNextBridge();
       }
     } else {
       console.log(`[BridgeHudService] No position source available, skipping boat state update`);
