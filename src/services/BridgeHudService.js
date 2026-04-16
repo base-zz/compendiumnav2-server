@@ -186,14 +186,17 @@ export class BridgeHudService extends BaseService {
     let navigationUpdated = false;
 
     for (const patch of patchData) {
-      console.log(`[BridgeHudService] Patch: op=${patch.op}, path=${patch.path}`);
       if (patch.path === '/routes/activeRoute') {
         const newRouteId = patch.value?.routeId;
-        console.log(`[BridgeHudService] Route patch: routeId=${newRouteId}, routeName=${patch.value?.routeName}`);
         if (newRouteId && newRouteId !== this._activeRouteId) {
-          console.log(`[BridgeHudService] Route activated: ${newRouteId} (${patch.value?.routeName})`);
           this._activeRouteId = newRouteId;
           routeChanged = true;
+        } else if (!newRouteId && this._activeRouteId) {
+          // Route deactivated
+          this._activeRouteId = null;
+          this._routeGpxData = null;
+          this._routeWithDistances = [];
+          this._routePoints = [];
         }
       } else if (patch.path.startsWith('/position/')) {
         positionUpdated = true;
@@ -277,7 +280,10 @@ export class BridgeHudService extends BaseService {
       const now = Date.now();
       if (!this._boatState.lastBridgeCheck || (now - this._boatState.lastBridgeCheck) > 1000) {
         this._boatState.lastBridgeCheck = now;
-        this._findAndPublishNextBridge();
+        // Only find bridges if there's an active route
+        if (this._activeRouteId) {
+          this._findAndPublishNextBridge();
+        }
       }
     } else {
       console.log(`[BridgeHudService] No position source available, skipping boat state update`);
