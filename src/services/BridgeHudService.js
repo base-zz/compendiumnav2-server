@@ -473,8 +473,12 @@ export class BridgeHudService extends BaseService {
 
       const bridge = bridgesAhead[0];
       if (bridge) {
+        // Map distanceFromRoute to distance_nm for consistency
+        bridge.distance_nm = bridge.distanceFromRoute;
         const distanceStr = bridge.distance_nm !== undefined ? bridge.distance_nm.toFixed(2) : 'unknown';
         console.log(`[BridgeHudService] Found next bridge: ${bridge.name || 'Unknown'} at ${distanceStr}nm`);
+        console.log(`[BridgeHudService] Bridge fields:`, Object.keys(bridge));
+        console.log(`[BridgeHudService] Bridge lat/lon: lat=${bridge.latitude}, lon=${bridge.longitude}, external_id=${bridge.external_id}`);
       }
       return bridge;
     } catch (err) {
