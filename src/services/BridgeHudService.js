@@ -168,8 +168,68 @@ export class BridgeHudService extends BaseService {
     this._processStatePatch(state);
   }
 
-  _processStatePatch(stateData) {
-    const { position, speedOverGround, courseOverGround, depthBelowTransducer, windSpeedOverGround } = stateData;
+  _processStatePatch(patchData) {
+    if (!Array.isArray(patchData)) {
+      // If it's not an array, it might be a full state object (from seeding)
+      this._processFullState(patchData);
+      return;
+    }
+
+    // Process individual patch operations
+    let routeChanged = false;
+    let positionUpdated = false;
+    let navigationUpdated = false;
+
+    for (const patch of patchData) {
+      if (patch.path === '/routes/activeRoute') {
+        const newRouteId = patch.value?.routeId;
+        if (newRouteId && newRouteId !== this._activeRouteId) {
+          console.log(`[BridgeHudService] Route activated: ${newRouteId} (${patch.value?.routeName})`);
+          this._activeRouteId = newRouteId;
+          routeChanged = true;
+        }
+      } else if (patch.path.startsWith('/position/')) {
+        positionUpdated = true;
+      } else if (patch.path.startsWith('/navigation/')) {
+        navigationUpdated = true;
+      }
+    }
+
+    if (routeChanged) {
+      this._fetchUserConfig(); // Reload route data
+      this._loadRoute();
+    }
+
+    if (positionUpdated || navigationUpdated) {
+      // Get current state to update boat state
+      const state = this._stateManager.getState();
+      if (state) {
+        this._updateBoatState(state);
+      }
+    }
+  }
+
+  _processFullState(stateData) {
+    const { position, navigation, routes } = stateData;
+
+    // Check for route activation changes
+    if (routes?.activeRoute) {
+      const newRouteId = routes.activeRoute.routeId;
+      if (newRouteId && newRouteId !== this._activeRouteId) {
+        console.log(`[BridgeHudService] Route activated: ${newRouteId} (${routes.activeRoute.routeName})`);
+        this._activeRouteId = newRouteId;
+        this._fetchUserConfig(); // Reload route data
+        this._loadRoute();
+      }
+    }
+
+    if (position) {
+      this._updateBoatState(stateData);
+    }
+  }
+
+  _updateBoatState(state) {
+    const { position, navigation } = state;
 
     if (position?.gps) {
       this._boatState.position = {
@@ -177,11 +237,11 @@ export class BridgeHudService extends BaseService {
         longitude: position.gps.longitude,
         heading: position.gps.heading || position.heading || null
       };
-      this._boatState.sog = speedOverGround?.value;
-      this._boatState.cog = courseOverGround?.value;
+      this._boatState.sog = navigation?.speed?.sog?.value;
+      this._boatState.cog = navigation?.course?.cog?.value;
 
       // Publish header data
-      this._publishHeader(depthBelowTransducer, windSpeedOverGround);
+      this._publishHeader(navigation?.depth?.belowTransducer, navigation?.wind?.apparent?.speed);
 
       // Find next bridge (throttled to every 1 second)
       const now = Date.now();
