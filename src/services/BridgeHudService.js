@@ -212,7 +212,6 @@ export class BridgeHudService extends BaseService {
     }
 
     if (positionUpdated || navigationUpdated) {
-      console.log(`[BridgeHudService] Position/navigation updated, updating boat state`);
       // Get current state to update boat state
       const state = this._stateManager.getState();
       if (state) {
