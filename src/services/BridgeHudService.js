@@ -6,6 +6,15 @@ import { queryBridgesAlongRoute } from '../bridges/route-queries.js';
 import { NexusTideService } from '../bridges/nexus-tide-service.js';
 import storageService from "../bluetooth/services/storage/storageService.js";
 
+/**
+ * Bridge HUD lifecycle and efficiency model:
+ * - Stays dormant when no active route exists.
+ * - Always listens for active-route events, and only then enables bridge patch processing.
+ * - Registers `state:bridge-patch` handler on activation and unregisters on deactivation.
+ * - Emits JSON Patch arrays for HUD updates.
+ * - Avoids redundant patch traffic by deduplicating unchanged header payloads.
+ */
+
 export class BridgeHudService extends BaseService {
   constructor(options = {}) {
     super("bridge-hud", "continuous");
@@ -15,7 +24,6 @@ export class BridgeHudService extends BaseService {
     
     // SpatiaLite extension path
     this.spatiaLitePath = options.spatiaLitePath || '/usr/lib/aarch64-linux-gnu/mod_spatialite.so';
-    console.log(`[BridgeHudService] spatiaLitePath from options: ${options.spatiaLitePath}, final: ${this.spatiaLitePath}`);
 
     // User configuration (fetched from storage)
     this._storageService = storageService;
@@ -54,15 +62,10 @@ export class BridgeHudService extends BaseService {
 
     // Subscriptions
     this._bridgeSub = null;
-
-    console.log(`[BridgeHudService] CONSTRUCTOR called - dbPath=${this.dbPath}`);
   }
 
   async start() {
-    console.log(`[BridgeHudService] START called - isRunning=${this.isRunning}, spatiaLitePath=${this.spatiaLitePath}`);
-    
     if (this.isRunning) {
-      console.log('[BridgeHudService] Already running, returning');
       return;
     }
 
@@ -77,7 +80,6 @@ export class BridgeHudService extends BaseService {
 
     // Mark service as ready first, then do heavy initialization in background
     await super.start();
-    this.log(`Bridge HUD service starting initialization in background`);
 
     // Do heavy initialization asynchronously
     this._initializeAsync().catch(err => {
@@ -97,11 +99,6 @@ export class BridgeHudService extends BaseService {
       await this._loadRoute();
 
       // Initialize tide service
-      console.log(`[BridgeHudService] Creating NexusTideService with:`, {
-        dbPath: this.dbPath,
-        spatialitePath: this.spatiaLitePath,
-        requestTimeoutMs: 10000
-      });
       this._tideService = new NexusTideService({
         dbPath: this.dbPath,
         spatialitePath: this.spatiaLitePath,
@@ -117,8 +114,6 @@ export class BridgeHudService extends BaseService {
         this._registerStatePatchHandler();
         this._seedBoatState();
       }
-
-      this.log(`Bridge HUD service fully initialized, emitting bridge:hud-update events`);
     } catch (err) {
       console.error('[BridgeHudService] Initialization failed:', err);
       throw err;
@@ -155,13 +150,11 @@ export class BridgeHudService extends BaseService {
 
   _seedBoatState() {
     if (!this._stateManager) {
-      console.log('[BridgeHudService] No state manager available for seeding');
       return;
     }
 
     const state = this._stateManager.getState();
     if (!state) {
-      console.log('[BridgeHudService] No state available for seeding');
       return;
     }
 
@@ -173,6 +166,7 @@ export class BridgeHudService extends BaseService {
       return;
     }
 
+    // Only active while a route is active; receives filtered bridge-relevant patches.
     this._statePatchHandler = (event) => {
       if (!event || !event.data) {
         return;
@@ -217,7 +211,7 @@ export class BridgeHudService extends BaseService {
       return;
     }
 
-    // Dormant until route activation event arrives
+    // Hard gate: no active route means no bridge/nav processing work this cycle.
     if (!this._activeRouteId) {
       return;
     }
@@ -257,12 +251,7 @@ export class BridgeHudService extends BaseService {
       return;
     }
 
-    console.log(`[BridgeHudService] _updateBoatState called`);
     const { position, navigation } = state;
-
-    console.log(`[BridgeHudService] Position available: ${!!position}, Position keys: ${position ? Object.keys(position) : 'none'}`);
-    console.log(`[BridgeHudService] Navigation available: ${!!navigation}`);
-    console.log(`[BridgeHudService] SOG: ${navigation?.speed?.sog?.value}, COG: ${navigation?.course?.cog?.value}`);
 
     // Position is a dynamic object with source names as keys (e.g., signalk, gps, ais)
     // Check for any position source that has latitude/longitude
@@ -273,7 +262,6 @@ export class BridgeHudService extends BaseService {
       for (const source of sources) {
         if (position[source] && position[source].latitude !== undefined && position[source].longitude !== undefined) {
           positionSource = position[source];
-          console.log(`[BridgeHudService] Found position source: ${source}`);
           break;
         }
       }
@@ -298,31 +286,25 @@ export class BridgeHudService extends BaseService {
       };
       this._boatState.sog = navigation?.speed?.sog?.value;
       this._boatState.cog = navigation?.course?.cog?.value;
-
-      console.log(`[BridgeHudService] Publishing header data: SOG=${this._boatState.sog}, COG=${this._boatState.cog}`);
       // Publish header data
       this._publishHeader(navigation?.depth?.belowTransducer, navigation?.wind?.apparent?.speed);
 
-      // Find next bridge (throttled to every 1 second)
+      // Bridge lookup is rate-limited to avoid repeated expensive spatial queries.
       const now = Date.now();
       if (!this._boatState.lastBridgeCheck || (now - this._boatState.lastBridgeCheck) > 1000) {
         this._boatState.lastBridgeCheck = now;
         this._findAndPublishNextBridge();
       }
-    } else {
-      console.log(`[BridgeHudService] No position source available, skipping boat state update`);
     }
   }
 
   async _initDatabase() {
     try {
       this._db = new Database(this.dbPath);
-      console.log('[BridgeHudService] Database opened');
 
       // Load SpatiaLite extension
       try {
         this._db.loadExtension(this.spatiaLitePath);
-        console.log('[BridgeHudService] SpatiaLite loaded');
         
         // Initialize spatial metadata only if not already present
         try {
@@ -350,20 +332,17 @@ export class BridgeHudService extends BaseService {
       const safeAirDraft = await this._storageService.getSetting('bridgeSafeAirDraft');
       if (safeAirDraft !== undefined && safeAirDraft !== null) {
         this._safeAirDraft = parseFloat(safeAirDraft);
-        console.log(`[BridgeHudService] Fetched safeAirDraft from storage: ${this._safeAirDraft}ft`);
       }
 
       const topSpeed = await this._storageService.getSetting('bridgeTopSpeed');
       if (topSpeed !== undefined && topSpeed !== null) {
         this._topSpeed = parseFloat(topSpeed);
-        console.log(`[BridgeHudService] Fetched topSpeed from storage: ${this._topSpeed}kts`);
       }
 
       // Fetch active route from storage
       const activeRouteId = await this._storageService.getSetting('activeRouteId');
       if (activeRouteId) {
         this._activeRouteId = activeRouteId;
-        console.log(`[BridgeHudService] Fetched activeRouteId from storage: ${activeRouteId}`);
 
         // Fetch the route data
         const importedRoutes = await this._storageService.getSetting('importedRoutes');
@@ -371,7 +350,6 @@ export class BridgeHudService extends BaseService {
           const activeRoute = importedRoutes.find(r => r.routeId === activeRouteId);
           if (activeRoute && activeRoute.gpxData) {
             this._routeGpxData = activeRoute.gpxData;
-            console.log(`[BridgeHudService] Fetched GPX data for active route: ${activeRoute.name}`);
           } else {
             // Clear route data if no active route or no GPX data
             this._routeGpxData = null;
@@ -385,7 +363,6 @@ export class BridgeHudService extends BaseService {
         this._routeGpxData = null;
         this._routeWithDistances = [];
         this._routePoints = [];
-        console.log('[BridgeHudService] No active route in storage, cleared route data');
       }
     } catch (err) {
       console.warn('[BridgeHudService] Failed to fetch user config from storage:', err.message);
@@ -394,9 +371,7 @@ export class BridgeHudService extends BaseService {
 
   async _loadRoute() {
     try {
-      console.log(`[BridgeHudService] _loadRoute called: _routeGpxData=${this._routeGpxData ? 'present' : 'null'}, _routeWithDistances.length=${this._routeWithDistances.length}`);
       if (this._routeGpxData) {
-        console.log('[BridgeHudService] Loading route from storage GPX data...');
         // Parse GPX data directly from string (parseGPXRoute expects a file path, need to adapt)
         // For now, write to temp file and parse
         const fs = await import('fs');
@@ -411,8 +386,6 @@ export class BridgeHudService extends BaseService {
 
         // Clean up temp file
         fs.unlinkSync(tempFile);
-
-        console.log(`[BridgeHudService] Route loaded: ${this._routePoints.length} points, ${this._routeWithDistances[this._routeWithDistances.length-1]?.distanceFromStart?.toFixed(1)}nm total`);
       } else {
         console.warn('[BridgeHudService] No GPX data available from storage, clearing route data');
         this._routePoints = [];
@@ -433,6 +406,7 @@ export class BridgeHudService extends BaseService {
       wind: wind?.speedOverGround?.value
     };
 
+    // Skip identical payloads to reduce state churn/log/transport overhead.
     if (
       this._lastHeaderData &&
       this._lastHeaderData.sog === nextHeaderData.sog &&
@@ -458,7 +432,6 @@ export class BridgeHudService extends BaseService {
       source: 'bridge-hud',
       timestamp: Date.now()
     });
-    console.log(`[BridgeHudService] Patched header state: SOG=${headerData.sog}, COG=${headerData.cog}`);
   }
 
   async _findAndPublishNextBridge() {
@@ -472,16 +445,11 @@ export class BridgeHudService extends BaseService {
       return;
     }
 
-    console.log(`[BridgeHudService] Finding next bridge (route points: ${this._routeWithDistances.length}, active route: ${this._activeRouteId})`);
-
     // Find next bridge on route
     const nextBridge = await this._findNextBridgeOnRoute(latitude, longitude);
 
     if (nextBridge) {
-      console.log('[BridgeHudService] Bridge found, publishing:', nextBridge);
       await this._publishNextBridge(nextBridge);
-    } else {
-      console.log('[BridgeHudService] No bridge found on route');
     }
   }
 
@@ -490,7 +458,6 @@ export class BridgeHudService extends BaseService {
     const closest = findClosestRoutePoint(this._routeWithDistances, boatLat, boatLon);
     
     if (closest.distanceNM > maxDistanceFromRoute) {
-      console.log(`[BridgeHudService] Boat is ${closest.distanceNM.toFixed(2)}nm off route`);
       return null;
     }
     
@@ -514,13 +481,10 @@ export class BridgeHudService extends BaseService {
         }
       );
 
-      console.log(`[BridgeHudService] queryBridgesAlongRoute returned ${bridgesAhead?.length || 0} bridges`);
-
       // Clean up temp file
       fs.unlinkSync(tempFile);
 
       if (!bridgesAhead || bridgesAhead.length === 0) {
-        console.log('[BridgeHudService] No bridges found ahead on route');
         return null;
       }
 
@@ -528,10 +492,6 @@ export class BridgeHudService extends BaseService {
       if (bridge) {
         // Map distanceFromRoute to distance_nm for consistency
         bridge.distance_nm = bridge.distanceFromRoute;
-        const distanceStr = bridge.distance_nm !== undefined ? bridge.distance_nm.toFixed(2) : 'unknown';
-        console.log(`[BridgeHudService] Found next bridge: ${bridge.name || 'Unknown'} at ${distanceStr}nm`);
-        console.log(`[BridgeHudService] Bridge fields:`, Object.keys(bridge));
-        console.log(`[BridgeHudService] Bridge lat/lon: lat=${bridge.latitude}, lon=${bridge.longitude}, external_id=${bridge.external_id}`);
       }
       return bridge;
     } catch (err) {
@@ -614,9 +574,6 @@ export class BridgeHudService extends BaseService {
       source: 'bridge-hud',
       timestamp: Date.now()
     });
-    const distanceStr = bridge.distance_nm !== undefined ? bridge.distance_nm.toFixed(2) : 'unknown';
-    const bridgeName = bridge.name || 'Unknown Bridge';
-    console.log(`[BridgeHudService] Patched next bridge state: ${bridgeName} (${distanceStr}nm)`);
 
     // Update alert for this bridge (add or remove based on clearance)
     if (bridge.external_id) {
@@ -673,7 +630,6 @@ export class BridgeHudService extends BaseService {
       source: 'bridge-hud',
       timestamp: Date.now()
     });
-    console.log(`[BridgeHudService] Patched alerts array: ${this._activeAlerts.length} active`);
   }
 
   _calculateNextOpening(bridge) {
@@ -724,7 +680,6 @@ export class BridgeHudService extends BaseService {
 
     this._activeNotifications.push(notificationData);
     this._publishNotifications();
-    console.log(`[BridgeHudService] Added notification: ${notification.message}`);
 
     // Auto-remove notification after 30 seconds
     setTimeout(() => {
@@ -737,7 +692,6 @@ export class BridgeHudService extends BaseService {
     if (index >= 0) {
       this._activeNotifications.splice(index, 1);
       this._publishNotifications();
-      console.log(`[BridgeHudService] Removed notification: ${id}`);
     }
   }
 
@@ -750,6 +704,5 @@ export class BridgeHudService extends BaseService {
       source: 'bridge-hud',
       timestamp: Date.now()
     });
-    console.log(`[BridgeHudService] Patched notifications array: ${this._activeNotifications.length} active`);
   }
 }
