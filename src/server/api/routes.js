@@ -330,7 +330,11 @@ export function registerRouteImportRoutes(app) {
           routeName: route.name
         };
         const patch = [{ op: "replace", path: "/routes/activeRoute", value: activeRouteData }];
+        console.log(`[ROUTES] Applying patch to state manager:`, JSON.stringify(patch, null, 2));
+        console.log(`[ROUTES] Current appState keys:`, Object.keys(stateManager.appState));
+        console.log(`[ROUTES] Current appState.routes:`, stateManager.appState.routes);
         stateManager.applyPatchAndForward(patch);
+        console.log(`[ROUTES] Patch applied, appState.routes after:`, stateManager.appState.routes);
         console.log(`[ROUTES] Updated state with active route: ${routeId} (${route.name})`);
       } else {
         console.log('[ROUTES] State manager not available, skipping state update');
