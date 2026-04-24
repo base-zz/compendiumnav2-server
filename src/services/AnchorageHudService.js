@@ -8,7 +8,6 @@ import {
   findClosestRoutePoint,
 } from "../bridges/gpx-route-parser.js";
 import { queryAnchoragesAlongRoute } from "../bridges/route-queries.js";
-import { calculateSunTimes } from "./noaa/SunMoonCalculator.js";
 
 /**
  * Anchorage HUD lifecycle and efficiency model:
@@ -407,17 +406,41 @@ export class AnchorageHudService extends BaseService {
   }
 
   _resolveSunsetIso(state) {
-    const tideSunset = state?.tides?.sunMoon?.sun?.sunset;
-    if (typeof tideSunset === "string" && tideSunset.trim()) {
-      return tideSunset;
-    }
+    return this._resolveWeatherSunsetIso(state);
+  }
 
-    if (!Number.isFinite(this._boatState.latitude) || !Number.isFinite(this._boatState.longitude)) {
+  _resolveWeatherSunsetIso(state) {
+    const forecast = state?.forecast;
+    const daily = forecast?.daily;
+    const dailySunsets = daily?.sunset;
+    const dailyTimes = daily?.time;
+    const currentTimeIso = forecast?.current?.time;
+
+    if (!Array.isArray(dailySunsets) || dailySunsets.length === 0) {
       return null;
     }
 
-    const calculatedSun = calculateSunTimes(this._boatState.latitude, this._boatState.longitude, new Date());
-    return calculatedSun?.sunset || null;
+    if (Array.isArray(dailyTimes) && dailyTimes.length === dailySunsets.length && typeof currentTimeIso === "string" && currentTimeIso.trim()) {
+      const currentDate = currentTimeIso.slice(0, 10);
+      for (let i = 0; i < dailyTimes.length; i += 1) {
+        const day = dailyTimes[i];
+        const sunsetIso = dailySunsets[i];
+        if (typeof day !== "string" || typeof sunsetIso !== "string" || !sunsetIso.trim()) {
+          continue;
+        }
+        if (day === currentDate) {
+          return sunsetIso;
+        }
+      }
+    }
+
+    for (const sunsetIso of dailySunsets) {
+      if (typeof sunsetIso === "string" && sunsetIso.trim()) {
+        return sunsetIso;
+      }
+    }
+
+    return null;
   }
 
   _buildRecommendations(state, sunsetIso) {
@@ -489,7 +512,14 @@ export class AnchorageHudService extends BaseService {
       });
     }
 
-    recommendations.sort((a, b) => b.score - a.score);
+    recommendations.sort((a, b) => {
+      const aReachableRank = a.reachable_before_sunset === true ? 1 : 0;
+      const bReachableRank = b.reachable_before_sunset === true ? 1 : 0;
+      if (aReachableRank !== bReachableRank) {
+        return bReachableRank - aReachableRank;
+      }
+      return b.score - a.score;
+    });
 
     const maxRecommendations = this._preferences?.maxRecommendations;
     if (Number.isFinite(maxRecommendations) && maxRecommendations > 0) {
