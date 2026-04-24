@@ -222,7 +222,7 @@ function buildServiceManifest() {
   const anchorageHudEnabled = process.env.ANCHORAGE_HUD_ENABLED === "true";
   const anchorageDbPath = process.env.ANCHORAGE_DB_PATH;
   const anchorageShorelineDbPath = fileURLToPath(new URL("../data/icw_navigation.sqlite", import.meta.url));
-  const anchorageSpatiaLitePath = process.env.ANCHORAGE_SPATIALITE_PATH;
+  const anchorageSpatiaLitePath = process.env.SPATIALITE_PATH;
 
   if (anchorageHudEnabled) {
     if (!anchorageDbPath) {
@@ -237,7 +237,7 @@ function buildServiceManifest() {
       }
       if (!anchorageSpatiaLitePath) {
         console.warn(
-          "[SERVER] ANCHORAGE_SPATIALITE_PATH is undefined. Set ANCHORAGE_SPATIALITE_PATH so AnchorageHudService can load SpatiaLite and query shoreline topology."
+          "[SERVER] SPATIALITE_PATH is undefined. Set SPATIALITE_PATH so AnchorageHudService can load SpatiaLite and query shoreline topology."
         );
       }
 
