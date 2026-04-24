@@ -29,6 +29,7 @@ import { NewStateService } from "./services/NewStateService.js";
 import { PositionService } from "./services/PositionService.js";
 import { TidalService } from "./services/TidalService.js";
 import { BridgeHudService } from "./services/BridgeHudService.js";
+import { AnchorageHudService } from "./services/AnchorageHudService.js";
 import { WeatherService } from "./services/WeatherService.js";
 import { BluetoothService } from "./services/BluetoothService.js";
 import { VictronModbusService } from "./services/VictronModbusService.js";
@@ -214,6 +215,28 @@ function buildServiceManifest() {
       });
       startupLog(
         "[SERVER] buildServiceManifest(): added bridge-hud service"
+      );
+    }
+  }
+
+  const anchorageHudEnabled = process.env.ANCHORAGE_HUD_ENABLED === "true";
+  const anchorageDbPath = process.env.ANCHORAGE_DB_PATH;
+
+  if (anchorageHudEnabled) {
+    if (!anchorageDbPath) {
+      console.warn(
+        "[SERVER] ANCHORAGE_HUD_ENABLED=true but ANCHORAGE_DB_PATH is undefined. Set ANCHORAGE_DB_PATH to enable AnchorageHudService."
+      );
+    } else {
+      manifest.push({
+        name: "anchorage-hud",
+        create: () =>
+          new AnchorageHudService({
+            dbPath: anchorageDbPath,
+          }),
+      });
+      startupLog(
+        "[SERVER] buildServiceManifest(): added anchorage-hud service"
       );
     }
   }

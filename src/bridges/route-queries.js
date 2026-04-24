@@ -78,6 +78,75 @@ export async function queryBridgesAlongRoute(gpxFilePath, config) {
   }
 }
 
+export async function queryAnchoragesAlongRoute(gpxFilePath, config) {
+  if (typeof gpxFilePath !== "string" || !gpxFilePath.trim()) {
+    throw new Error("gpxFilePath is required");
+  }
+
+  const { dbPath, maxDistanceNM } = requireConfig(config);
+
+  const routePoints = await parseGPXRoute(gpxFilePath);
+  const routeWithDistances = calculateRouteDistances(routePoints);
+  const db = new Database(dbPath);
+
+  try {
+    const stmt = db.prepare(`
+      SELECT
+        a.id,
+        a.name,
+        a.city,
+        a.state,
+        a.lat,
+        a.lon,
+        a.source_url,
+        a.raw_data_json,
+        a.last_updated,
+        a.location,
+        a.mile_marker,
+        a.lat_lon_text,
+        a.depth,
+        a.description,
+        a.holding_rating,
+        a.wind_protection_rating,
+        a.current_flow_rating,
+        a.wake_protection_rating,
+        a.scenic_beauty_rating,
+        a.ease_of_shopping_rating,
+        a.shore_access_rating,
+        a.pet_friendly_rating,
+        a.cell_service_rating,
+        a.wifi_rating
+      FROM anchorages a
+      WHERE a.lat IS NOT NULL AND a.lon IS NOT NULL
+    `);
+
+    const anchorages = stmt.all();
+    const results = [];
+
+    for (const anchorage of anchorages) {
+      const closest = findClosestRoutePoint(
+        routeWithDistances,
+        anchorage.lat,
+        anchorage.lon,
+      );
+
+      if (closest.distanceNM <= maxDistanceNM) {
+        results.push({
+          ...anchorage,
+          distanceFromRoute: closest.distanceNM,
+          distanceAlongRoute: closest.distanceFromStart,
+          closestRoutePointIndex: closest.pointIndex,
+        });
+      }
+    }
+
+    results.sort((a, b) => a.distanceAlongRoute - b.distanceAlongRoute);
+    return results;
+  } finally {
+    db.close();
+  }
+}
+
 export async function queryMarinasAlongRoute(gpxFilePath, config) {
   if (typeof gpxFilePath !== "string" || !gpxFilePath.trim()) {
     throw new Error("gpxFilePath is required");

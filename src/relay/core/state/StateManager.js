@@ -488,10 +488,37 @@ export class StateManager extends EventEmitter {
         );
       });
 
+      const anchorageRelevantPatchData = patchForEmit.filter((operation) => {
+        const path = operation?.path;
+        return (
+          typeof path === "string" &&
+          (
+            path.startsWith("/routes/") ||
+            path.startsWith("/position/") ||
+            path.startsWith("/navigation/") ||
+            path === "/forecast" ||
+            path.startsWith("/forecast/") ||
+            path === "/tides" ||
+            path.startsWith("/tides/") ||
+            path === "/vessel/info/dimensions/draft" ||
+            path.startsWith("/vessel/info/dimensions/draft/")
+          )
+        );
+      });
+
       if (bridgeRelevantPatchData.length > 0) {
         this.emit("state:bridge-patch", {
           type: "state:bridge-patch",
           data: bridgeRelevantPatchData,
+          boatId: this._boatId,
+          timestamp: eventTimestamp,
+        });
+      }
+
+      if (anchorageRelevantPatchData.length > 0) {
+        this.emit("state:anchorage-patch", {
+          type: "state:anchorage-patch",
+          data: anchorageRelevantPatchData,
           boatId: this._boatId,
           timestamp: eventTimestamp,
         });
@@ -701,6 +728,19 @@ export class StateManager extends EventEmitter {
     };
     this.emit("tide:update", tideUpdatePayload);
 
+    this.emit("state:anchorage-patch", {
+      type: "state:anchorage-patch",
+      data: [
+        {
+          op: "replace",
+          path: "/tides",
+          value: this.appState.tides,
+        },
+      ],
+      boatId: this._boatId,
+      timestamp: Date.now(),
+    });
+
     this.log(
       `[StateManager][setTideData] Broadcasting full state update with tide data`
     );
@@ -764,6 +804,19 @@ export class StateManager extends EventEmitter {
       role: "boat-server",
     };
     this.emit("weather:update", weatherUpdatePayload);
+
+    this.emit("state:anchorage-patch", {
+      type: "state:anchorage-patch",
+      data: [
+        {
+          op: "replace",
+          path: "/forecast",
+          value: this.appState.forecast,
+        },
+      ],
+      boatId: this._boatId,
+      timestamp: Date.now(),
+    });
 
     log('Broadcasting full state update with weather data');
     this.emitFullState(); // Broadcast the change to all clients
@@ -875,6 +928,27 @@ export class StateManager extends EventEmitter {
 
       const toRad = (value) => (value * Math.PI) / 180;
       const toDeg = (value) => (value * 180) / Math.PI;
+
+      const calculateDistance = (lat1, lon1, lat2, lon2) => {
+        if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
+        if (!Number.isFinite(lat1) || !Number.isFinite(lon1) || !Number.isFinite(lat2) || !Number.isFinite(lon2)) {
+          return null;
+        }
+
+        const R = 6371e3;
+        const φ1 = toRad(lat1);
+        const φ2 = toRad(lat2);
+        const Δφ = toRad(lat2 - lat1);
+        const Δλ = toRad(lon2 - lon1);
+
+        const a =
+          Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+          Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        return R * c;
+      };
 
       const calculateBearingDegrees = (lat1, lon1, lat2, lon2) => {
         if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
