@@ -3,7 +3,7 @@ import http from "http";
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import {
@@ -221,6 +221,8 @@ function buildServiceManifest() {
 
   const anchorageHudEnabled = process.env.ANCHORAGE_HUD_ENABLED === "true";
   const anchorageDbPath = process.env.ANCHORAGE_DB_PATH;
+  const anchorageShorelineDbPath = fileURLToPath(new URL("../data/icw_navigation.sqlite", import.meta.url));
+  const anchorageSpatiaLitePath = process.env.ANCHORAGE_SPATIALITE_PATH;
 
   if (anchorageHudEnabled) {
     if (!anchorageDbPath) {
@@ -228,11 +230,24 @@ function buildServiceManifest() {
         "[SERVER] ANCHORAGE_HUD_ENABLED=true but ANCHORAGE_DB_PATH is undefined. Set ANCHORAGE_DB_PATH to enable AnchorageHudService."
       );
     } else {
+      if (!existsSync(anchorageShorelineDbPath)) {
+        console.warn(
+          `[SERVER] Anchorage shoreline DB not found at ${anchorageShorelineDbPath}. Copy the shoreline spatial DB into this path to enable topology scoring.`
+        );
+      }
+      if (!anchorageSpatiaLitePath) {
+        console.warn(
+          "[SERVER] ANCHORAGE_SPATIALITE_PATH is undefined. Set ANCHORAGE_SPATIALITE_PATH so AnchorageHudService can load SpatiaLite and query shoreline topology."
+        );
+      }
+
       manifest.push({
         name: "anchorage-hud",
         create: () =>
           new AnchorageHudService({
             dbPath: anchorageDbPath,
+            shorelineDbPath: anchorageShorelineDbPath,
+            shorelineSpatiaLitePath: anchorageSpatiaLitePath,
           }),
       });
       startupLog(

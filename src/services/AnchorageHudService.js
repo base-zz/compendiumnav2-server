@@ -29,6 +29,8 @@ export class AnchorageHudService extends BaseService {
     }
 
     this.dbPath = options.dbPath;
+    this.shorelineDbPath = options.shorelineDbPath;
+    this.shorelineSpatiaLitePath = options.shorelineSpatiaLitePath;
     this._storageService = storageService;
     this._stateManager = getStateManager();
 
@@ -217,19 +219,19 @@ export class AnchorageHudService extends BaseService {
       return;
     }
 
-    const shorelineDbPath = shorelinePreferences?.shorelineDbPath;
+    const shorelineDbPath = shorelinePreferences?.shorelineDbPath ?? this.shorelineDbPath;
     if (typeof shorelineDbPath !== "string" || !shorelineDbPath.trim()) {
       if (!this._shorelineConfigWarningShown) {
-        console.warn("[AnchorageHudService] shorelineProtection.enabled is true but shorelineProtection.shorelineDbPath is missing; add it to use shoreline topology scoring.");
+        console.warn("[AnchorageHudService] shorelineProtection.enabled is true but shorelineProtection.shorelineDbPath is missing and no shorelineDbPath service option was provided; add one to use shoreline topology scoring.");
         this._shorelineConfigWarningShown = true;
       }
       return;
     }
 
-    const spatiaLitePath = shorelinePreferences?.spatiaLitePath;
+    const spatiaLitePath = shorelinePreferences?.spatiaLitePath ?? this.shorelineSpatiaLitePath;
     if (typeof spatiaLitePath !== "string" || !spatiaLitePath.trim()) {
       if (!this._shorelineConfigWarningShown) {
-        console.warn("[AnchorageHudService] shorelineProtection.enabled is true but shorelineProtection.spatiaLitePath is missing; add it to enable shoreline spatial queries.");
+        console.warn("[AnchorageHudService] shorelineProtection.enabled is true but shorelineProtection.spatiaLitePath is missing and no shorelineSpatiaLitePath service option was provided; add one to enable shoreline spatial queries.");
         this._shorelineConfigWarningShown = true;
       }
       return;

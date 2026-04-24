@@ -31,4 +31,4 @@ keys/
 
 # Local development
 .vscode/
-.idea/
+.idea/data/icw_navigation.sqlite
