@@ -506,6 +506,18 @@ export class StateManager extends EventEmitter {
         );
       });
 
+      const marinaRelevantPatchData = patchForEmit.filter((operation) => {
+        const path = operation?.path;
+        return (
+          typeof path === "string" &&
+          (
+            path.startsWith("/routes/") ||
+            path.startsWith("/position/") ||
+            path.startsWith("/navigation/")
+          )
+        );
+      });
+
       if (bridgeRelevantPatchData.length > 0) {
         this.emit("state:bridge-patch", {
           type: "state:bridge-patch",
@@ -519,6 +531,15 @@ export class StateManager extends EventEmitter {
         this.emit("state:anchorage-patch", {
           type: "state:anchorage-patch",
           data: anchorageRelevantPatchData,
+          boatId: this._boatId,
+          timestamp: eventTimestamp,
+        });
+      }
+
+      if (marinaRelevantPatchData.length > 0) {
+        this.emit("state:marina-patch", {
+          type: "state:marina-patch",
+          data: marinaRelevantPatchData,
           boatId: this._boatId,
           timestamp: eventTimestamp,
         });

@@ -31,4 +31,7 @@ keys/
 
 # Local development
 .vscode/
-.idea/data/icw_navigation.sqlite
+.idea/
+
+# Large local spatial DB (managed outside git)
+data/icw_navigation.sqlite

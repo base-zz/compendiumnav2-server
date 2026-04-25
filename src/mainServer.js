@@ -30,6 +30,7 @@ import { PositionService } from "./services/PositionService.js";
 import { TidalService } from "./services/TidalService.js";
 import { BridgeHudService } from "./services/BridgeHudService.js";
 import { AnchorageHudService } from "./services/AnchorageHudService.js";
+import { MarinaService } from "./services/MarinaService.js";
 import { WeatherService } from "./services/WeatherService.js";
 import { BluetoothService } from "./services/BluetoothService.js";
 import { VictronModbusService } from "./services/VictronModbusService.js";
@@ -252,6 +253,29 @@ function buildServiceManifest() {
       });
       startupLog(
         "[SERVER] buildServiceManifest(): added anchorage-hud service"
+      );
+    }
+  }
+
+  // Add MarinaService if enabled
+  const marinaHudEnabled = process.env.MARINA_HUD_ENABLED === "true";
+  const marinaDbPath = process.env.MARINA_DB_PATH;
+
+  if (marinaHudEnabled) {
+    if (!marinaDbPath) {
+      console.warn(
+        "[SERVER] MARINA_HUD_ENABLED=true but MARINA_DB_PATH is undefined. Set MARINA_DB_PATH to enable MarinaService."
+      );
+    } else {
+      manifest.push({
+        name: "marina-hud",
+        create: () =>
+          new MarinaService({
+            dbPath: marinaDbPath,
+          }),
+      });
+      startupLog(
+        "[SERVER] buildServiceManifest(): added marina-hud service"
       );
     }
   }
