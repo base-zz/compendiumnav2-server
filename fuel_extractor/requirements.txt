@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn==0.30.6
+httpx[http2]==0.27.2
+beautifulsoup4==4.12.3
+markdownify==0.13.1
+pydantic==2.9.2
+pymupdf4llm==0.0.17
+PyMuPDF==1.24.10
+dnspython==2.7.0
+playwright==1.48.0

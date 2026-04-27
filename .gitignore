@@ -1,5 +1,9 @@
 # Dependencies
 node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
 
 # Build output
 dist/
@@ -35,3 +39,7 @@ keys/
 
 # Large local spatial DB (managed outside git)
 data/icw_navigation.sqlite
+
+# Temporary/debug files
+tmp/
+**/tmp/

@@ -18,6 +18,7 @@ import { registerBoatInfoRoutes, getBoatInfo } from "./server/api/boatInfo.js";
 import { registerVpsRoutes } from "./server/vps/registration.js";
 import { registerVictronRoutes } from "./server/api/victron.js";
 import { registerRouteImportRoutes } from "./server/api/routes.js";
+import { registerFuelPipelineRoutes } from "./server/api/fuelPipeline.js";
 import debug from "debug";
 import {
   bootstrapServices,
@@ -480,6 +481,11 @@ async function startServer() {
     // Register Victron routes (victronModbusService will be set after initialization)
     if (global.victronModbusService) {
       registerVictronRoutes(app, global.victronModbusService);
+    }
+
+    // Register fuel pipeline routes (requires MARINA_DB_PATH)
+    if (process.env.MARINA_DB_PATH) {
+      registerFuelPipelineRoutes(app, { dbPath: process.env.MARINA_DB_PATH });
     }
 
     // Simple health check endpoint
