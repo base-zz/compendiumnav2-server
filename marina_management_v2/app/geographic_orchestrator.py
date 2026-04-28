@@ -7,7 +7,7 @@ from typing import Any
 
 from .discovery_runner import discover_bounds_now
 from .reconcile_runner import reconcile_discovered_records
-from .seed_publish_runner import publish_fuel_seeds
+from .seed_publish_runner import publish_candidates_now
 
 
 class GeographicOrchestratorError(Exception):
@@ -145,9 +145,9 @@ def run_discovery_at_point(
     )
 
     # Publish seeds
-    seed_result = publish_fuel_seeds(
+    seed_result = publish_candidates_now(
         connection=connection,
-        max_seeds=100,
+        max_rows=100,
     )
 
     return {
