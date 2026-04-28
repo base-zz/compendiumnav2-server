@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .discovery_runner import discover_bounds_now
-from .reconcile_runner import reconcile_discovered_marinas
+from .reconcile_runner import reconcile_discovered_records
 from .seed_publish_runner import publish_fuel_seeds
 
 
@@ -139,7 +139,7 @@ def run_discovery_at_point(
     )
 
     # Reconcile
-    reconcile_result = reconcile_discovered_marinas(
+    reconcile_result = reconcile_discovered_records(
         connection=connection,
         discovered_records=discovered,
     )
