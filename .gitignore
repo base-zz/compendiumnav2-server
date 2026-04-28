@@ -16,6 +16,8 @@ dist/
 
 # Database
 /src/signalk_dev.db
+*.db-shm
+*.db-wal
 
 # Local device DB (generated at runtime)
 /data/devices*
