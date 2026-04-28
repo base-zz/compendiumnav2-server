@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
 
@@ -142,6 +143,7 @@ def run_discovery_at_point(
     reconcile_result = reconcile_discovered_records(
         connection=connection,
         discovered_records=discovered,
+        reconciled_at_utc=datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     )
 
     # Publish seeds
