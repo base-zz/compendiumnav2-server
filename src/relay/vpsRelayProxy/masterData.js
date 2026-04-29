@@ -18,6 +18,9 @@ function initializeDatabase(dbPath) {
   // Enable foreign keys
   db.pragma("foreign_keys = ON");
 
+  // Drop existing marinas table to recreate with updated schema
+  db.exec("DROP TABLE IF EXISTS marinas;");
+
   // Create marinas table
   db.exec(`
     CREATE TABLE IF NOT EXISTS marinas (
