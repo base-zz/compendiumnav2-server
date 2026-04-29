@@ -38,6 +38,7 @@ import { VictronModbusService } from "./services/VictronModbusService.js";
 import { MasterSyncService } from "./services/MasterSyncService.js";
 import DemoRecorderService from "./services/DemoRecorderService.js";
 import RecordedDemoService from "./services/RecordedDemoService.js";
+import { getOrCreateKeyPair } from "./state/keyPair.js";
 
 const log = debug("server:main");
 const verboseStartupLogs = process.env.VERBOSE_STARTUP_LOGS === "true";
@@ -346,16 +347,17 @@ async function startSecondaryServices() {
       );
     } else {
       const boatInfo = getBoatInfo();
-      if (!boatInfo.boatId || !boatInfo.privateKey) {
+      const keyPair = getOrCreateKeyPair();
+      if (!boatInfo.boatId || !keyPair.privateKey) {
         console.warn(
-          "[SERVER] MASTER_SYNC_ENABLED=true but boatId or privateKey is missing from boat info. Cannot enable MasterSyncService."
+          "[SERVER] MASTER_SYNC_ENABLED=true but boatId or privateKey is missing. Cannot enable MasterSyncService."
         );
       } else {
         const masterSyncService = new MasterSyncService({
           dbPath: masterSyncDbPath,
           vpsHost: vpsHost,
           boatId: boatInfo.boatId,
-          privateKey: boatInfo.privateKey,
+          privateKey: keyPair.privateKey,
           syncIntervalMs: 5 * 60 * 1000, // 5 minutes
           batchSize: 10,
         });
