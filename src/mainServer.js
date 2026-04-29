@@ -35,6 +35,7 @@ import { MarinaService } from "./services/MarinaService.js";
 import { WeatherService } from "./services/WeatherService.js";
 import { BluetoothService } from "./services/BluetoothService.js";
 import { VictronModbusService } from "./services/VictronModbusService.js";
+import { MasterSyncService } from "./services/MasterSyncService.js";
 import DemoRecorderService from "./services/DemoRecorderService.js";
 import RecordedDemoService from "./services/RecordedDemoService.js";
 
@@ -278,6 +279,46 @@ function buildServiceManifest() {
       startupLog(
         "[SERVER] buildServiceManifest(): added marina-hud service"
       );
+    }
+  }
+
+  // Add MasterSyncService if enabled
+  const masterSyncEnabled = process.env.MASTER_SYNC_ENABLED === "true";
+  const masterSyncDbPath = process.env.MARINA_DB_PATH; // Use same DB as marina management
+  const vpsHost = process.env.VPS_HOST;
+
+  if (masterSyncEnabled) {
+    if (!masterSyncDbPath) {
+      console.warn(
+        "[SERVER] MASTER_SYNC_ENABLED=true but MARINA_DB_PATH is undefined. Set MARINA_DB_PATH to enable MasterSyncService."
+      );
+    } else if (!vpsHost) {
+      console.warn(
+        "[SERVER] MASTER_SYNC_ENABLED=true but VPS_HOST is undefined. Set VPS_HOST to enable MasterSyncService."
+      );
+    } else {
+      const boatInfo = getBoatInfo();
+      if (!boatInfo.boatId || !boatInfo.privateKey) {
+        console.warn(
+          "[SERVER] MASTER_SYNC_ENABLED=true but boatId or privateKey is missing from boat info. Cannot enable MasterSyncService."
+        );
+      } else {
+        manifest.push({
+          name: "master-sync",
+          create: () =>
+            new MasterSyncService({
+              dbPath: masterSyncDbPath,
+              vpsHost: vpsHost,
+              boatId: boatInfo.boatId,
+              privateKey: boatInfo.privateKey,
+              syncIntervalMs: 5 * 60 * 1000, // 5 minutes
+              batchSize: 10,
+            }),
+        });
+        startupLog(
+          "[SERVER] buildServiceManifest(): added master-sync service"
+        );
+      }
     }
   }
 

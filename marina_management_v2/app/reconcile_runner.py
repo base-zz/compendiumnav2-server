@@ -304,6 +304,10 @@ def _update_existing_marina(
         set_clause_parts.append(f"{field_name} = ?")
         set_values.append(field_value)
 
+    # Always set sync_dirty = 1 on update to trigger VPS sync
+    set_clause_parts.append("sync_dirty = ?")
+    set_values.append(1)
+
     set_values.append(rowid_value)
     sql = f"UPDATE marinas SET {', '.join(set_clause_parts)} WHERE rowid = ?"
     cursor = connection.execute(sql, set_values)

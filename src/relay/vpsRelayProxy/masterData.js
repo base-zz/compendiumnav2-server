@@ -214,6 +214,7 @@ function initializeDatabase(dbPath) {
       price_source TEXT NOT NULL CHECK (price_source IN ('dockwa_json', 'marinas_web', 'website_text', 'not_published_online', 'none')),
       confidence REAL NOT NULL CHECK (confidence >= 0.0 AND confidence <= 1.0),
       extraction_hash TEXT,
+      sync_dirty INTEGER NOT NULL CHECK (sync_dirty IN (0, 1)),
       created_at_utc TEXT NOT NULL,
       FOREIGN KEY (marina_uid) REFERENCES marinas(marina_uid) ON DELETE CASCADE,
       CHECK (json_valid(provenance_json)),

@@ -355,8 +355,9 @@ def _write_fuel_log(connection: sqlite3.Connection, output_payload: dict[str, An
             price_source,
             confidence,
             extraction_hash,
+            sync_dirty,
             created_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             output_payload["marina_uid"],
@@ -374,6 +375,7 @@ def _write_fuel_log(connection: sqlite3.Connection, output_payload: dict[str, An
             _price_source(output_payload["outcome_state"], output_payload.get("source_url")),
             confidence,
             extraction_hash,
+            1,  # sync_dirty = 1 to trigger VPS sync
             created_at_utc,
         ),
     )
