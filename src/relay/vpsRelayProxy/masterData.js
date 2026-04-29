@@ -22,7 +22,7 @@ function initializeDatabase(dbPath) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS marinas (
       marina_uid TEXT PRIMARY KEY,
-      primary_name TEXT NOT NULL,
+      primary_name TEXT,
       lat REAL NOT NULL,
       lon REAL NOT NULL,
       website_url TEXT,
