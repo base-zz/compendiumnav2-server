@@ -153,10 +153,12 @@ export class MasterSyncService extends BaseService {
   _clearSyncDirty(db, table, ids) {
     if (ids.length === 0) return 0;
     const placeholders = ids.map(() => "?").join(",");
+    // Marinas table uses marina_uid (singular), not marinas_uid
+    const uidColumn = table === 'marinas' ? 'marina_uid' : `${table}_uid`;
     const stmt = db.prepare(`
       UPDATE ${table}
       SET sync_dirty = 0
-      WHERE ${table}_uid IN (${placeholders})
+      WHERE ${uidColumn} IN (${placeholders})
     `);
     const result = stmt.run(...ids);
     return result.changes;
@@ -166,6 +168,13 @@ export class MasterSyncService extends BaseService {
    * Sync dirty marinas to VPS
    */
   async _syncMarinas(db) {
+    // Check if marinas table exists
+    const tableCheck = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='marinas'").get();
+    if (!tableCheck) {
+      this.log('Marinas table does not exist in local database, skipping marina sync');
+      return { synced: 0 };
+    }
+
     const dirtyMarinas = this._getDirtyRecords(db, "marinas", this.batchSize);
     if (dirtyMarinas.length === 0) return { synced: 0 };
 
