@@ -168,4 +168,15 @@ CREATE TABLE IF NOT EXISTS sync_events (
 CREATE INDEX IF NOT EXISTS idx_sync_events_pending
     ON sync_events(master_acknowledged, occurred_at_utc);
 
+-- Marina discovery state tracking
+CREATE TABLE IF NOT EXISTS discovery_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    last_discovery_lat REAL,
+    last_discovery_lon REAL,
+    last_discovery_time TEXT,
+    discovery_count INTEGER NOT NULL DEFAULT 0,
+    discovery_threshold_miles REAL NOT NULL DEFAULT 10,
+    min_discovery_interval_hours REAL NOT NULL DEFAULT 1
+);
+
 COMMIT;

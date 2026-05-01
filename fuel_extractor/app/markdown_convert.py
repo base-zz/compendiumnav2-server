@@ -24,9 +24,13 @@ class ConversionError(Exception):
 
 
 DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Upgrade-Insecure-Requests": "1",
 }
 
 
@@ -208,21 +212,30 @@ def fetch_dockwa_fuel_snapshot(url: str, timeout_seconds: int) -> Optional[dict[
 def _fetch_html_with_playwright(url: str, timeout_seconds: int) -> tuple[str, str]:
     try:
         from playwright.sync_api import sync_playwright
+        from playwright_stealth import stealth_sync
     except Exception as exc:
         raise ConversionError(
             "Playwright fallback is required for challenge-blocked pages. "
-            "Install with `pip install playwright` and run `playwright install chromium`."
+            "Install with `pip install playwright playwright-stealth` and run `playwright install chromium`."
         ) from exc
 
+    import random
     timeout_ms = max(timeout_seconds, 5) * 1000
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         try:
-            context = browser.new_context(user_agent=DEFAULT_HEADERS["User-Agent"])
+            context = browser.new_context(
+                user_agent=DEFAULT_HEADERS["User-Agent"],
+                viewport={"width": 1920, "height": 1080},
+                timezone_id="America/New_York"
+            )
             page = context.new_page()
+            # Apply stealth to avoid WAF detection
+            stealth_sync(page)
+            # Random delay to simulate human behavior
             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(random.randint(2000, 5000))
 
             html = page.content()
             resolved_url = page.url
@@ -361,3 +374,116 @@ def fetch_and_convert_to_markdown(url: str, timeout_seconds: int) -> tuple[str, 
         raise
     except Exception as exc:
         raise ConversionError(str(exc)) from exc
+
+
+def prune_marina_markdown(markdown: str) -> str:
+    """
+    Reduce token count and noise in stitched markdown before LLM processing.
+
+    1. Keyword-Based Semantic Filter: Keep sections with data-dense keywords
+    2. Regex Fluff Removal: Remove footers, navigation, empty structure
+    3. Whitespace & Link Compression
+    """
+    import re
+
+    # Data-dense keywords that indicate valuable content
+    DATA_DENSE_KEYWORDS = [
+        "slip", "rate", "ft", "beam", "lift", "haul", "launch",
+        "bridge", "draft", "depth", "fee", "$", "metered",
+        "catamaran", "multihull", "surcharge", "diy"
+    ]
+
+    # Step 1: Split into sections by ## headers
+    sections = re.split(r'\n## ', markdown)
+    filtered_sections = []
+
+    # First section (before any ##) - always include if it has keywords
+    first_section = sections[0] if sections else ""
+    if any(keyword in first_section.lower() for keyword in DATA_DENSE_KEYWORDS):
+        filtered_sections.append(first_section)
+
+    # Process remaining sections
+    for section in sections[1:]:
+        # Check if section contains data-dense keywords
+        section_lower = section.lower()
+        if any(keyword in section_lower for keyword in DATA_DENSE_KEYWORDS):
+            filtered_sections.append("## " + section)
+
+    # Rejoin filtered sections
+    markdown = "\n## ".join(filtered_sections)
+
+    # Step 2: Regex Fluff Removal
+
+    # Remove social/footer lines
+    markdown = re.sub(
+        r'^.*(follow us|copyright|all rights reserved|privacy policy|terms of use).*$',
+        '',
+        markdown,
+        flags=re.MULTILINE | re.IGNORECASE
+    )
+
+    # Remove repetitive navigation links (simplified - removes common nav patterns)
+    markdown = re.sub(
+        r'^\s*[\*\-\+]\s*\[(?:home|about|contact|news|blog|photos|directions|local info)\]\(.*\)\s*$',
+        '',
+        markdown,
+        flags=re.MULTILINE | re.IGNORECASE
+    )
+
+    # Remove empty table structure lines
+    markdown = re.sub(r'^[\s\|\-]*$', '', markdown, flags=re.MULTILINE)
+
+    # Remove empty lines
+    markdown = re.sub(r'\n\s*\n\s*\n', '\n\n', markdown)
+
+    # Step 3: Whitespace & Link Compression
+
+    # Collapse multiple spaces
+    markdown = re.sub(r' +', ' ', markdown)
+
+    return markdown.strip()
+
+
+def fetch_full_site_markdown(base_url: str, timeout_seconds: int, max_pages: int = 20) -> str:
+    """
+    Convert entire small marina website to markdown by crawling all pages.
+    Returns stitched markdown from all discovered pages.
+    """
+    from .discovery import discover_candidate_urls
+
+    try:
+        # Crawl all pages from base URL
+        visited, candidates = discover_candidate_urls(
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+            max_pages=max_pages
+        )
+    except Exception as exc:
+        raise ConversionError(f"Discovery failed: {exc}") from exc
+
+    # Combine visited and candidates (visited is just homepage, candidates are the discovered links)
+    all_urls = visited + candidates
+    # Deduplicate while preserving order
+    seen = set()
+    unique_urls = []
+    for url in all_urls:
+        if url not in seen:
+            seen.add(url)
+            unique_urls.append(url)
+
+    # Convert every page to markdown
+    markdown_sections = []
+    for url in unique_urls:
+        try:
+            markdown, _ = fetch_and_convert_to_markdown(url, timeout_seconds)
+            markdown_sections.append(f"\n\n## SOURCE: {url}\n\n{markdown}")
+        except Exception:
+            # Skip pages that fail to convert
+            continue
+
+    if not markdown_sections:
+        raise ConversionError("No pages could be converted to markdown")
+
+    # Stitch all pages together
+    full_markdown = "\n\n".join(markdown_sections)
+    return full_markdown

@@ -38,6 +38,7 @@ import { VictronModbusService } from "./services/VictronModbusService.js";
 import { MasterSyncService } from "./services/MasterSyncService.js";
 import DemoRecorderService from "./services/DemoRecorderService.js";
 import RecordedDemoService from "./services/RecordedDemoService.js";
+import { MarinaDiscoveryService } from "./services/MarinaDiscoveryService.js";
 import { getOrCreateKeyPair } from "./state/keyPair.js";
 
 const log = debug("server:main");
@@ -283,6 +284,32 @@ function buildServiceManifest() {
     }
   }
 
+  // Add MarinaDiscoveryService if enabled
+  const marinaDiscoveryEnabled = process.env.MARINA_DISCOVERY_ENABLED === "true";
+  const discoveryDbPath = process.env.MARINA_DB_PATH || marinaDbPath;
+
+  if (marinaDiscoveryEnabled) {
+    if (!discoveryDbPath) {
+      console.warn(
+        "[SERVER] MARINA_DISCOVERY_ENABLED=true but MARINA_DB_PATH is undefined. Set MARINA_DB_PATH to enable MarinaDiscoveryService."
+      );
+    } else {
+      manifest.push({
+        name: "marina-discovery",
+        create: () =>
+          new MarinaDiscoveryService({
+            dbPath: discoveryDbPath,
+            thresholdMiles: parseFloat(process.env.MARINA_DISCOVERY_THRESHOLD_MILES || "10"),
+            minIntervalHours: parseFloat(process.env.MARINA_DISCOVERY_MIN_INTERVAL_HOURS || "1"),
+            debug: process.env.MARINA_DISCOVERY_DEBUG === "true",
+          }),
+      });
+      startupLog(
+        "[SERVER] buildServiceManifest(): added marina-discovery service"
+      );
+    }
+  }
+
   startupLog("[SERVER] buildServiceManifest(): manifest complete with services:", manifest.map(m => m.name));
   return manifest;
 }
@@ -415,6 +442,36 @@ async function startServer() {
     startupLog("[SERVER] bridgeStateToRelay() completed");
     await startSecondaryServices();
     startupLog("[SERVER] startSecondaryServices() completed");
+
+    // Set up MarinaDiscoveryService listener to trigger fuel pipeline discovery
+    const marinaDiscoveryService = serviceManager.getService('marina-discovery');
+    if (marinaDiscoveryService) {
+      const marinaDbPath = process.env.MARINA_DB_PATH;
+      if (marinaDbPath) {
+        marinaDiscoveryService.on('marina:discovery:trigger', async (data) => {
+          console.log('[SERVER] Marina discovery triggered:', data);
+          try {
+            const { triggerDiscovery } = await import('./server/api/fuelPipeline.js');
+            await triggerDiscovery({
+              dbPath: marinaDbPath,
+              lat: data.lat,
+              lon: data.lon,
+              sweepRadius: 50,
+              discoveryRadius: 5,
+              gridSpacing: 10,
+              timeout: 45,
+              scrollCycles: 10,
+            });
+            console.log('[SERVER] Marina discovery completed successfully');
+          } catch (error) {
+            console.error('[SERVER] Marina discovery failed:', error);
+          }
+        });
+        startupLog('[SERVER] Marina discovery event listener registered');
+      } else {
+        console.warn('[SERVER] MarinaDiscoveryService registered but MARINA_DB_PATH not set, discovery trigger disabled');
+      }
+    }
 
     if (healthTelemetryLogsEnabled) {
       const healthTelemetryIntervalRaw = process.env.HEALTH_TELEMETRY_INTERVAL_MS;

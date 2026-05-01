@@ -2,6 +2,31 @@ import { spawn } from "child_process";
 import path from "path";
 
 /**
+ * Rate limiter for pricing extraction to avoid WAF blocks
+ */
+class PricingRateLimiter {
+  constructor(minDelayMs = 15000) {
+    this.minDelayMs = minDelayMs;
+    this.lastExtractionTime = 0;
+  }
+
+  async waitForRateLimit() {
+    const now = Date.now();
+    const timeSinceLastExtraction = now - this.lastExtractionTime;
+    
+    if (timeSinceLastExtraction < this.minDelayMs) {
+      const delay = this.minDelayMs - timeSinceLastExtraction;
+      console.log(`[RateLimiter] Waiting ${delay}ms before extraction to avoid WAF blocks`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    
+    this.lastExtractionTime = Date.now();
+  }
+}
+
+const pricingRateLimiter = new PricingRateLimiter(15000); // 15 second minimum delay
+
+/**
  * Fuel Pipeline API
  *
  * Provides HTTP endpoints to trigger the Python-based fuel extraction pipeline:
@@ -112,6 +137,38 @@ export async function triggerFuelExtraction(options) {
 }
 
 /**
+ * Trigger pricing extraction for a marina
+ */
+export async function triggerPricingExtraction(options) {
+  const {
+    dbPath,
+    marinaUid,
+    websiteUrl,
+    timeout = 45,
+    maxPages = 20,
+  } = options;
+
+  if (!dbPath || !marinaUid || !websiteUrl) {
+    throw new Error("dbPath, marinaUid, and websiteUrl are required");
+  }
+
+  const args = [
+    "--db-path",
+    dbPath,
+    "--marina-uid",
+    marinaUid,
+    "--website-url",
+    websiteUrl,
+    "--timeout",
+    String(timeout),
+    "--max-pages",
+    String(maxPages),
+  ];
+
+  return runPythonScript("fuel_extractor_v2/run_pricing_worker_once.py", args);
+}
+
+/**
  * Run full pipeline: discovery + extraction
  */
 export async function runFullPipeline(options) {
@@ -214,6 +271,52 @@ export function registerFuelPipelineRoutes(app, options = {}) {
       });
     } catch (error) {
       console.error("[FuelPipeline] Extraction failed:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+
+  /**
+   * POST /api/fuel/pricing-extract
+   * Trigger pricing extraction for a marina
+   *
+   * Body: {
+   *   marinaUid: string (required) - Marina UUID
+   *   websiteUrl: string (required) - Marina website URL
+   *   timeout?: number - Timeout in seconds (default: 45)
+   *   maxPages?: number - Max pages to crawl (default: 20)
+   * }
+   */
+  app.post("/api/fuel/pricing-extract", async (req, res) => {
+    try {
+      const { marinaUid, websiteUrl, timeout, maxPages } = req.body;
+
+      if (!marinaUid || !websiteUrl) {
+        return res.status(400).json({
+          error: "marinaUid and websiteUrl are required",
+        });
+      }
+
+      // Enforce rate limiting to avoid WAF blocks
+      await pricingRateLimiter.waitForRateLimit();
+
+      const result = await triggerPricingExtraction({
+        dbPath,
+        marinaUid,
+        websiteUrl,
+        timeout,
+        maxPages,
+      });
+
+      res.json({
+        success: true,
+        result: result.result,
+        warnings: result.stderr,
+      });
+    } catch (error) {
+      console.error("[FuelPipeline] Pricing extraction failed:", error);
       res.status(500).json({
         success: false,
         error: error.message,
@@ -332,6 +435,7 @@ export function registerFuelPipelineRoutes(app, options = {}) {
   console.log("[FuelPipeline] Routes registered:");
   console.log("  POST /api/fuel/discover");
   console.log("  POST /api/fuel/extract");
+  console.log("  POST /api/fuel/pricing-extract");
   console.log("  POST /api/fuel/pipeline");
   console.log("  GET  /api/fuel/status");
 }

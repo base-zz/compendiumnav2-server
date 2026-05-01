@@ -286,6 +286,66 @@ function initializeDatabase(dbPath) {
       ON sync_events(master_acknowledged, occurred_at_utc);
   `);
 
+  // Create pricing_logs table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pricing_logs (
+      pricing_log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      marina_uid TEXT NOT NULL,
+      fetched_at_utc TEXT NOT NULL,
+      monthly_base REAL,
+      is_per_ft INTEGER CHECK (is_per_ft IS NULL OR is_per_ft IN (0, 1)),
+      catamaran_multiplier REAL,
+      liveaboard_fee REAL,
+      min_air_draft_ft REAL,
+      air_draft_source TEXT,
+      min_depth_ft REAL,
+      depth_source TEXT,
+      lift_max_beam_ft REAL,
+      lift_max_tons REAL,
+      diy_allowed INTEGER CHECK (diy_allowed IS NULL OR diy_allowed IN (0, 1)),
+      electricity_metered INTEGER CHECK (electricity_metered IS NULL OR electricity_metered IN (0, 1)),
+      water_metered INTEGER CHECK (water_metered IS NULL OR water_metered IN (0, 1)),
+      liveaboard_permitted INTEGER CHECK (liveaboard_permitted IS NULL OR liveaboard_permitted IN (0, 1)),
+      source_quotes TEXT,
+      extraction_hash TEXT,
+      sync_dirty INTEGER NOT NULL CHECK (sync_dirty IN (0, 1)),
+      created_at_utc TEXT NOT NULL,
+      FOREIGN KEY (marina_uid) REFERENCES marinas(marina_uid) ON DELETE CASCADE,
+      CHECK (json_valid(source_quotes))
+    )
+  `);
+
+  // Create indexes for pricing_logs
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_pricing_logs_marina_time
+      ON pricing_logs(marina_uid, fetched_at_utc);
+
+    CREATE INDEX IF NOT EXISTS idx_pricing_logs_sync_dirty
+      ON pricing_logs(sync_dirty);
+  `);
+
+  // Create vessel_profiles table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS vessel_profiles (
+      profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      length_ft REAL NOT NULL,
+      beam_ft REAL NOT NULL,
+      draft_ft REAL NOT NULL,
+      air_draft_ft REAL NOT NULL,
+      is_multihull INTEGER NOT NULL CHECK (is_multihull IN (0, 1)),
+      needs_haulout INTEGER NOT NULL CHECK (needs_haulout IN (0, 1)),
+      created_at_utc TEXT NOT NULL,
+      updated_at_utc TEXT NOT NULL
+    )
+  `);
+
+  // Create index for vessel_profiles
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_vessel_profiles_name
+      ON vessel_profiles(name);
+  `);
+
   return db;
 }
 
@@ -496,6 +556,195 @@ export function acknowledgeSyncEvents(db, eventIds) {
 }
 
 /**
+ * Submit pricing log entry
+ */
+export function submitPricingLog(db, pricingLogData) {
+  const {
+    marina_uid,
+    fetched_at_utc,
+    monthly_base,
+    is_per_ft,
+    catamaran_multiplier,
+    liveaboard_fee,
+    min_air_draft_ft,
+    air_draft_source,
+    min_depth_ft,
+    depth_source,
+    lift_max_beam_ft,
+    lift_max_tons,
+    diy_allowed,
+    electricity_metered,
+    water_metered,
+    liveaboard_permitted,
+    source_quotes,
+    extraction_hash,
+    created_at_utc,
+  } = pricingLogData;
+
+  const now = created_at_utc || new Date().toISOString();
+
+  const stmt = db.prepare(`
+    INSERT INTO pricing_logs (
+      marina_uid, fetched_at_utc, monthly_base, is_per_ft, catamaran_multiplier,
+      liveaboard_fee, min_air_draft_ft, air_draft_source, min_depth_ft, depth_source,
+      lift_max_beam_ft, lift_max_tons, diy_allowed, electricity_metered, water_metered,
+      liveaboard_permitted, source_quotes, extraction_hash, sync_dirty, created_at_utc
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+  `);
+
+  const result = stmt.run(
+    marina_uid,
+    fetched_at_utc || now,
+    monthly_base,
+    is_per_ft,
+    catamaran_multiplier,
+    liveaboard_fee,
+    min_air_draft_ft,
+    air_draft_source,
+    min_depth_ft,
+    depth_source,
+    lift_max_beam_ft,
+    lift_max_tons,
+    diy_allowed,
+    electricity_metered,
+    water_metered,
+    liveaboard_permitted,
+    source_quotes ? JSON.stringify(source_quotes) : null,
+    extraction_hash,
+    now
+  );
+
+  return { success: true, pricing_log_id: result.lastInsertRowid };
+}
+
+/**
+ * Get pricing logs for a marina
+ */
+export function getPricingLogs(db, marina_uid, limit = 10) {
+  const stmt = db.prepare(`
+    SELECT * FROM pricing_logs
+    WHERE marina_uid = ?
+    ORDER BY fetched_at_utc DESC
+    LIMIT ?
+  `);
+
+  const logs = stmt.all(marina_uid, limit);
+
+  // Parse source_quotes JSON
+  return {
+    success: true,
+    logs: logs.map(log => ({
+      ...log,
+      source_quotes: log.source_quotes ? JSON.parse(log.source_quotes) : [],
+    })),
+  };
+}
+
+/**
+ * Create vessel profile
+ */
+export function createVesselProfile(db, profileData) {
+  const {
+    name,
+    length_ft,
+    beam_ft,
+    draft_ft,
+    air_draft_ft,
+    is_multihull = 0,
+    needs_haulout = 0,
+    created_at_utc,
+  } = profileData;
+
+  const now = created_at_utc || new Date().toISOString();
+
+  const stmt = db.prepare(`
+    INSERT INTO vessel_profiles (
+      name, length_ft, beam_ft, draft_ft, air_draft_ft, is_multihull,
+      needs_haulout, created_at_utc, updated_at_utc
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const result = stmt.run(
+    name,
+    length_ft,
+    beam_ft,
+    draft_ft,
+    air_draft_ft,
+    is_multihull,
+    needs_haulout,
+    now,
+    now
+  );
+
+  return { success: true, profile_id: result.lastInsertRowid };
+}
+
+/**
+ * Get vessel profiles
+ */
+export function getVesselProfiles(db) {
+  const stmt = db.prepare(`
+    SELECT * FROM vessel_profiles
+    ORDER BY name ASC
+  `);
+
+  const profiles = stmt.all();
+
+  return { success: true, profiles };
+}
+
+/**
+ * Update vessel profile
+ */
+export function updateVesselProfile(db, profile_id, profileData) {
+  const {
+    name,
+    length_ft,
+    beam_ft,
+    draft_ft,
+    air_draft_ft,
+    is_multihull,
+    needs_haulout,
+  } = profileData;
+
+  const stmt = db.prepare(`
+    UPDATE vessel_profiles
+    SET name = ?, length_ft = ?, beam_ft = ?, draft_ft = ?, air_draft_ft = ?,
+        is_multihull = ?, needs_haulout = ?, updated_at_utc = ?
+    WHERE profile_id = ?
+  `);
+
+  const now = new Date().toISOString();
+  const result = stmt.run(
+    name,
+    length_ft,
+    beam_ft,
+    draft_ft,
+    air_draft_ft,
+    is_multihull,
+    needs_haulout,
+    now,
+    profile_id
+  );
+
+  return { success: true, changes: result.changes };
+}
+
+/**
+ * Delete vessel profile
+ */
+export function deleteVesselProfile(db, profile_id) {
+  const stmt = db.prepare(`
+    DELETE FROM vessel_profiles
+    WHERE profile_id = ?
+  `);
+
+  const result = stmt.run(profile_id);
+
+  return { success: true, changes: result.changes };
+}
+
+/**
  * Register master data routes on Express app
  */
 export function registerMasterDataRoutes(app, options = {}) {
@@ -626,10 +875,137 @@ export function registerMasterDataRoutes(app, options = {}) {
     }
   });
 
+  /**
+   * POST /api/master/pricing-logs
+   * Submit pricing log entry (requires boat signature)
+   */
+  app.post("/api/master/pricing-logs", async (req, res) => {
+    if (!requireBoatSignature) {
+      return res.status(503).json({ success: false, error: "Authentication not configured" });
+    }
+
+    try {
+      const auth = await requireBoatSignature(req, res);
+      if (!auth) return;
+
+      const result = submitPricingLog(db, req.body);
+      res.json(result);
+    } catch (error) {
+      console.error("[MasterData] Pricing log submission failed:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  /**
+   * GET /api/master/pricing-logs
+   * Get pricing logs for a marina
+   * Query: marina_uid, limit (default 10)
+   */
+  app.get("/api/master/pricing-logs", (req, res) => {
+    try {
+      const { marina_uid, limit } = req.query;
+
+      if (!marina_uid) {
+        return res.status(400).json({ error: "marina_uid is required" });
+      }
+
+      const result = getPricingLogs(db, marina_uid, limit ? parseInt(limit) : 10);
+      res.json(result);
+    } catch (error) {
+      console.error("[MasterData] Pricing logs query failed:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  /**
+   * POST /api/master/vessel-profiles
+   * Create vessel profile (requires boat signature)
+   */
+  app.post("/api/master/vessel-profiles", async (req, res) => {
+    if (!requireBoatSignature) {
+      return res.status(503).json({ success: false, error: "Authentication not configured" });
+    }
+
+    try {
+      const auth = await requireBoatSignature(req, res);
+      if (!auth) return;
+
+      const result = createVesselProfile(db, req.body);
+      res.json(result);
+    } catch (error) {
+      console.error("[MasterData] Vessel profile creation failed:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  /**
+   * GET /api/master/vessel-profiles
+   * Get all vessel profiles
+   */
+  app.get("/api/master/vessel-profiles", (req, res) => {
+    try {
+      const result = getVesselProfiles(db);
+      res.json(result);
+    } catch (error) {
+      console.error("[MasterData] Vessel profiles query failed:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  /**
+   * PUT /api/master/vessel-profiles/:id
+   * Update vessel profile (requires boat signature)
+   */
+  app.put("/api/master/vessel-profiles/:id", async (req, res) => {
+    if (!requireBoatSignature) {
+      return res.status(503).json({ success: false, error: "Authentication not configured" });
+    }
+
+    try {
+      const auth = await requireBoatSignature(req, res);
+      if (!auth) return;
+
+      const profile_id = parseInt(req.params.id);
+      const result = updateVesselProfile(db, profile_id, req.body);
+      res.json(result);
+    } catch (error) {
+      console.error("[MasterData] Vessel profile update failed:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  /**
+   * DELETE /api/master/vessel-profiles/:id
+   * Delete vessel profile (requires boat signature)
+   */
+  app.delete("/api/master/vessel-profiles/:id", async (req, res) => {
+    if (!requireBoatSignature) {
+      return res.status(503).json({ success: false, error: "Authentication not configured" });
+    }
+
+    try {
+      const auth = await requireBoatSignature(req, res);
+      if (!auth) return;
+
+      const profile_id = parseInt(req.params.id);
+      const result = deleteVesselProfile(db, profile_id);
+      res.json(result);
+    } catch (error) {
+      console.error("[MasterData] Vessel profile deletion failed:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   console.log("[MasterData] Routes registered:");
   console.log("  POST /api/master/marinas");
   console.log("  POST /api/master/fuel-logs");
   console.log("  GET  /api/master/nearby");
   console.log("  GET  /api/master/sync-events");
   console.log("  POST /api/master/sync-events/acknowledge");
+  console.log("  POST /api/master/pricing-logs");
+  console.log("  GET  /api/master/pricing-logs");
+  console.log("  POST /api/master/vessel-profiles");
+  console.log("  GET  /api/master/vessel-profiles");
+  console.log("  PUT  /api/master/vessel-profiles/:id");
+  console.log("  DELETE /api/master/vessel-profiles/:id");
 }
