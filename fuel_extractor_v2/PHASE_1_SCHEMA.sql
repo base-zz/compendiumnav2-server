@@ -179,4 +179,36 @@ CREATE TABLE IF NOT EXISTS discovery_state (
     min_discovery_interval_hours REAL NOT NULL DEFAULT 1
 );
 
+-- Pricing logs for slip rates and amenities
+CREATE TABLE IF NOT EXISTS pricing_logs (
+    pricing_log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    marina_uid TEXT NOT NULL,
+    fetched_at_utc TEXT NOT NULL,
+    monthly_base REAL,
+    is_per_ft INTEGER CHECK (is_per_ft IS NULL OR is_per_ft IN (0, 1)),
+    catamaran_multiplier REAL,
+    liveaboard_fee REAL,
+    min_air_draft_ft REAL,
+    air_draft_source TEXT,
+    min_depth_ft REAL,
+    depth_source TEXT,
+    lift_max_beam_ft REAL,
+    lift_max_tons REAL,
+    diy_allowed INTEGER CHECK (diy_allowed IS NULL OR diy_allowed IN (0, 1)),
+    electricity_metered INTEGER CHECK (electricity_metered IS NULL OR electricity_metered IN (0, 1)),
+    water_metered INTEGER CHECK (water_metered IS NULL OR water_metered IN (0, 1)),
+    liveaboard_permitted INTEGER CHECK (liveaboard_permitted IS NULL OR liveaboard_permitted IN (0, 1)),
+    source_quotes TEXT,
+    extraction_hash TEXT,
+    sync_dirty INTEGER NOT NULL CHECK (sync_dirty IN (0, 1)),
+    created_at_utc TEXT NOT NULL,
+    CHECK (json_valid(source_quotes))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pricing_logs_marina_time
+    ON pricing_logs(marina_uid, fetched_at_utc);
+
+CREATE INDEX IF NOT EXISTS idx_pricing_logs_sync_dirty
+    ON pricing_logs(sync_dirty);
+
 COMMIT;
