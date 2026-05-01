@@ -241,10 +241,10 @@ export class MasterSyncService extends BaseService {
     for (const log of dirtyLogs) {
       try {
         const result = await this._sendToVps("/api/master/pricing-logs", log);
-        results.push({ success: true, pricing_log_id: log.pricing_log_id, result });
+        results.push({ success: true, pricing_log_id: log.id, result });
       } catch (error) {
-        console.error(`[MasterSyncService] Failed to sync pricing log ${log.pricing_log_id}:`, error);
-        results.push({ success: false, pricing_log_id: log.pricing_log_id, error: error.message });
+        console.error(`[MasterSyncService] Failed to sync pricing log ${log.id}:`, error);
+        results.push({ success: false, pricing_log_id: log.id, error: error.message });
       }
     }
 
@@ -254,7 +254,7 @@ export class MasterSyncService extends BaseService {
       const stmt = db.prepare(`
         UPDATE pricing_logs
         SET sync_dirty = 0
-        WHERE pricing_log_id IN (${successfulIds.map(() => "?").join(",")})
+        WHERE id IN (${successfulIds.map(() => "?").join(",")})
       `);
       stmt.run(...successfulIds);
     }
