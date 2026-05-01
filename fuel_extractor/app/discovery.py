@@ -34,6 +34,19 @@ FUEL_INTENT_KEYWORDS = (
     "fuel"
 )
 
+SLIP_INTENT_KEYWORDS = (
+    "slip",
+    "slips",
+    "berth",
+    "mooring",
+    "transient",
+    "monthly",
+    "annual",
+    "long-term",
+    "catamaran",
+    "multihull"
+)
+
 GENERIC_PAGE_TOKENS = (
     "/about",
     "/careers",
@@ -57,6 +70,18 @@ FUEL_PATH_TOKENS = (
     "pricing",
 )
 
+FACILITY_PATH_TOKENS = (
+    "/facilities",
+    "/amenities",
+    "/services",
+    "/boat-yard",
+    "/haul-out",
+    "/travel-lift",
+    "/storage",
+    "/yard",
+    "/lift"
+)
+
 IRRELEVANT_PATH_TOKENS = (
     "/boat-rentals",
     "/faq",
@@ -69,9 +94,13 @@ class DiscoveryError(Exception):
 
 
 DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Upgrade-Insecure-Requests": "1",
 }
 
 
@@ -80,23 +109,28 @@ def _variant_urls(base_url: str) -> list[str]:
     if not parsed.scheme or not parsed.netloc:
         return [base_url]
 
-    urls = [base_url]
     host = parsed.netloc
-
+    
+    # Prioritize apex domain to avoid SSL hostname mismatches
     if host.startswith("www."):
-        alt_host = host[4:]
+        apex_host = host[4:]
+        apex_url = parsed._replace(netloc=apex_host).geturl()
+        www_url = base_url
     else:
-        alt_host = f"www.{host}"
-
-    alt_url = parsed._replace(netloc=alt_host).geturl()
-    if alt_url not in urls:
-        urls.append(alt_url)
+        apex_url = base_url
+        www_host = f"www.{host}"
+        www_url = parsed._replace(netloc=www_host).geturl()
+    
+    urls = [apex_url]
+    if www_url != apex_url:
+        urls.append(www_url)
 
     return urls
 
 
 def _fetch_html_with_fallback(base_url: str, timeout_seconds: int) -> tuple[str, str]:
     errors: list[str] = []
+    got_403 = False
 
     for candidate_url in _variant_urls(base_url):
         for use_http2 in (True, False):
@@ -110,8 +144,41 @@ def _fetch_html_with_fallback(base_url: str, timeout_seconds: int) -> tuple[str,
                     response = client.get(candidate_url)
                     response.raise_for_status()
                     return str(response.url), response.text
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (403, 409):
+                    got_403 = True
+                    errors.append(f"{candidate_url} (http2={use_http2}): {exc.response.status_code} - will try Playwright")
+                else:
+                    errors.append(f"{candidate_url} (http2={use_http2}): {exc}")
+            except httpx.HTTPError as exc:
+                # Try with SSL verification disabled on SSL errors
+                if "SSL" in str(exc) or "certificate" in str(exc).lower():
+                    try:
+                        with httpx.Client(
+                            follow_redirects=True,
+                            timeout=timeout_seconds,
+                            headers=DEFAULT_HEADERS,
+                            http2=use_http2,
+                            verify=False
+                        ) as client:
+                            response = client.get(candidate_url)
+                            response.raise_for_status()
+                            return str(response.url), response.text
+                    except Exception as ssl_exc:
+                        errors.append(f"{candidate_url} (http2={use_http2}): SSL bypass failed - {ssl_exc}")
+                else:
+                    errors.append(f"{candidate_url} (http2={use_http2}): {exc}")
             except Exception as exc:
                 errors.append(f"{candidate_url} (http2={use_http2}): {exc}")
+
+    # If we got 403 errors, try Playwright fallback
+    if got_403:
+        try:
+            from .markdown_convert import _fetch_html_with_playwright
+            resolved_url, html = _fetch_html_with_playwright(base_url, timeout_seconds)
+            return resolved_url, html
+        except Exception as exc:
+            errors.append(f"Playwright fallback failed: {exc}")
 
     raise DiscoveryError("; ".join(errors))
 
@@ -131,6 +198,11 @@ def _is_allowed_candidate_link(base_url: str, candidate_url: str) -> bool:
     if _same_host(base_url, candidate_url):
         return True
     if _is_dockwa_destination_url(candidate_url):
+        return True
+    # Allow sub-domains of the base netloc
+    base_netloc = urlparse(base_url).netloc
+    candidate_netloc = urlparse(candidate_url).netloc
+    if candidate_netloc.endswith(base_netloc) or base_netloc.endswith(candidate_netloc):
         return True
     return False
 
@@ -153,10 +225,28 @@ def _score_link(text: str, href: str) -> int:
         if keyword in haystack:
             score += 25
 
+    # Big Three: Slip rates/pricing pages (high priority)
+    for keyword in SLIP_INTENT_KEYWORDS:
+        if keyword in haystack:
+            score += 30
+
     href_lower = href.lower()
     for token in FUEL_PATH_TOKENS:
         if token in href_lower:
             score += 10
+
+    # Big Three: Facilities/travel lift pages (high priority)
+    for token in FACILITY_PATH_TOKENS:
+        if token in href_lower:
+            score += 20
+
+    # Explicit high priority for /rates pages
+    if "/rates" in href_lower:
+        score += 40
+
+    # Big Three: Dockwa pages (highest priority - already handled by _is_allowed_candidate_link)
+    if "dockwa.com" in href_lower and "/explore/destination/" in href_lower:
+        score += 50
 
     for token in IRRELEVANT_PATH_TOKENS:
         if token in href_lower:

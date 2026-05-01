@@ -42,8 +42,10 @@ def harvest_marinas_token(timeout_seconds: int) -> Optional[str]:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
+        # Mask navigator.webdriver to avoid detection
+        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         page = context.new_page()
 
         page.route("**/*.{png,jpg,jpeg,css,svg,woff}", lambda route: route.abort())
@@ -202,6 +204,7 @@ def _discover_marinas_by_tilequery(center_lat: float, center_lon: float, radius_
                 "lat": float(lat),
                 "lon": float(lon),
                 "marinas_url": f"https://marinas.com/view/marina/{str(marina_id).strip()}",
+                "website": properties.get("website"),
                 "source": "mapbox_tilequery",
                 "diesel_amenity": properties.get("diesel_amenity"),
                 "gas_amenity": properties.get("gas_amenity"),
@@ -235,7 +238,11 @@ def _discover_from_search_url(search_url: str, timeout_seconds: int, scroll_cycl
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
-        context = browser.new_context()
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        )
+        # Mask navigator.webdriver to avoid detection
+        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         page = context.new_page()
 
         try:

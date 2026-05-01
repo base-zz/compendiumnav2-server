@@ -165,12 +165,14 @@ def _build_update_fields(
     source_marinas_id = discovered_record.get("source_marinas_id")
     name = discovered_record.get("name")
     marinas_url = discovered_record.get("marinas_url")
+    website = discovered_record.get("website")
 
     if not isinstance(source_marinas_id, str) or not source_marinas_id.strip():
         raise ReconcileRunnerError("source_marinas_id is required")
     if not isinstance(name, str) or not name.strip():
         raise ReconcileRunnerError("name is required")
     has_marinas_url = isinstance(marinas_url, str) and bool(marinas_url.strip())
+    has_website = isinstance(website, str) and bool(website.strip())
 
     if "source_marinas_id" in columns:
         update_fields["source_marinas_id"] = source_marinas_id.strip()
@@ -178,6 +180,28 @@ def _build_update_fields(
         update_fields[name_column_name] = name.strip()
     if "marinas_url" in columns and has_marinas_url:
         update_fields["marinas_url"] = marinas_url.strip()
+    
+    # Fetch contact info from marinas.com if not provided in discovery
+    if has_marinas_url:
+        try:
+            from fuel_extractor.app.dockwa_lookup import extract_contact_info_from_marinas_page
+            contact_info = extract_contact_info_from_marinas_page(marinas_url.strip(), timeout_seconds=10)
+            
+            if contact_info.get("website") and not has_website:
+                website = contact_info["website"]
+                has_website = True
+            
+            if contact_info.get("phone") and "phone" in columns:
+                update_fields["phone"] = contact_info["phone"].strip()
+            
+            # Email not in database schema yet, skip for now
+            # if contact_info.get("email") and "email" in columns:
+            #     update_fields["email"] = contact_info["email"].strip()
+        except Exception:
+            pass  # Don't fail update if contact fetch fails
+    
+    if "website" in columns and has_website:
+        update_fields["website"] = website.strip()
     if "last_seen_on_web_utc" in columns:
         update_fields["last_seen_on_web_utc"] = discovered_at_utc
     if "verification_state" in columns:
@@ -215,7 +239,9 @@ def _insert_new_marina(
     source_marinas_id = discovered_record.get("source_marinas_id")
     name = discovered_record.get("name")
     marinas_url = discovered_record.get("marinas_url")
+    website = discovered_record.get("website")
     has_marinas_url = isinstance(marinas_url, str) and bool(marinas_url.strip())
+    has_website = isinstance(website, str) and bool(website.strip())
     lat = discovered_record.get("lat")
     lon = discovered_record.get("lon")
 
@@ -240,6 +266,28 @@ def _insert_new_marina(
 
     if has_marinas_url:
         insert_fields["marinas_url"] = marinas_url.strip()
+    
+    # Fetch contact info from marinas.com
+    if has_marinas_url:
+        try:
+            from fuel_extractor.app.dockwa_lookup import extract_contact_info_from_marinas_page
+            contact_info = extract_contact_info_from_marinas_page(marinas_url.strip(), timeout_seconds=10)
+            
+            if contact_info.get("website") and not has_website:
+                website = contact_info["website"]
+                has_website = True
+            
+            if contact_info.get("phone") and "phone" in columns:
+                insert_fields["phone"] = contact_info["phone"].strip()
+            
+            # Email not in database schema yet, skip for now
+            # if contact_info.get("email") and "email" in columns:
+            #     insert_fields["email"] = contact_info["email"].strip()
+        except Exception:
+            pass  # Don't fail insert if contact fetch fails
+    
+    if has_website:
+        insert_fields["website"] = website.strip()
 
     fuel_candidate_value, seed_reason_value = _derive_fuel_candidacy(discovered_record, None)
 

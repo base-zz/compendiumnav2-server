@@ -27,6 +27,7 @@ def _normalize_discovery_record(record: dict[str, Any], discovered_at_utc: str) 
         raise DiscoveryRunnerError("discovery record missing name")
 
     marinas_url = record.get("marinas_url")
+    website = record.get("website")
 
     normalized: dict[str, Any] = {
         "source_marinas_id": source_marinas_id.strip(),
@@ -36,6 +37,9 @@ def _normalize_discovery_record(record: dict[str, Any], discovered_at_utc: str) 
 
     if isinstance(marinas_url, str) and marinas_url.strip():
         normalized["marinas_url"] = marinas_url.strip()
+
+    if isinstance(website, str) and website.strip():
+        normalized["website"] = website.strip()
 
     lat = record.get("lat")
     lon = record.get("lon")
