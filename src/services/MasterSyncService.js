@@ -272,7 +272,9 @@ export class MasterSyncService extends BaseService {
     try {
       const marinaResult = await this._syncMarinas(db);
       const fuelLogResult = await this._syncFuelLogs(db);
-      const pricingLogResult = await this._syncPricingLogs(db);
+      // Pricing log sync disabled until VPS endpoint is implemented
+      // const pricingLogResult = await this._syncPricingLogs(db);
+      const pricingLogResult = { synced: 0 };
 
       const totalSynced = marinaResult.synced + fuelLogResult.synced + pricingLogResult.synced;
       if (totalSynced > 0) {
