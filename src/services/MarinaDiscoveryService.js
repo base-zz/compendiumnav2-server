@@ -18,7 +18,7 @@ export class MarinaDiscoveryService extends ContinuousService {
     const { 
       dbPath = path.resolve(process.cwd(), 'data/nav_data.db'),
       thresholdMiles = 10,
-      minIntervalHours = 1,
+      minIntervalHours = 48,
       debug = false 
     } = options;
 
@@ -52,7 +52,7 @@ export class MarinaDiscoveryService extends ContinuousService {
       if (row.count === 0) {
         db.prepare(`
           INSERT INTO discovery_state (id, last_discovery_lat, last_discovery_lon, last_discovery_time, discovery_count, discovery_threshold_miles, min_discovery_interval_hours)
-          VALUES (1, NULL, NULL, NULL, 0, 10, 1)
+          VALUES (1, NULL, NULL, NULL, 0, 10, 48)
         `).run();
         this.log('Initialized discovery_state with default row');
       }
@@ -124,9 +124,9 @@ export class MarinaDiscoveryService extends ContinuousService {
         const now = new Date();
         const hoursSinceLast = (now.getTime() - lastTime.getTime()) / (1000 * 60 * 60);
         
-        if (hoursSinceLast < state.min_discovery_interval_hours) {
+        if (hoursSinceLast < this.minIntervalHours) {
           if (this.debug) {
-            this.log(`Skipping discovery: only ${hoursSinceLast.toFixed(2)} hours since last discovery (min: ${state.min_discovery_interval_hours}h)`);
+            this.log(`Skipping discovery: only ${hoursSinceLast.toFixed(2)} hours since last discovery (min: ${this.minIntervalHours}h)`);
           }
           return false;
         }
