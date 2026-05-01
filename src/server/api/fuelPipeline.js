@@ -39,7 +39,7 @@ function runPythonScript(scriptPath, args) {
   return new Promise((resolve, reject) => {
     const venvPython = path.resolve(
       process.cwd(),
-      "fuel_extractor/.venv/bin/python"
+      "fuel_extractor_v2/.venv/bin/python"
     );
     const fullScriptPath = path.resolve(process.cwd(), scriptPath);
 

@@ -74,7 +74,7 @@ function makeRequest(method, path, body = null) {
 async function testPythonExecutable() {
   log("\n[TEST] Python executable check", "blue");
 
-  const venvPython = path.join(REPO_ROOT, "fuel_extractor/.venv/bin/python");
+  const venvPython = path.join(REPO_ROOT, "fuel_extractor_v2/.venv/bin/python");
 
   return new Promise((resolve) => {
     const python = spawn(venvPython, ["--version"]);
