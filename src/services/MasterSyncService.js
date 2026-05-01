@@ -45,6 +45,9 @@ export class MasterSyncService extends BaseService {
 
     this.dbPath = options.dbPath;
     this.vpsHost = options.vpsHost || process.env.VPS_HOST;
+    if (this.vpsHost && !this.vpsHost.startsWith('http')) {
+      this.vpsHost = `https://${this.vpsHost}`;
+    }
     this.boatId = options.boatId;
     this.privateKey = options.privateKey;
     this.syncIntervalMs = options.syncIntervalMs || 5 * 60 * 1000; // 5 minutes default
@@ -219,6 +222,38 @@ export class MasterSyncService extends BaseService {
   }
 
   /**
+   * Sync dirty pricing logs to VPS
+   */
+  async _syncPricingLogs(db) {
+    const dirtyLogs = this._getDirtyRecords(db, "pricing_logs", this.batchSize);
+    if (dirtyLogs.length === 0) return { synced: 0 };
+
+    const results = [];
+    for (const log of dirtyLogs) {
+      try {
+        const result = await this._sendToVps("/api/master/pricing-logs", log);
+        results.push({ success: true, pricing_log_id: log.pricing_log_id, result });
+      } catch (error) {
+        console.error(`[MasterSyncService] Failed to sync pricing log ${log.pricing_log_id}:`, error);
+        results.push({ success: false, pricing_log_id: log.pricing_log_id, error: error.message });
+      }
+    }
+
+    // Clear sync_dirty for successful syncs
+    const successfulIds = results.filter((r) => r.success).map((r) => r.pricing_log_id);
+    if (successfulIds.length > 0) {
+      const stmt = db.prepare(`
+        UPDATE pricing_logs
+        SET sync_dirty = 0
+        WHERE pricing_log_id IN (${successfulIds.map(() => "?").join(",")})
+      `);
+      stmt.run(...successfulIds);
+    }
+
+    return { synced: successfulIds.length, total: dirtyLogs.length, results };
+  }
+
+  /**
    * Main sync loop
    */
   async _syncToMaster() {
@@ -228,13 +263,14 @@ export class MasterSyncService extends BaseService {
     try {
       const marinaResult = await this._syncMarinas(db);
       const fuelLogResult = await this._syncFuelLogs(db);
+      const pricingLogResult = await this._syncPricingLogs(db);
 
-      const totalSynced = marinaResult.synced + fuelLogResult.synced;
+      const totalSynced = marinaResult.synced + fuelLogResult.synced + pricingLogResult.synced;
       if (totalSynced > 0) {
-        this.log(`Synced ${marinaResult.synced} marinas, ${fuelLogResult.synced} fuel logs to VPS`);
+        this.log(`Synced ${marinaResult.synced} marinas, ${fuelLogResult.synced} fuel logs, ${pricingLogResult.synced} pricing logs to VPS`);
       }
 
-      return { marinas: marinaResult, fuelLogs: fuelLogResult };
+      return { marinas: marinaResult, fuelLogs: fuelLogResult, pricingLogs: pricingLogResult };
     } finally {
       db.close();
     }
