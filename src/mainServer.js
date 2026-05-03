@@ -127,12 +127,21 @@ async function bridgeStateToRelay() {
     console.log("[SERVER] Setting up state update listeners...");
 
     stateService.on("state:full-update", (msg) => {
-      console.log("[SERVER] Received state:full-update from StateService");
+      // Only log if it contains navigation data
+      if (msg.data && (msg.data.navigation || msg.data.position)) {
+        console.log("[SERVER] Received state:full-update from StateService (navigation)");
+      }
       relayStateManager.receiveExternalStateUpdate(msg.data);
     });
 
     stateService.on("state:patch", (msg) => {
-      console.log("[SERVER] Received state:patch from StateService");
+      // Only log if patch contains navigation-related paths
+      const hasNavPatch = Array.isArray(msg.data) && msg.data.some(patch => 
+        patch.path && (patch.path.includes('navigation') || patch.path.includes('position'))
+      );
+      if (hasNavPatch) {
+        console.log("[SERVER] Received state:patch from StateService (navigation)");
+      }
       relayStateManager.applyPatchAndForward(msg.data);
     });
     console.log("[SERVER] State bridge activated");
