@@ -111,10 +111,6 @@ function buildVpsUrl() {
 
 // --- Bridge canonical state into relay state manager ---
 async function bridgeStateToRelay() {
-  if (!stateManager) {
-    console.error("[SERVER] State manager not initialized");
-    return;
-  }
   log("Starting state bridge to relay");
   try {
     const { stateData } = await import("./state/StateData.js");
