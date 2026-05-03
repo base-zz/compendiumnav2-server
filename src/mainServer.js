@@ -114,12 +114,17 @@ async function bridgeStateToRelay() {
   console.log("[SERVER] Starting state bridge to relay");
   log("Starting state bridge to relay");
   try {
+    console.log("[SERVER] Importing StateData...");
     const { stateData } = await import("./state/StateData.js");
+    console.log("[SERVER] Importing StateManager...");
     const { getStateManager: resolveStateManager } = await import(
       "./relay/core/state/StateManager.js"
     );
+    console.log("[SERVER] Resolving StateManager...");
     const relayStateManager = resolveStateManager();
+    console.log("[SERVER] Getting state service...");
     const stateService = requireService("state");
+    console.log("[SERVER] Setting up state update listeners...");
 
     stateService.on("state:full-update", (msg) => {
       relayStateManager.receiveExternalStateUpdate(msg.data);
@@ -128,6 +133,7 @@ async function bridgeStateToRelay() {
     stateService.on("state:patch", (msg) => {
       relayStateManager.applyPatchAndForward(msg.data);
     });
+    console.log("[SERVER] State bridge activated");
     log("StateService patch listener registered");
     log("State bridge activated");
   } catch (err) {
