@@ -127,10 +127,12 @@ async function bridgeStateToRelay() {
     console.log("[SERVER] Setting up state update listeners...");
 
     stateService.on("state:full-update", (msg) => {
+      console.log("[SERVER] Received state:full-update from StateService");
       relayStateManager.receiveExternalStateUpdate(msg.data);
     });
 
     stateService.on("state:patch", (msg) => {
+      console.log("[SERVER] Received state:patch from StateService");
       relayStateManager.applyPatchAndForward(msg.data);
     });
     console.log("[SERVER] State bridge activated");
