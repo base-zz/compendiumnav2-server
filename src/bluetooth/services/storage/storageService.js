@@ -83,6 +83,31 @@ class StorageService extends EventEmitter {
     console.log('[STORAGE] initialize() completed, storageService is ready');
   }
 
+  async close() {
+    const closePromises = [];
+
+    if (this.cacheCleanupInterval) {
+      clearInterval(this.cacheCleanupInterval);
+      this.cacheCleanupInterval = null;
+    }
+
+    for (const db of this.readingsDBs.values()) {
+      if (db && typeof db.close === 'function') {
+        closePromises.push(db.close());
+      }
+    }
+    this.readingsDBs.clear();
+
+    if (this.devicesDB && typeof this.devicesDB.close === 'function') {
+      closePromises.push(this.devicesDB.close());
+    }
+
+    await Promise.allSettled(closePromises);
+    this.devicesDB = null;
+    this.initialized = false;
+    this.initializing = null;
+  }
+
   // === Settings Management ===
 
   /**

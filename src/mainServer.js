@@ -26,6 +26,7 @@ import {
 } from "./services/bootstrap.js";
 import { serviceManager } from "./services/ServiceManager.js";
 import { requireService } from "./services/serviceLocator.js";
+import storageService from "./bluetooth/services/storage/storageService.js";
 import { NewStateService } from "./services/NewStateService.js";
 import { PositionService } from "./services/PositionService.js";
 import { TidalService } from "./services/TidalService.js";
@@ -49,6 +50,10 @@ const startupLog = (...args) => {
   }
 };
 const healthTelemetryLogsEnabled = process.env.HEALTH_TELEMETRY_LOGS === "true";
+let shutdownStarted = false;
+let httpServerInstance = null;
+let relayServerInstance = null;
+let directServerInstance = null;
 
 startupLog("[SERVER] TOP: mainServer.js imports completed, entering top-level code...");
 
@@ -63,7 +68,7 @@ dotenv.config({ path: ".env" });
 startupLog("[SERVER] TOP: after dotenv.config, before CLI flag parsing");
 
 // Periodic memory usage logging to diagnose heap growth
-setInterval(() => {
+const memoryLogInterval = setInterval(() => {
   const memory = process.memoryUsage();
   const formatMb = (value) => `${(value / 1024 / 1024).toFixed(1)}MB`;
   console.log("[SERVER] Memory usage", {
@@ -108,6 +113,64 @@ function buildVpsUrl() {
   }
   return undefined;
 }
+
+async function closeHttpServer(server) {
+  if (!server) {
+    return;
+  }
+
+  await new Promise((resolve) => {
+    server.close(() => resolve());
+  });
+}
+
+async function shutdown(signal) {
+  if (shutdownStarted) {
+    return;
+  }
+  shutdownStarted = true;
+
+  console.log(`\n[SERVER] Shutting down gracefully (${signal})...`);
+
+  const forceExitTimer = setTimeout(() => {
+    console.error("[SERVER] Graceful shutdown timed out, forcing exit");
+    process.exit(1);
+  }, 8000);
+
+  try {
+    clearInterval(memoryLogInterval);
+
+    if (directServerInstance && typeof directServerInstance.shutdown === "function") {
+      await directServerInstance.shutdown();
+    }
+
+    if (relayServerInstance && typeof relayServerInstance.shutdown === "function") {
+      relayServerInstance.shutdown();
+    } else if (relayServerInstance && typeof relayServerInstance.close === "function") {
+      relayServerInstance.close();
+    }
+
+    await closeHttpServer(httpServerInstance);
+    await serviceManager.stopAll();
+    await storageService.close();
+
+    clearTimeout(forceExitTimer);
+    console.log("[SERVER] Graceful shutdown complete");
+    process.exit(0);
+  } catch (err) {
+    clearTimeout(forceExitTimer);
+    console.error("[SERVER] Error during graceful shutdown:", err);
+    process.exit(1);
+  }
+}
+
+process.once("SIGINT", () => {
+  shutdown("SIGINT");
+});
+
+process.once("SIGTERM", () => {
+  shutdown("SIGTERM");
+});
 
 // --- Bridge canonical state into relay state manager ---
 async function bridgeStateToRelay() {
@@ -545,7 +608,7 @@ async function startServer() {
 
     // 4. Start relay server
     startupLog("[SERVER] Starting relay server with config:", relayConfig);
-    await startRelayServer(stateManager, relayConfig);
+    relayServerInstance = await startRelayServer(stateManager, relayConfig);
     startupLog("[SERVER] Relay server started");
 
     // 5. Create and configure Express app for API endpoints
@@ -618,6 +681,7 @@ async function startServer() {
     // 6. Start HTTP server
     const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000; // Default to 3000 for HTTP
     const httpServer = http.createServer(app);
+    httpServerInstance = httpServer;
 
     // Auto-register with VPS on startup if configured
     if (process.env.VPS_AUTO_REGISTER === "true") {
@@ -675,21 +739,10 @@ async function startServer() {
       const directServer = await startDirectServerWrapper(stateManager, {
         port: parseInt(process.env.DIRECT_WS_PORT, 10),
       });
+      directServerInstance = directServer;
       console.log(
         `[SERVER] Direct WebSocket server started on port ${process.env.DIRECT_WS_PORT}`
       );
-      // Handle graceful shutdown for directServer if needed
-      process.on("SIGINT", async () => {
-        console.log("\n[SERVER] Shutting down gracefully...");
-        if (directServer && directServer.shutdown) {
-          directServer.shutdown();
-        }
-        if (httpServer) {
-          httpServer.close(() => process.exit(0));
-        } else {
-          process.exit(0);
-        }
-      });
     }
 
     // Bluetooth state logger removed - state is available via WebSocket updates
