@@ -602,12 +602,13 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   const previousFilteredBoatLon = anchor.filteredBoatPosition?.position?.longitude?.value;
   // Adaptive defaults for stable anchor display without client changes.
   // These tune smoothing from observed position stability and vessel speed.
-  const DEFAULT_DEADBAND_METERS = 6;
-  const STATIONARY_DEADBAND_FLOOR_METERS = 8;
-  const ACCURACY_DEADBAND_MULTIPLIER = 1.5;
-  const DEFAULT_FILTER_ALPHA = 0.15;
-  const STATIONARY_FILTER_ALPHA = 0.05;
-  const UNDERWAY_FILTER_ALPHA = 0.25;
+  const DEFAULT_DEADBAND_METERS = 3;
+  const STATIONARY_DEADBAND_FLOOR_METERS = 6;
+  const MAX_DEADBAND_METERS = 12;
+  const ACCURACY_DEADBAND_MULTIPLIER = 0.75;
+  const DEFAULT_FILTER_ALPHA = 0.35;
+  const STATIONARY_FILTER_ALPHA = 0.25;
+  const UNDERWAY_FILTER_ALPHA = 0.6;
   const STATIONARY_SOG_THRESHOLD_KNOTS = 0.2;
   const UNDERWAY_SOG_THRESHOLD_KNOTS = 2;
   const MOVEMENT_PERSIST_MS = 5000;
@@ -639,7 +640,8 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   const sogUnits = appState.navigation?.speed?.sog?.units;
   const sogKnots = convertSpeedToKnots(sogValue, sogUnits);
 
-  // Deadband expands with reported jitter, but never below the 6m baseline.
+  // Deadband expands with reported jitter, but is capped so rejected/quarantined
+  // outliers cannot inflate it enough to freeze real movement.
   let filterDeadbandMeters;
   if (Number.isFinite(accuracyMeters)) {
     filterDeadbandMeters = Math.max(
@@ -649,6 +651,7 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
   } else {
     filterDeadbandMeters = DEFAULT_DEADBAND_METERS;
   }
+  filterDeadbandMeters = Math.min(filterDeadbandMeters, MAX_DEADBAND_METERS);
 
   // Alpha adapts with vessel speed:
   // - stationary: stronger smoothing
@@ -681,10 +684,11 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
     );
 
     if (Number.isFinite(deltaFromPreviousFilteredMeters)) {
-      // Reject abrupt one-sample teleports from noisy fixes.
+      // Dampen abrupt jumps instead of rejecting forever. This avoids filter lock
+      // when real movement accumulates beyond the stale filtered position.
       if (deltaFromPreviousFilteredMeters > JUMP_REJECTION_METERS) {
-        filteredBoatLat = previousFilteredBoatLat;
-        filteredBoatLon = previousFilteredBoatLon;
+        filteredBoatLat = previousFilteredBoatLat + ((rawBoatLat - previousFilteredBoatLat) * STATIONARY_FILTER_ALPHA);
+        filteredBoatLon = previousFilteredBoatLon + ((rawBoatLon - previousFilteredBoatLon) * STATIONARY_FILTER_ALPHA);
       // Hold within deadband to remove normal anchor jitter.
       } else if (deltaFromPreviousFilteredMeters <= filterDeadbandMeters) {
         filteredBoatLat = previousFilteredBoatLat;
@@ -976,15 +980,28 @@ export function recomputeAnchorDerivedState(appState, options = {}) {
         ? updatedAnchor.history
         : [];
       
-      // Only add breadcrumb if at least 30 seconds have passed since last one
       const MIN_BREADCRUMB_INTERVAL_MS = 30000; // 30 seconds
+      const MIN_BREADCRUMB_DISTANCE_METERS = 3;
       
       const lastEntry = existingHistory.length > 0
         ? existingHistory[existingHistory.length - 1]
         : null;
       
+      const lastHistoryLat = lastEntry?.position?.latitude;
+      const lastHistoryLon = lastEntry?.position?.longitude;
+      const distanceFromLastHistoryMeters =
+        Number.isFinite(lastHistoryLat) && Number.isFinite(lastHistoryLon)
+          ? calculateDistance(lastHistoryLat, lastHistoryLon, filteredBoatLat, filteredBoatLon)
+          : null;
+
       if (lastEntry && (now - lastEntry.time) < MIN_BREADCRUMB_INTERVAL_MS) {
         // Skip adding breadcrumb - not enough time has passed
+      } else if (
+        lastEntry &&
+        Number.isFinite(distanceFromLastHistoryMeters) &&
+        distanceFromLastHistoryMeters < MIN_BREADCRUMB_DISTANCE_METERS
+      ) {
+        // Skip adding breadcrumb - filtered position has not moved enough
       } else {
         const historyEntry = {
           position: {
