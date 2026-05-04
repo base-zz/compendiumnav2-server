@@ -9,7 +9,13 @@
     "build": "tsc",
     "dev": "node -r module-alias/register src/mainServer.js",
     "mcp": "node -r module-alias/register src/mcpServer.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "mocha test/**/*.test.js --timeout 10000",
+    "test:unit": "mocha test/unit/**/*.test.js --timeout 5000",
+    "test:integration": "mocha test/integration/**/*.test.js --timeout 10000",
+    "test:api": "mocha test/api/**/*.test.js --timeout 10000",
+    "test:e2e": "mocha test/e2e/**/*.test.js --timeout 30000",
+    "test:coverage": "nyc --reporter=text --reporter=lcov mocha test/**/*.test.js --timeout 10000",
+    "test:watch": "mocha test/**/*.test.js --timeout 10000 --watch"
   },
   "dependencies": {
     "@abandonware/bluetooth-hci-socket": "^0.5.3-12",
@@ -50,6 +56,9 @@
     "@types/node": "^20.5.0",
     "@types/ws": "^8.5.5",
     "module-alias": "^2.2.3",
+    "nyc": "^15.1.0",
+    "sinon": "^18.0.1",
+    "supertest": "^7.0.0",
     "ts-node": "^10.9.1",
     "typescript": "^5.1.6"
   }
