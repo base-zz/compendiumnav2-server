@@ -14,7 +14,7 @@ import path from 'path';
 console.log('[ROUTES] boatInfo routes module loaded');
 
 const PROFILE_ID = 'default';
-const BOAT_PROFILE_DB_PATH = path.join(process.cwd(), 'data', 'boat_profile.cb');
+const BOAT_PROFILE_DB_PATH = path.join(process.cwd(), 'data', 'boat_profile.db');
 const STRING_FIELDS = new Set(['boatName', 'boatType', 'mmsi']);
 const NUMBER_FIELDS = new Set([
   'loa',
