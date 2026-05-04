@@ -8,10 +8,13 @@
 import { getBoatInfo as buildBoatInfo } from '../uniqueAppId.js';
 import { requireService } from '../../services/serviceLocator.js';
 import Database from 'better-sqlite3';
+import fs from 'fs';
+import path from 'path';
 
 console.log('[ROUTES] boatInfo routes module loaded');
 
 const PROFILE_ID = 'default';
+const BOAT_PROFILE_DB_PATH = path.join(process.cwd(), 'data', 'boat_profile.cb');
 const STRING_FIELDS = new Set(['boatName', 'boatType', 'mmsi']);
 const NUMBER_FIELDS = new Set([
   'loa',
@@ -25,11 +28,11 @@ const NUMBER_FIELDS = new Set([
 ]);
 
 function getBoatProfileDbPath() {
-  const dbPath = process.env.BOAT_PROFILE_DB_PATH;
-  if (typeof dbPath !== 'string' || dbPath.trim() === '') {
-    throw new Error('BOAT_PROFILE_DB_PATH must be set');
+  const dataDir = path.dirname(BOAT_PROFILE_DB_PATH);
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
   }
-  return dbPath;
+  return BOAT_PROFILE_DB_PATH;
 }
 
 function openBoatProfileDb() {
