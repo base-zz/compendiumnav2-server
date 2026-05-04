@@ -1,5 +1,6 @@
 import PouchDB from 'pouchdb';
 import PouchDBFind from 'pouchdb-find';
+import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -23,6 +24,7 @@ class StorageService extends EventEmitter {
     super(); // Call parent constructor first
     this.basePath = path.join(process.cwd(), 'data');
     this.devicesDB = null;
+    this.settingsDB = null;
     this.readingsDBs = new Map();
     this.initialized = false;
     this.initializing = null;
@@ -69,6 +71,8 @@ class StorageService extends EventEmitter {
       fs.mkdirSync(this.basePath, { recursive: true });
     }
 
+    this._initializeSettingsDb();
+
     // Initialize devices database
     console.log('[STORAGE] Creating devicesDB at', path.join(this.basePath, 'devices.db'));
     this.devicesDB = new PouchDB(path.join(this.basePath, 'devices.db'), {
@@ -79,6 +83,7 @@ class StorageService extends EventEmitter {
     console.log('[STORAGE] Calling _ensureDesignDocs()...');
     await this._ensureDesignDocs();
     console.log('[STORAGE] _ensureDesignDocs() completed');
+    await this._migrateSettingsFromPouchDb();
     this.initialized = true;
     console.log('[STORAGE] initialize() completed, storageService is ready');
   }
@@ -103,9 +108,75 @@ class StorageService extends EventEmitter {
     }
 
     await Promise.allSettled(closePromises);
+
+    if (this.settingsDB && typeof this.settingsDB.close === 'function') {
+      this.settingsDB.close();
+    }
+
     this.devicesDB = null;
+    this.settingsDB = null;
     this.initialized = false;
     this.initializing = null;
+  }
+
+  _initializeSettingsDb() {
+    if (this.settingsDB) {
+      return;
+    }
+
+    const dbPath = path.join(this.basePath, 'settings.db');
+    this.settingsDB = new Database(dbPath);
+    this.settingsDB.exec(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+  }
+
+  async _migrateSettingsFromPouchDb() {
+    if (!this.devicesDB || !this.settingsDB) {
+      return;
+    }
+
+    const marker = this.settingsDB.prepare('SELECT value_json FROM app_settings WHERE key = ?').get('__pouch_settings_migrated');
+    if (marker) {
+      return;
+    }
+
+    let doc;
+    try {
+      doc = await this.devicesDB.get('_local/settings');
+    } catch (err) {
+      if (err.status !== 404) {
+        throw err;
+      }
+      doc = null;
+    }
+
+    const now = new Date().toISOString();
+    const upsert = this.settingsDB.prepare(`
+      INSERT INTO app_settings (key, value_json, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        value_json = excluded.value_json,
+        updated_at = excluded.updated_at
+    `);
+
+    const migrate = this.settingsDB.transaction(() => {
+      if (doc && typeof doc === 'object') {
+        for (const [key, value] of Object.entries(doc)) {
+          if (key.startsWith('_')) {
+            continue;
+          }
+          upsert.run(key, JSON.stringify(value), now);
+        }
+      }
+      upsert.run('__pouch_settings_migrated', JSON.stringify(true), now);
+    });
+
+    migrate();
   }
 
   // === Settings Management ===
@@ -120,12 +191,15 @@ class StorageService extends EventEmitter {
     this._checkInitialized();
     
     try {
-      const doc = await this.devicesDB.get(`_local/settings`).catch(err => {
-        if (err.status === 404) return null;
-        throw err;
-      });
-      
-      return doc?.[key] ?? defaultValue;
+      const row = this.settingsDB
+        .prepare('SELECT value_json FROM app_settings WHERE key = ?')
+        .get(key);
+      if (!row) {
+        return defaultValue;
+      }
+
+      const value = JSON.parse(row.value_json);
+      return value ?? defaultValue;
     } catch (error) {
       console.error('Error getting setting:', error);
       return defaultValue;
@@ -142,20 +216,13 @@ class StorageService extends EventEmitter {
     this._checkInitialized();
     
     try {
-      // Get existing settings doc or create new one
-      let doc;
-      try {
-        doc = await this.devicesDB.get('_local/settings');
-      } catch (err) {
-        if (err.status !== 404) throw err;
-        doc = { _id: '_local/settings' };
-      }
-      
-      // Update setting
-      doc[key] = value;
-      
-      // Save back to database
-      await this.devicesDB.put(doc);
+      this.settingsDB.prepare(`
+        INSERT INTO app_settings (key, value_json, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value_json = excluded.value_json,
+          updated_at = excluded.updated_at
+      `).run(key, JSON.stringify(value), new Date().toISOString());
       return true;
     } catch (error) {
       console.error('Error saving setting:', error);
