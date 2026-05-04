@@ -25,6 +25,7 @@ class StorageService extends EventEmitter {
     this.devicesDB = null;
     this.readingsDBs = new Map();
     this.initialized = false;
+    this.initializing = null;
     this.retentionPolicies = {
       raw: 30 * 24 * 60 * 60 * 1000,       // 30 days
       hourly: 90 * 24 * 60 * 60 * 1000,    // 90 days
@@ -50,7 +51,18 @@ class StorageService extends EventEmitter {
   async initialize() {
     console.log('[STORAGE] initialize() called');
     if (this.initialized) return;
-    
+    if (this.initializing) return this.initializing;
+
+    this.initializing = this._initialize();
+
+    try {
+      await this.initializing;
+    } finally {
+      this.initializing = null;
+    }
+  }
+
+  async _initialize() {
     // Ensure data directory exists
     console.log('[STORAGE] Ensuring basePath exists at', this.basePath);
     if (!fs.existsSync(this.basePath)) {
