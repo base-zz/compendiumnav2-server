@@ -2,6 +2,8 @@ import BaseService from "./BaseService.js";
 import crypto from "crypto";
 import { getStateManager } from "../relay/core/state/StateManager.js";
 import fetch from "node-fetch";
+import fs from "fs/promises";
+import path from "path";
 
 /**
  * VPS Master Database Sync Service
@@ -267,6 +269,17 @@ export class MasterSyncService extends BaseService {
    */
   async _syncToMaster() {
     const Database = await import("better-sqlite3");
+    
+    // Ensure database directory exists
+    const dbDir = path.dirname(this.dbPath);
+    try {
+      await fs.mkdir(dbDir, { recursive: true });
+    } catch (err) {
+      if (err.code !== 'EEXIST') {
+        throw new Error(`[MasterSyncService] Failed to create database directory: ${err.message}`);
+      }
+    }
+    
     const db = new Database.default(this.dbPath);
 
     try {

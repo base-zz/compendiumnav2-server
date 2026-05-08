@@ -1,6 +1,5 @@
 import { EventEmitter } from "events";
 import debug from "debug";
-import { v4 as uuidv4 } from "uuid";
 import { createStateDataModel } from "../../../shared/stateDataModel.js";
 import storageService from "../../../bluetooth/services/storage/storageService.js";
 import { RuleEngine2 } from "./ruleEngine2.js";
@@ -15,7 +14,7 @@ import pkg from "fast-json-patch";
 const { applyPatch } = pkg;
 
 const log = debug("state-manager");
-const logError = debug("state-manager:error");
+//const logError = debug("state-manager:error");
 const logState = debug("state-manager:state");
 
 export class StateManager extends EventEmitter {
@@ -1610,10 +1609,20 @@ export class StateManager extends EventEmitter {
           }
 
           const nextFence = { ...fence };
+          if (nextFence.currentDistance == null && existingFence.currentDistance != null) {
+            nextFence.currentDistance = existingFence.currentDistance;
+            nextFence.currentDistanceUnits = existingFence.currentDistanceUnits;
+          }
           if (nextFence.minimumDistance == null && existingFence.minimumDistance != null) {
             nextFence.minimumDistance = existingFence.minimumDistance;
             nextFence.minimumDistanceUnits = existingFence.minimumDistanceUnits;
             nextFence.minimumDistanceUpdatedAt = existingFence.minimumDistanceUpdatedAt;
+          }
+          if (!Array.isArray(nextFence.distanceHistory) && Array.isArray(existingFence.distanceHistory)) {
+            nextFence.distanceHistory = existingFence.distanceHistory;
+          }
+          if (nextFence.inAlert == null && existingFence.inAlert != null) {
+            nextFence.inAlert = existingFence.inAlert;
           }
 
           return nextFence;
