@@ -3,6 +3,11 @@
  * These rules handle anchor deployment, retrieval, and monitoring
  */
 
+import debug from 'debug';
+import { calculateDistance, getBoatPosition } from './geoUtils.js';
+
+const logAisDiagnostics = debug('nexus:rules:ais');
+
 const ANCHOR_ALERT_DEBOUNCE_MS = 10000;
 if (!Number.isFinite(ANCHOR_ALERT_DEBOUNCE_MS) || ANCHOR_ALERT_DEBOUNCE_MS < 0) {
   throw new Error(
@@ -144,27 +149,9 @@ export const anchorRules = [
         return false;
       }
 
-      const navLat = state.navigation?.position?.latitude?.value;
-      const navLon = state.navigation?.position?.longitude?.value;
-
-      const positionRoot =
-        state.position && typeof state.position === 'object'
-          ? state.position
-          : {};
-      const boatPositionFromPosition =
-        positionRoot.signalk && typeof positionRoot.signalk === 'object'
-          ? positionRoot.signalk
-          : positionRoot;
-
-      const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
-        ? boatPositionFromPosition.latitude?.value
-        : boatPositionFromPosition?.latitude;
-      const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
-        ? boatPositionFromPosition.longitude?.value
-        : boatPositionFromPosition?.longitude;
-
-      const boatLat = navLat != null ? navLat : fallbackBoatLat;
-      const boatLon = navLon != null ? navLon : fallbackBoatLon;
+      const boatPosition = getBoatPosition(state);
+      const boatLat = boatPosition?.lat;
+      const boatLon = boatPosition?.lon;
 
       const criticalRangeValue = anchorState.criticalRange?.r;
       const criticalRangeUnits = anchorState.criticalRange?.units;
@@ -190,8 +177,6 @@ export const anchorRules = [
         dropLon
       );
 
-      const distanceInRangeUnits = convertDistanceFromMeters(distance, criticalRangeUnits);
-
       const hasActiveAlert = state.alerts?.active?.some(
         (alert) => alert.trigger === 'critical_range' && !alert.acknowledged
       );
@@ -214,27 +199,9 @@ export const anchorRules = [
     action: (state) => {
       const anchorState = state.anchor || {};
 
-      const navLat = state.navigation?.position?.latitude?.value;
-      const navLon = state.navigation?.position?.longitude?.value;
-
-      const positionRoot =
-        state.position && typeof state.position === 'object'
-          ? state.position
-          : {};
-      const boatPositionFromPosition =
-        positionRoot.signalk && typeof positionRoot.signalk === 'object'
-          ? positionRoot.signalk
-          : positionRoot;
-
-      const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
-        ? boatPositionFromPosition.latitude?.value
-        : boatPositionFromPosition?.latitude;
-      const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
-        ? boatPositionFromPosition.longitude?.value
-        : boatPositionFromPosition?.longitude;
-
-      const boatLat = navLat != null ? navLat : fallbackBoatLat;
-      const boatLon = navLon != null ? navLon : fallbackBoatLon;
+      const boatPosition = getBoatPosition(state);
+      const boatLat = boatPosition?.lat;
+      const boatLon = boatPosition?.lon;
 
       const dropPosition = anchorState.anchorDropLocation?.position;
       const criticalRangeValue = anchorState.criticalRange?.r;
@@ -400,27 +367,9 @@ export const anchorRules = [
       const warningRadiusUnits = anchorState.warningRange?.units;
       const warningRadiusMeters = convertDistanceToMeters(warningRadiusValue, warningRadiusUnits);
 
-      const navLat = state.navigation?.position?.latitude?.value;
-      const navLon = state.navigation?.position?.longitude?.value;
-
-      const positionRoot =
-        state.position && typeof state.position === 'object'
-          ? state.position
-          : {};
-      const boatPositionFromPosition =
-        positionRoot.signalk && typeof positionRoot.signalk === 'object'
-          ? positionRoot.signalk
-          : positionRoot;
-
-      const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
-        ? boatPositionFromPosition.latitude?.value
-        : boatPositionFromPosition?.latitude;
-      const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
-        ? boatPositionFromPosition.longitude?.value
-        : boatPositionFromPosition?.longitude;
-
-      const boatLat = navLat != null ? navLat : fallbackBoatLat;
-      const boatLon = navLon != null ? navLon : fallbackBoatLon;
+      const boatPosition = getBoatPosition(state);
+      const boatLat = boatPosition?.lat;
+      const boatLon = boatPosition?.lon;
 
       if (!Number.isFinite(warningRadiusMeters) || boatLat == null || boatLon == null || !aisTargetsArray.length) {
         return false;
@@ -476,7 +425,7 @@ export const anchorRules = [
       const shouldTrigger = newVesselsNeedingAlerts.length > 0;
       if (!shouldTrigger) {
         if (anchorAlertDebounceState.aisProximityCandidateSince != null) {
-          console.log('[AIS Proximity Detection][diagnostics] candidate reset: no new vessels in range', {
+          logAisDiagnostics('[AIS Proximity Detection][diagnostics] candidate reset: no new vessels in range %o', {
             selfMmsi,
             boatLat,
             boatLon,
@@ -495,7 +444,7 @@ export const anchorRules = [
       const now = Date.now();
       if (anchorAlertDebounceState.aisProximityCandidateSince == null) {
         anchorAlertDebounceState.aisProximityCandidateSince = now;
-        console.log('[AIS Proximity Detection][diagnostics] trigger candidate started', {
+        logAisDiagnostics('[AIS Proximity Detection][diagnostics] trigger candidate started %o', {
           selfMmsi,
           boatLat,
           boatLon,
@@ -510,7 +459,7 @@ export const anchorRules = [
         return false;
       }
 
-      console.log('[AIS Proximity Detection][diagnostics] trigger confirmed', {
+      logAisDiagnostics('[AIS Proximity Detection][diagnostics] trigger confirmed %o', {
         selfMmsi,
         boatLat,
         boatLon,
@@ -536,27 +485,9 @@ export const anchorRules = [
       const warningRadiusUnits = anchorState.warningRange?.units;
       const warningRadiusMeters = convertDistanceToMeters(warningRadiusValue, warningRadiusUnits);
 
-      const navLat = state.navigation?.position?.latitude?.value;
-      const navLon = state.navigation?.position?.longitude?.value;
-
-      const positionRoot =
-        state.position && typeof state.position === "object"
-          ? state.position
-          : {};
-      const boatPositionFromPosition =
-        positionRoot.signalk && typeof positionRoot.signalk === "object"
-          ? positionRoot.signalk
-          : positionRoot;
-
-      const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
-        ? boatPositionFromPosition.latitude?.value
-        : boatPositionFromPosition?.latitude;
-      const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
-        ? boatPositionFromPosition.longitude?.value
-        : boatPositionFromPosition?.longitude;
-
-      const boatLat = navLat != null ? navLat : fallbackBoatLat;
-      const boatLon = navLon != null ? navLon : fallbackBoatLon;
+      const boatPosition = getBoatPosition(state);
+      const boatLat = boatPosition?.lat;
+      const boatLon = boatPosition?.lon;
 
       if (!Number.isFinite(warningRadiusMeters) || boatLat == null || boatLon == null) {
         return null;
@@ -650,31 +581,13 @@ export const anchorRules = [
       const warningRadiusUnits = anchorState.warningRange?.units;
       const warningRadiusMeters = convertDistanceToMeters(warningRadiusValue, warningRadiusUnits);
 
-      const navLat = state.navigation?.position?.latitude?.value;
-      const navLon = state.navigation?.position?.longitude?.value;
-
-      const positionRoot =
-        state.position && typeof state.position === 'object'
-          ? state.position
-          : {};
-      const boatPositionFromPosition =
-        positionRoot.signalk && typeof positionRoot.signalk === 'object'
-          ? positionRoot.signalk
-          : positionRoot;
-
-      const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
-        ? boatPositionFromPosition.latitude?.value
-        : boatPositionFromPosition?.latitude;
-      const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
-        ? boatPositionFromPosition.longitude?.value
-        : boatPositionFromPosition?.longitude;
-
-      const boatLat = navLat != null ? navLat : fallbackBoatLat;
-      const boatLon = navLon != null ? navLon : fallbackBoatLon;
+      const boatPosition = getBoatPosition(state);
+      const boatLat = boatPosition?.lat;
+      const boatLon = boatPosition?.lon;
 
       if (!hasActiveAlerts || !Number.isFinite(warningRadiusMeters) || boatLat == null || boatLon == null || !aisTargetsArray.length) {
         if (anchorAlertDebounceState.aisProximityClearCandidateSince != null) {
-          console.log('[AIS Proximity Resolution][diagnostics] clear candidate reset: prerequisites missing', {
+          logAisDiagnostics('[AIS Proximity Resolution][diagnostics] clear candidate reset: prerequisites missing %o', {
             selfMmsi,
             hasActiveAlerts,
             warningRadiusValue,
@@ -738,7 +651,7 @@ export const anchorRules = [
 
       if (targetsInRange.length > 0) {
         if (anchorAlertDebounceState.aisProximityClearCandidateSince != null) {
-          console.log('[AIS Proximity Resolution][diagnostics] clear candidate reset: targets still in range', {
+          logAisDiagnostics('[AIS Proximity Resolution][diagnostics] clear candidate reset: targets still in range %o', {
             selfMmsi,
             boatLat,
             boatLon,
@@ -756,7 +669,7 @@ export const anchorRules = [
       const now = Date.now();
       if (anchorAlertDebounceState.aisProximityClearCandidateSince == null) {
         anchorAlertDebounceState.aisProximityClearCandidateSince = now;
-        console.log('[AIS Proximity Resolution][diagnostics] clear candidate started', {
+        logAisDiagnostics('[AIS Proximity Resolution][diagnostics] clear candidate started %o', {
           selfMmsi,
           boatLat,
           boatLon,
@@ -768,7 +681,7 @@ export const anchorRules = [
         return false;
       }
 
-      console.log('[AIS Proximity Resolution][diagnostics] clear confirmed', {
+      logAisDiagnostics('[AIS Proximity Resolution][diagnostics] clear confirmed %o', {
         selfMmsi,
         boatLat,
         boatLon,
@@ -799,19 +712,3 @@ export const anchorRules = [
     },
   },
 ];
-
-// Helper function to calculate distance between two coordinates (Haversine formula)
-function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371e3; // Earth's radius in meters
-  const φ1 = lat1 * Math.PI/180;
-  const φ2 = lat2 * Math.PI/180;
-  const Δφ = (lat2-lat1) * Math.PI/180;
-  const Δλ = (lon2-lon1) * Math.PI/180;
-
-  const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-            Math.cos(φ1) * Math.cos(φ2) *
-            Math.sin(Δλ/2) * Math.sin(Δλ/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-
-  return R * c; // Distance in meters
-}

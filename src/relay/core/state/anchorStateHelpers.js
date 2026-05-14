@@ -1,3 +1,5 @@
+import { calculateBearing, calculateDistance, projectPoint } from './geoUtils.js';
+
 // Anchor state helper utilities
 // These functions recompute derived anchor fields based on current
 // boat position, anchor configuration, and AIS targets.
@@ -74,9 +76,6 @@ function appendDistanceHistory(fence, distance, nowMs) {
   
   const lastEntry = fence.distanceHistory[fence.distanceHistory.length - 1];
   
-  // Append every 30 seconds for consistent time-series data
-  const FENCE_HISTORY_INTERVAL_MS = 30 * 1000; // 30 seconds
-  
   const shouldAppend = !lastEntry || (nowMs - lastEntry.t) >= FENCE_HISTORY_INTERVAL_MS;
   
   if (shouldAppend) {
@@ -98,54 +97,6 @@ function updateMinimumDistance(fence, distance, nowMs) {
     fence.minimumDistanceUnits = fence.units;
     fence.minimumDistanceUpdatedAt = nowMs;
   }
-}
-
-function projectPoint(latDeg, lonDeg, bearingDeg, distanceMeters) {
-  if (
-    latDeg == null ||
-    lonDeg == null ||
-    bearingDeg == null ||
-    distanceMeters == null
-  ) {
-    return null;
-  }
-
-  if (
-    !Number.isFinite(latDeg) ||
-    !Number.isFinite(lonDeg) ||
-    !Number.isFinite(bearingDeg) ||
-    !Number.isFinite(distanceMeters)
-  ) {
-    return null;
-  }
-
-  const toRad = (value) => (value * Math.PI) / 180;
-  const toDeg = (value) => (value * 180) / Math.PI;
-  const R = 6371e3;
-  const angularDistance = distanceMeters / R;
-  const bearingRad = toRad(bearingDeg);
-  const lat1 = toRad(latDeg);
-  const lon1 = toRad(lonDeg);
-
-  const lat2 = Math.asin(
-    Math.sin(lat1) * Math.cos(angularDistance) +
-      Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(bearingRad)
-  );
-  const lon2 = lon1 + Math.atan2(
-    Math.sin(bearingRad) * Math.sin(angularDistance) * Math.cos(lat1),
-    Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2)
-  );
-
-  const next = {
-    latitude: toDeg(lat2),
-    longitude: toDeg(lon2),
-  };
-
-  if (!Number.isFinite(next.latitude) || !Number.isFinite(next.longitude)) {
-    return null;
-  }
-
-  return next;
 }
 
 /**
@@ -239,7 +190,7 @@ function updateFenceDistance(fence, boatPosition, anchorDropLocation, anchorLoca
   
   // Append to history
   const historyLengthBefore = fence.distanceHistory?.length || 0;
-  const historyAppended = appendDistanceHistory(fence, distanceInUnits, nowMs);
+  appendDistanceHistory(fence, distanceInUnits, nowMs);
   const historyLengthAfter = fence.distanceHistory?.length || 0;
   if (historyLengthAfter !== historyLengthBefore) {
     modified = true;
@@ -310,79 +261,6 @@ function updateAllFences(fences, boatPosition, anchorDropLocation, anchorLocatio
 }
 
 /**
- * Calculate distance between two points in meters (Haversine formula)
- * @param {number} lat1
- * @param {number} lon1
- * @param {number} lat2
- * @param {number} lon2
- * @returns {number} distance in meters
- */
-function calculateDistance(lat1, lon1, lat2, lon2) {
-  if (
-    lat1 == null || lon1 == null ||
-    lat2 == null || lon2 == null
-  ) {
-    return 0;
-  }
-
-  const toRad = (value) => (value * Math.PI) / 180;
-  const R = 6371e3; // Earth radius in meters
-  const φ1 = toRad(lat1);
-  const φ2 = toRad(lat2);
-  const Δφ = toRad(lat2 - lat1);
-  const Δλ = toRad(lon2 - lon1);
-
-  const a =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c;
-}
-
-/**
- * Calculate bearing in degrees from point 1 to point 2
- * @param {number} lat1
- * @param {number} lon1
- * @param {number} lat2
- * @param {number} lon2
- * @returns {number} bearing in degrees (0-360)
- */
-function calculateBearing(lat1, lon1, lat2, lon2) {
-  if (
-    lat1 == null || lon1 == null ||
-    lat2 == null || lon2 == null
-  ) {
-    return 0;
-  }
-
-  const toRad = (value) => (value * Math.PI) / 180;
-  const toDeg = (value) => (value * 180) / Math.PI;
-
-  const φ1 = toRad(lat1);
-  const φ2 = toRad(lat2);
-  const λ1 = toRad(lon1);
-  const λ2 = toRad(lon2);
-  const Δλ = λ2 - λ1;
-
-  const y = Math.sin(Δλ) * Math.cos(φ2);
-  const x =
-    Math.cos(φ1) * Math.sin(φ2) -
-    Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
-
-  let θ = Math.atan2(y, x);
-  let bearing = toDeg(θ);
-
-  if (!Number.isFinite(bearing)) {
-    return 0;
-  }
-
-  // Normalize to 0-360
-  bearing = (bearing + 360) % 360;
-  return bearing;
-}
-
-/**
  * Extract rode length in meters from anchor rode field
  * Handles both amount/units and value/unit shapes
  * @param {Object} anchor - Anchor state object
@@ -398,32 +276,6 @@ function extractRodeLengthMeters(anchor) {
   if (amount == null || units == null) return null;
   
   // Convert to meters based on unit
-  switch (units.toLowerCase()) {
-    case 'm':
-    case 'meters':
-    case 'meter':
-      return amount;
-    case 'ft':
-    case 'feet':
-    case 'foot':
-      return amount * 0.3048;
-    default:
-      return null;
-  }
-}
-
-function extractDropDepthMeters(anchor) {
-  const depthObj = anchor?.anchorDropLocation?.depth;
-  const depthSource = anchor?.anchorDropLocation?.depthSource;
-  const amount = depthObj?.value;
-  const units = depthObj?.units;
-
-  if (depthSource == null) return null;
-  if (amount == null || units == null) return null;
-
-  if (!Number.isFinite(amount)) return null;
-  if (typeof units !== 'string') return null;
-
   switch (units.toLowerCase()) {
     case 'm':
     case 'meters':
@@ -454,60 +306,6 @@ function convertMetersToRequestedLengthUnits(meters, units) {
     default:
       return null;
   }
-}
-
-/**
- * Project new anchor position using direct projection method
- * Places anchor at rodeLength distance from boat along bearing from anchor to boat
- * @param {Object} boatPos - Boat position {latitude, longitude}
- * @param {Object} currentAnchorPos - Current anchor position {latitude, longitude}
- * @param {number} rodeLengthMeters - Rode length in meters
- * @returns {Object} new anchor position {latitude, longitude}
- */
-function projectNewAnchorPosition(boatPos, currentAnchorPos, rodeLengthMeters) {
-  // Calculate bearing from anchor to boat
-  const bearing = calculateBearing(
-    currentAnchorPos.latitude,
-    currentAnchorPos.longitude,
-    boatPos.latitude,
-    boatPos.longitude
-  );
-  
-  // Project new anchor position rodeLength meters from boat in opposite direction
-  const oppositeBearing = (bearing + 180) % 360;
-  
-  const toRad = (value) => (value * Math.PI) / 180;
-  const toDeg = (value) => (value * 180) / Math.PI;
-  const R = 6371e3; // Earth radius in meters
-  
-  const lat1 = toRad(boatPos.latitude);
-  const lon1 = toRad(boatPos.longitude);
-  const angularDistance = rodeLengthMeters / R;
-  const bearingRad = toRad(oppositeBearing);
-  
-  const lat2 = Math.asin(
-    Math.sin(lat1) * Math.cos(angularDistance) +
-    Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(bearingRad)
-  );
-  
-  const lon2 = lon1 + Math.atan2(
-    Math.sin(bearingRad) * Math.sin(angularDistance) * Math.cos(lat1),
-    Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2)
-  );
-  
-  const newAnchorPos = {
-    latitude: toDeg(lat2),
-    longitude: toDeg(lon2)
-  };
-  
-  console.log(`[Anchor] Projected new anchor position:`, {
-    from: currentAnchorPos,
-    to: newAnchorPos,
-    bearing: bearing.toFixed(1),
-    rodeLength: rodeLengthMeters
-  });
-  
-  return newAnchorPos;
 }
 
 /**

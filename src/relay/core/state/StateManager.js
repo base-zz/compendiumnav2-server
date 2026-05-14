@@ -6,6 +6,7 @@ import { RuleEngine2 } from "./ruleEngine2.js";
 import { getRules } from "./allRules2.js";
 import { AlertService } from "../services/AlertService.js";
 import { recomputeAnchorDerivedState } from "./anchorStateHelpers.js";
+import { calculateBearing, calculateDistance, projectPoint, toRad } from "./geoUtils.js";
 import { getOrCreateAppUuid } from "../../../server/uniqueAppId.js";
 import { defaultProfile } from "../../../config/profiles.js";
 import { UNIT_PRESETS } from "../../../shared/unitPreferences.js";
@@ -148,11 +149,11 @@ export class StateManager extends EventEmitter {
     });
 
     // Initialize the new rule engine, which is event-driven
-    console.log('[StateManager] constructor: before creating RuleEngine2');
+    this.log('[StateManager] constructor: before creating RuleEngine2');
     this.ruleEngine = new RuleEngine2();
-    console.log('[StateManager] constructor: after RuleEngine2, before getRules');
+    this.log('[StateManager] constructor: after RuleEngine2, before getRules');
     const allRules = getRules(); // Get all rules from the new set
-    console.log('[StateManager] constructor: after getRules, rule count =', Array.isArray(allRules) ? allRules.length : 'NON_ARRAY');
+    this.log('[StateManager] constructor: after getRules, rule count = %s', Array.isArray(allRules) ? allRules.length : 'NON_ARRAY');
 
     this.log(`Retrieved ${allRules.length} rules from getRules().`);
     allRules.forEach((rule) => {
@@ -160,7 +161,7 @@ export class StateManager extends EventEmitter {
       this.ruleEngine.addRule(rule);
     });
     this.log(`Finished adding rules.`);
-    console.log('[StateManager] constructor: finished adding rules');
+    this.log('[StateManager] constructor: finished adding rules');
 
     // Listen for rule engine actions and process them via AlertService/etc.
     this.ruleEngine.on("actions", (actions) => {
@@ -178,14 +179,14 @@ export class StateManager extends EventEmitter {
     });
 
     // Initialize the alert service
-    console.log('[StateManager] constructor: before AlertService');
+    this.log('[StateManager] constructor: before AlertService');
     this.alertService = new AlertService(this);
-    console.log('[StateManager] constructor: after AlertService, before defaultProfile clone');
+    this.log('[StateManager] constructor: after AlertService, before defaultProfile clone');
 
     this.currentProfile = this._safeClone(defaultProfile);
-    console.log('[StateManager] constructor: after defaultProfile clone, before getOrCreateAppUuid');
+    this.log('[StateManager] constructor: after defaultProfile clone, before getOrCreateAppUuid');
     this._boatId = getOrCreateAppUuid();
-    console.log('[StateManager] constructor: after getOrCreateAppUuid, constructor continuing');
+    this.log('[StateManager] constructor: after getOrCreateAppUuid, constructor continuing');
 
     this._clientCount = 0;
     this.tideData = null;
@@ -266,9 +267,8 @@ export class StateManager extends EventEmitter {
         `Setting up weather:update listener for service '${serviceName}'`
       );
       service.on("weather:update", (data) => {
-        console.log(`[StateManager] Received weather:update from '${serviceName}', forwarding.`);
         this.log(`Received weather:update from '${serviceName}', forwarding.`);
-        console.log(
+        this.log(
           `[StateManager] Weather data details: type=${typeof data}, hasData=${!!data}, keys=${
             data ? Object.keys(data).join(", ") : "none"
           }`
@@ -284,9 +284,8 @@ export class StateManager extends EventEmitter {
       // Set up tide:update listener
       this.log(`Setting up tide:update listener for service '${serviceName}'`);
       service.on("tide:update", (data) => {
-        console.log(`[StateManager] Received tide:update from '${serviceName}', forwarding.`);
         this.log(`Received tide:update from '${serviceName}', forwarding.`);
-        console.log(`[StateManager] Tide data details: type=${typeof data}, hasData=${!!data}, keys=${
+        this.log(`[StateManager] Tide data details: type=${typeof data}, hasData=${!!data}, keys=${
           data ? Object.keys(data).join(", ") : "none"
         }`);
         this.setTideData(data);
@@ -721,7 +720,7 @@ export class StateManager extends EventEmitter {
       return;
     }
 
-    console.log('[StateManager] setTideData called with data:', {
+    this.log('[StateManager] setTideData called with data: %o', {
       hasData: !!tideData,
       type: typeof tideData,
       keys: tideData ? Object.keys(tideData) : []
@@ -732,7 +731,7 @@ export class StateManager extends EventEmitter {
     this.appState.tides = tideData;
     this.ruleEngine?.updateState({ tides: tideData });
 
-    console.log('[StateManager] Tide data stored in appState.tides:', {
+    this.log('[StateManager] Tide data stored in appState.tides: %o', {
       hasTides: !!this.appState.tides,
       type: typeof this.appState.tides,
       keys: this.appState.tides ? Object.keys(this.appState.tides) : []
@@ -786,12 +785,11 @@ export class StateManager extends EventEmitter {
 
   setWeatherData(weatherData) {
     if (!weatherData) {
-      console.log("[StateManager] setWeatherData called with null or undefined data");
       this.logError("setWeatherData called with null or undefined data");
       return;
     }
 
-    console.log('[StateManager] setWeatherData called with data:', {
+    this.log('[StateManager] setWeatherData called with data: %o', {
       hasData: !!weatherData,
       type: typeof weatherData,
       keys: weatherData ? Object.keys(weatherData) : []
@@ -801,7 +799,7 @@ export class StateManager extends EventEmitter {
     this.weatherData = weatherData;
     this.appState.forecast = weatherData;
 
-    console.log('[StateManager] Weather data stored in appState.forecast:', {
+    this.log('[StateManager] Weather data stored in appState.forecast: %o', {
       hasForecast: !!this.appState.forecast,
       type: typeof this.appState.forecast,
       keys: this.appState.forecast ? Object.keys(this.appState.forecast) : []
@@ -939,257 +937,19 @@ export class StateManager extends EventEmitter {
     }
 
     try {
-      // Client sends a wrapper message: { type: 'anchor:update', data: { ...anchorStatePatch } }
-      // The server must treat this as actions/parameters only.
-      const incomingAnchorPatch =
-        anchorData?.data && typeof anchorData.data === 'object'
-          ? anchorData.data
-          : anchorData;
-
-      const toRad = (value) => (value * Math.PI) / 180;
-      const toDeg = (value) => (value * 180) / Math.PI;
-
-      const calculateDistance = (lat1, lon1, lat2, lon2) => {
-        if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
-        if (!Number.isFinite(lat1) || !Number.isFinite(lon1) || !Number.isFinite(lat2) || !Number.isFinite(lon2)) {
-          return null;
-        }
-
-        const R = 6371e3;
-        const φ1 = toRad(lat1);
-        const φ2 = toRad(lat2);
-        const Δφ = toRad(lat2 - lat1);
-        const Δλ = toRad(lon2 - lon1);
-
-        const a =
-          Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-          Math.cos(φ1) * Math.cos(φ2) *
-            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-        return R * c;
-      };
-
-      const calculateBearingDegrees = (lat1, lon1, lat2, lon2) => {
-        if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
-        const φ1 = toRad(lat1);
-        const φ2 = toRad(lat2);
-        const λ1 = toRad(lon1);
-        const λ2 = toRad(lon2);
-        const Δλ = λ2 - λ1;
-        const y = Math.sin(Δλ) * Math.cos(φ2);
-        const x =
-          Math.cos(φ1) * Math.sin(φ2) -
-          Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
-        const θ = Math.atan2(y, x);
-        const bearing = (toDeg(θ) + 360) % 360;
-        return Number.isFinite(bearing) ? bearing : null;
-      };
-
-      const projectPoint = (latDeg, lonDeg, bearingDeg, distanceMeters) => {
-        if (latDeg == null || lonDeg == null || bearingDeg == null || distanceMeters == null) return null;
-        if (!Number.isFinite(latDeg) || !Number.isFinite(lonDeg) || !Number.isFinite(bearingDeg) || !Number.isFinite(distanceMeters)) {
-          return null;
-        }
-        const R = 6371e3;
-        const angularDistance = distanceMeters / R;
-        const bearingRad = toRad(bearingDeg);
-        const lat1 = toRad(latDeg);
-        const lon1 = toRad(lonDeg);
-
-        const lat2 = Math.asin(
-          Math.sin(lat1) * Math.cos(angularDistance) +
-            Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(bearingRad)
-        );
-        const lon2 = lon1 + Math.atan2(
-          Math.sin(bearingRad) * Math.sin(angularDistance) * Math.cos(lat1),
-          Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2)
-        );
-
-        const next = { latitude: toDeg(lat2), longitude: toDeg(lon2) };
-        if (!Number.isFinite(next.latitude) || !Number.isFinite(next.longitude)) return null;
-        return next;
-      };
-
-      const extractRodeLengthMeters = (anchor) => {
-        const rode = anchor?.rode;
-        const amount = rode?.amount ?? rode?.value;
-        const units = rode?.units ?? rode?.unit;
-        if (amount == null || units == null) return null;
-        if (!Number.isFinite(amount) || typeof units !== 'string') return null;
-        switch (units.toLowerCase()) {
-          case 'm':
-          case 'meter':
-          case 'meters':
-            return amount;
-          case 'ft':
-          case 'foot':
-          case 'feet':
-            return amount * 0.3048;
-          default:
-            return null;
-        }
-      };
-
-      const extractDropDepthMeters = (patchOrAnchor) => {
-        const depthObj = patchOrAnchor?.anchorDropLocation?.depth;
-        const depthSource = patchOrAnchor?.anchorDropLocation?.depthSource;
-        const amount = depthObj?.value;
-        const units = depthObj?.units;
-        if (depthSource == null) return null;
-        if (amount == null || units == null) return null;
-        if (!Number.isFinite(amount) || typeof units !== 'string') return null;
-        switch (units.toLowerCase()) {
-          case 'm':
-          case 'meter':
-          case 'meters':
-            return amount;
-          case 'ft':
-          case 'foot':
-          case 'feet':
-            return amount * 0.3048;
-          default:
-            return null;
-        }
-      };
-
-      const convertMetersToRequestedLengthUnits = (meters, units) => {
-        if (!Number.isFinite(meters) || typeof units !== 'string') return null;
-        switch (units.toLowerCase()) {
-          case 'm':
-          case 'meter':
-          case 'meters':
-            return meters;
-          case 'ft':
-          case 'foot':
-          case 'feet':
-            return meters / 0.3048;
-          default:
-            return null;
-        }
-      };
-
-      const getServerBoatLatLon = () => {
-        const navLat = this.appState?.navigation?.position?.latitude?.value;
-        const navLon = this.appState?.navigation?.position?.longitude?.value;
-
-        const positionRoot =
-          this.appState?.position && typeof this.appState.position === 'object'
-            ? this.appState.position
-            : {};
-        const boatPositionFromPosition =
-          positionRoot.signalk && typeof positionRoot.signalk === 'object'
-            ? positionRoot.signalk
-            : positionRoot;
-
-        const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
-          ? boatPositionFromPosition.latitude?.value
-          : boatPositionFromPosition?.latitude;
-        const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
-          ? boatPositionFromPosition.longitude?.value
-          : boatPositionFromPosition?.longitude;
-
-        const boatLat = navLat != null ? navLat : fallbackBoatLat;
-        const boatLon = navLon != null ? navLon : fallbackBoatLon;
-        if (boatLat == null || boatLon == null) return null;
-        if (!Number.isFinite(boatLat) || !Number.isFinite(boatLon)) return null;
-        return { boatLat, boatLon };
-      };
+      const incomingAnchorPatch = this._unwrapAnchorPatch(anchorData);
 
       // Merge incoming anchor data into existing anchor state so that
       // server-maintained fields (e.g., history, derived distances) are
       // preserved and then recomputed by helpers.
       const currentAnchor = this.appState?.anchor || {};
 
-      // Never accept client-provided positions for anchoring.
-      const sanitizedPatch = { ...(incomingAnchorPatch || {}) };
+      const sanitizedPatch = this._sanitizeIncomingAnchorPatch(incomingAnchorPatch);
+      const action = typeof incomingAnchorPatch?.action === 'string' ? incomingAnchorPatch.action : null;
 
-      const action = typeof sanitizedPatch.action === 'string' ? sanitizedPatch.action : null;
-
-      delete sanitizedPatch.action;
-      delete sanitizedPatch.setBearing;
-
-      if (sanitizedPatch.anchorDropLocation?.position != null) {
-        sanitizedPatch.anchorDropLocation = { ...sanitizedPatch.anchorDropLocation };
-        delete sanitizedPatch.anchorDropLocation.position;
-      }
-      if (sanitizedPatch.anchorLocation?.position != null) {
-        sanitizedPatch.anchorLocation = { ...sanitizedPatch.anchorLocation };
-        delete sanitizedPatch.anchorLocation.position;
-      }
-
-      if (sanitizedPatch.anchorDropLocation && typeof sanitizedPatch.anchorDropLocation === 'object') {
-        sanitizedPatch.anchorDropLocation = { ...sanitizedPatch.anchorDropLocation };
-        delete sanitizedPatch.anchorDropLocation.bearing;
-        delete sanitizedPatch.anchorDropLocation.originalBearing;
-        delete sanitizedPatch.anchorDropLocation.distancesFromCurrent;
-        delete sanitizedPatch.anchorDropLocation.distancesFromDrop;
-      }
-
-      if (sanitizedPatch.anchorLocation && typeof sanitizedPatch.anchorLocation === 'object') {
-        sanitizedPatch.anchorLocation = { ...sanitizedPatch.anchorLocation };
-        delete sanitizedPatch.anchorLocation.bearing;
-        delete sanitizedPatch.anchorLocation.originalBearing;
-        delete sanitizedPatch.anchorLocation.distancesFromCurrent;
-        delete sanitizedPatch.anchorLocation.distancesFromDrop;
-        delete sanitizedPatch.anchorLocation.originalPosition;
-      }
-
-      delete sanitizedPatch.dragging;
-      delete sanitizedPatch.history;
-
-      const boatLatLon = getServerBoatLatLon();
+      const boatLatLon = this._getServerBoatLatLon();
       const serverNowIso = new Date().toISOString();
       const serverNowMs = Date.now();
-
-      const isLengthUnits = (units) => {
-        if (typeof units !== 'string') return false;
-        const normalized = units.toLowerCase();
-        return normalized === 'm' ||
-          normalized === 'meter' ||
-          normalized === 'meters' ||
-          normalized === 'ft' ||
-          normalized === 'foot' ||
-          normalized === 'feet';
-      };
-
-      const resolvePreferredLengthUnits = () => {
-        const candidates = [
-          currentAnchor?.rode?.units,
-          this.appState?.preferences?.units?.length,
-          this.appState?.preferences?.length,
-          this.appState?.unitPreferences?.length,
-          sanitizedPatch?.rode?.units,
-        ];
-
-        for (const candidate of candidates) {
-          if (isLengthUnits(candidate)) {
-            return candidate;
-          }
-        }
-
-        return null;
-      };
-
-      const resolveAnchorMonitoringAlerts = (reason) => {
-        if (!this.alertService || typeof this.alertService.resolveAlertsByTrigger !== 'function') {
-          return;
-        }
-
-        const triggers = ['critical_range', 'anchor_dragging', 'ais_proximity'];
-        let resolvedAny = false;
-        for (const trigger of triggers) {
-          const resolved = this.alertService.resolveAlertsByTrigger(trigger, { reason });
-          if (Array.isArray(resolved) && resolved.length > 0) {
-            resolvedAny = true;
-          }
-        }
-
-        if (resolvedAny) {
-          this._syncAlertsToRuleEngine();
-          this._emitAlertsPatch();
-        }
-      };
 
       // If anchor is being deployed now, capture the server's current boat position as
       // both the drop location and initial anchor location.
@@ -1241,7 +1001,7 @@ export class StateManager extends EventEmitter {
           return;
         }
 
-        const rodeMeters = extractRodeLengthMeters({
+        const rodeMeters = this._extractAnchorRodeLengthMeters({
           rode: sanitizedPatch?.rode != null ? sanitizedPatch.rode : currentAnchor?.rode,
         });
         if (rodeMeters == null) {
@@ -1249,7 +1009,7 @@ export class StateManager extends EventEmitter {
           return;
         }
 
-        const dropDepthMeters = extractDropDepthMeters({
+        const dropDepthMeters = this._extractAnchorDropDepthMeters({
           anchorDropLocation:
             sanitizedPatch?.anchorDropLocation != null
               ? sanitizedPatch.anchorDropLocation
@@ -1313,7 +1073,7 @@ export class StateManager extends EventEmitter {
         const rodeUnits = sanitizedPatch?.rode?.units ?? currentAnchor?.rode?.units;
         if (Number.isFinite(oldDropLat) && Number.isFinite(oldDropLon) && typeof rodeUnits === 'string') {
           const movedDistanceMeters = calculateDistance(oldDropLat, oldDropLon, boatLatLon.boatLat, boatLatLon.boatLon);
-          const convertedRodeAmount = convertMetersToRequestedLengthUnits(movedDistanceMeters, rodeUnits);
+          const convertedRodeAmount = this._convertMetersToRequestedLengthUnits(movedDistanceMeters, rodeUnits);
           if (convertedRodeAmount != null) {
             sanitizedPatch.rode = {
               ...(currentAnchor?.rode || {}),
@@ -1326,7 +1086,7 @@ export class StateManager extends EventEmitter {
 
         applyCapturedDropAndAnchorPosition();
 
-        const moveBearingDeg = calculateBearingDegrees(oldDropLat, oldDropLon, boatLatLon.boatLat, boatLatLon.boatLon);
+        const moveBearingDeg = calculateBearing(oldDropLat, oldDropLon, boatLatLon.boatLat, boatLatLon.boatLon);
         if (moveBearingDeg == null) {
           return;
         }
@@ -1404,7 +1164,7 @@ export class StateManager extends EventEmitter {
       };
 
       const backfillFinalizeRodeFromMeasuredDistance = () => {
-        const rodeUnits = resolvePreferredLengthUnits();
+        const rodeUnits = this._resolveAnchorPreferredLengthUnits(currentAnchor, sanitizedPatch);
         if (rodeUnits == null) {
           throw new Error('finalize_drop_now requires resolvable length units from anchor state or preferences');
         }
@@ -1452,14 +1212,14 @@ export class StateManager extends EventEmitter {
         if (
           Number.isFinite(criticalRangeValue) &&
           criticalRangeValue > 0 &&
-          isLengthUnits(criticalRangeUnits)
+          this._isAnchorLengthUnits(criticalRangeUnits)
         ) {
           return;
         }
 
         const rodeAmount = sanitizedPatch?.rode?.amount;
         const rodeUnits = sanitizedPatch?.rode?.units;
-        if (!Number.isFinite(rodeAmount) || rodeAmount <= 0 || !isLengthUnits(rodeUnits)) {
+        if (!Number.isFinite(rodeAmount) || rodeAmount <= 0 || !this._isAnchorLengthUnits(rodeUnits)) {
           throw new Error('finalize_drop_now requires criticalRange or calculated rode to derive criticalRange');
         }
 
@@ -1471,7 +1231,7 @@ export class StateManager extends EventEmitter {
       };
 
       const applyFinalizeDropNow = () => {
-        console.log('[StateManager][finalize_drop_now] incoming payload summary', {
+        this.log('[StateManager][finalize_drop_now] incoming payload summary %o', {
           rode: sanitizedPatch?.rode,
           warningRange: sanitizedPatch?.warningRange,
           criticalRange: sanitizedPatch?.criticalRange,
@@ -1537,7 +1297,7 @@ export class StateManager extends EventEmitter {
             lastSampleAt: null,
           },
         };
-        resolveAnchorMonitoringAlerts('drop_now_cancelled');
+        this._resolveAnchorMonitoringAlerts('drop_now_cancelled');
       };
 
       if (action === 'drop_now') {
@@ -1569,7 +1329,7 @@ export class StateManager extends EventEmitter {
             lastSampleAt: serverNowMs,
           },
         };
-        resolveAnchorMonitoringAlerts('drop_now_started');
+        this._resolveAnchorMonitoringAlerts('drop_now_started');
       } else if (action === 'finalize_drop_now') {
         applyFinalizeDropNow();
       } else if (action === 'cancel_drop_now') {
@@ -1600,34 +1360,7 @@ export class StateManager extends EventEmitter {
 
       const mergedAnchor = this._deepMergeAnchor(currentAnchor, sanitizedPatch);
 
-      if (Array.isArray(currentAnchor.fences) && Array.isArray(mergedAnchor.fences)) {
-        const fencesById = new Map(currentAnchor.fences.map((fence) => [fence?.id, fence]));
-        mergedAnchor.fences = mergedAnchor.fences.map((fence) => {
-          const existingFence = fence?.id ? fencesById.get(fence.id) : null;
-          if (!existingFence) {
-            return fence;
-          }
-
-          const nextFence = { ...fence };
-          if (nextFence.currentDistance == null && existingFence.currentDistance != null) {
-            nextFence.currentDistance = existingFence.currentDistance;
-            nextFence.currentDistanceUnits = existingFence.currentDistanceUnits;
-          }
-          if (nextFence.minimumDistance == null && existingFence.minimumDistance != null) {
-            nextFence.minimumDistance = existingFence.minimumDistance;
-            nextFence.minimumDistanceUnits = existingFence.minimumDistanceUnits;
-            nextFence.minimumDistanceUpdatedAt = existingFence.minimumDistanceUpdatedAt;
-          }
-          if (!Array.isArray(nextFence.distanceHistory) && Array.isArray(existingFence.distanceHistory)) {
-            nextFence.distanceHistory = existingFence.distanceHistory;
-          }
-          if (nextFence.inAlert == null && existingFence.inAlert != null) {
-            nextFence.inAlert = existingFence.inAlert;
-          }
-
-          return nextFence;
-        });
-      }
+      this._preserveAnchorFenceRuntimeState(currentAnchor, mergedAnchor);
 
       // Create a patch to update the anchor state with the merged result
       const patch = [{ op: "replace", path: "/anchor", value: mergedAnchor }];
@@ -1636,7 +1369,7 @@ export class StateManager extends EventEmitter {
       this.applyPatchAndForward(patch);
 
       if (action === 'finalize_drop_now') {
-        console.log('[StateManager][finalize_drop_now] persisted anchor values', {
+        this.log('[StateManager][finalize_drop_now] persisted anchor values %o', {
           rode: this.appState?.anchor?.rode,
           warningRange: this.appState?.anchor?.warningRange,
           criticalRange: this.appState?.anchor?.criticalRange,
@@ -1660,7 +1393,7 @@ export class StateManager extends EventEmitter {
    * of truth for all anchor-derived fields again.
    */
   resetAnchorState() {
-    console.log('[StateManager] anchor:reset received');
+    this.log('[StateManager] anchor:reset received');
 
     try {
       const freshModel = createStateDataModel(UNIT_PRESETS.IMPERIAL);
@@ -1675,6 +1408,217 @@ export class StateManager extends EventEmitter {
       this.logError("[StateManager][resetAnchorState] Error resetting anchor state:", error);
       return false;
     }
+  }
+
+  _unwrapAnchorPatch(anchorData) {
+    return anchorData?.data && typeof anchorData.data === 'object'
+      ? anchorData.data
+      : anchorData;
+  }
+
+  _sanitizeIncomingAnchorPatch(incomingAnchorPatch) {
+    const sanitizedPatch = { ...(incomingAnchorPatch || {}) };
+
+    delete sanitizedPatch.action;
+    delete sanitizedPatch.setBearing;
+
+    if (sanitizedPatch.anchorDropLocation?.position != null) {
+      sanitizedPatch.anchorDropLocation = { ...sanitizedPatch.anchorDropLocation };
+      delete sanitizedPatch.anchorDropLocation.position;
+    }
+    if (sanitizedPatch.anchorLocation?.position != null) {
+      sanitizedPatch.anchorLocation = { ...sanitizedPatch.anchorLocation };
+      delete sanitizedPatch.anchorLocation.position;
+    }
+
+    if (sanitizedPatch.anchorDropLocation && typeof sanitizedPatch.anchorDropLocation === 'object') {
+      sanitizedPatch.anchorDropLocation = { ...sanitizedPatch.anchorDropLocation };
+      delete sanitizedPatch.anchorDropLocation.bearing;
+      delete sanitizedPatch.anchorDropLocation.originalBearing;
+      delete sanitizedPatch.anchorDropLocation.distancesFromCurrent;
+      delete sanitizedPatch.anchorDropLocation.distancesFromDrop;
+    }
+
+    if (sanitizedPatch.anchorLocation && typeof sanitizedPatch.anchorLocation === 'object') {
+      sanitizedPatch.anchorLocation = { ...sanitizedPatch.anchorLocation };
+      delete sanitizedPatch.anchorLocation.bearing;
+      delete sanitizedPatch.anchorLocation.originalBearing;
+      delete sanitizedPatch.anchorLocation.distancesFromCurrent;
+      delete sanitizedPatch.anchorLocation.distancesFromDrop;
+      delete sanitizedPatch.anchorLocation.originalPosition;
+    }
+
+    delete sanitizedPatch.dragging;
+    delete sanitizedPatch.history;
+
+    return sanitizedPatch;
+  }
+
+  _extractAnchorRodeLengthMeters(anchor) {
+    const rode = anchor?.rode;
+    const amount = rode?.amount ?? rode?.value;
+    const units = rode?.units ?? rode?.unit;
+    if (amount == null || units == null) return null;
+    if (!Number.isFinite(amount) || typeof units !== 'string') return null;
+    switch (units.toLowerCase()) {
+      case 'm':
+      case 'meter':
+      case 'meters':
+        return amount;
+      case 'ft':
+      case 'foot':
+      case 'feet':
+        return amount * 0.3048;
+      default:
+        return null;
+    }
+  }
+
+  _extractAnchorDropDepthMeters(patchOrAnchor) {
+    const depthObj = patchOrAnchor?.anchorDropLocation?.depth;
+    const depthSource = patchOrAnchor?.anchorDropLocation?.depthSource;
+    const amount = depthObj?.value;
+    const units = depthObj?.units;
+    if (depthSource == null) return null;
+    if (amount == null || units == null) return null;
+    if (!Number.isFinite(amount) || typeof units !== 'string') return null;
+    switch (units.toLowerCase()) {
+      case 'm':
+      case 'meter':
+      case 'meters':
+        return amount;
+      case 'ft':
+      case 'foot':
+      case 'feet':
+        return amount * 0.3048;
+      default:
+        return null;
+    }
+  }
+
+  _convertMetersToRequestedLengthUnits(meters, units) {
+    if (!Number.isFinite(meters) || typeof units !== 'string') return null;
+    switch (units.toLowerCase()) {
+      case 'm':
+      case 'meter':
+      case 'meters':
+        return meters;
+      case 'ft':
+      case 'foot':
+      case 'feet':
+        return meters / 0.3048;
+      default:
+        return null;
+    }
+  }
+
+  _getServerBoatLatLon() {
+    const navLat = this.appState?.navigation?.position?.latitude?.value;
+    const navLon = this.appState?.navigation?.position?.longitude?.value;
+
+    const positionRoot =
+      this.appState?.position && typeof this.appState.position === 'object'
+        ? this.appState.position
+        : {};
+    const boatPositionFromPosition =
+      positionRoot.signalk && typeof positionRoot.signalk === 'object'
+        ? positionRoot.signalk
+        : positionRoot;
+
+    const fallbackBoatLat = typeof boatPositionFromPosition?.latitude === 'object'
+      ? boatPositionFromPosition.latitude?.value
+      : boatPositionFromPosition?.latitude;
+    const fallbackBoatLon = typeof boatPositionFromPosition?.longitude === 'object'
+      ? boatPositionFromPosition.longitude?.value
+      : boatPositionFromPosition?.longitude;
+
+    const boatLat = navLat != null ? navLat : fallbackBoatLat;
+    const boatLon = navLon != null ? navLon : fallbackBoatLon;
+    if (boatLat == null || boatLon == null) return null;
+    if (!Number.isFinite(boatLat) || !Number.isFinite(boatLon)) return null;
+    return { boatLat, boatLon };
+  }
+
+  _isAnchorLengthUnits(units) {
+    if (typeof units !== 'string') return false;
+    const normalized = units.toLowerCase();
+    return normalized === 'm' ||
+      normalized === 'meter' ||
+      normalized === 'meters' ||
+      normalized === 'ft' ||
+      normalized === 'foot' ||
+      normalized === 'feet';
+  }
+
+  _resolveAnchorPreferredLengthUnits(currentAnchor, sanitizedPatch) {
+    const candidates = [
+      currentAnchor?.rode?.units,
+      this.appState?.preferences?.units?.length,
+      this.appState?.preferences?.length,
+      this.appState?.unitPreferences?.length,
+      sanitizedPatch?.rode?.units,
+    ];
+
+    for (const candidate of candidates) {
+      if (this._isAnchorLengthUnits(candidate)) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
+  _resolveAnchorMonitoringAlerts(reason) {
+    if (!this.alertService || typeof this.alertService.resolveAlertsByTrigger !== 'function') {
+      return;
+    }
+
+    const triggers = ['critical_range', 'anchor_dragging', 'ais_proximity'];
+    let resolvedAny = false;
+    for (const trigger of triggers) {
+      const resolved = this.alertService.resolveAlertsByTrigger(trigger, { reason });
+      if (Array.isArray(resolved) && resolved.length > 0) {
+        resolvedAny = true;
+      }
+    }
+
+    if (resolvedAny) {
+      this._syncAlertsToRuleEngine();
+      this._emitAlertsPatch();
+    }
+  }
+
+  _preserveAnchorFenceRuntimeState(currentAnchor, mergedAnchor) {
+    if (!Array.isArray(currentAnchor.fences) || !Array.isArray(mergedAnchor.fences)) {
+      return;
+    }
+
+    const fencesById = new Map(currentAnchor.fences.map((fence) => [fence?.id, fence]));
+    mergedAnchor.fences = mergedAnchor.fences.map((fence) => {
+      const existingFence = fence?.id ? fencesById.get(fence.id) : null;
+      if (!existingFence) {
+        return fence;
+      }
+
+      const nextFence = { ...fence };
+      if (nextFence.currentDistance == null && existingFence.currentDistance != null) {
+        nextFence.currentDistance = existingFence.currentDistance;
+        nextFence.currentDistanceUnits = existingFence.currentDistanceUnits;
+      }
+      if (nextFence.minimumDistance == null && existingFence.minimumDistance != null) {
+        nextFence.minimumDistance = existingFence.minimumDistance;
+        nextFence.minimumDistanceUnits = existingFence.minimumDistanceUnits;
+        nextFence.minimumDistanceUpdatedAt = existingFence.minimumDistanceUpdatedAt;
+      }
+      if (!Array.isArray(nextFence.distanceHistory) && Array.isArray(existingFence.distanceHistory)) {
+        nextFence.distanceHistory = existingFence.distanceHistory;
+      }
+      if (nextFence.inAlert == null && existingFence.inAlert != null) {
+        nextFence.inAlert = existingFence.inAlert;
+      }
+
+      return nextFence;
+    });
   }
 
   _runStateHelpers(patchOps) {
@@ -1710,7 +1654,7 @@ export class StateManager extends EventEmitter {
         const { anchor: updatedAnchor, changedPaths } = helperResult;
         
         if (hasAnchorPatch) {
-          console.log(
+          this.log(
             "[StateManager][_runStateHelpers] Anchor helper updated anchor state after anchor patch"
           );
         }
@@ -1888,7 +1832,7 @@ export class StateManager extends EventEmitter {
 
     if (previousWarningRadius === nextWarningRadius) return;
 
-    console.log('[StateManager] Anchor warning range changed, resolving AIS proximity alerts:', {
+    this.log('[StateManager] Anchor warning range changed, resolving AIS proximity alerts: %o', {
       previousWarningRadius,
       nextWarningRadius,
     });
@@ -1979,7 +1923,7 @@ export class StateManager extends EventEmitter {
    */
   async _loadSelectedDevices() {
     try {
-      console.log('[StateManager] _loadSelectedDevices: Starting to load selected devices from storage');
+      this.log('[StateManager] _loadSelectedDevices: Starting to load selected devices from storage');
       
       // Load selected device IDs from storage
       const selectedIds = await storageService.getSetting(
@@ -1987,8 +1931,8 @@ export class StateManager extends EventEmitter {
         []
       );
       
-      console.log('[StateManager] _loadSelectedDevices: Loaded selectedIds from storage:', selectedIds);
-      console.log('[StateManager] _loadSelectedDevices: selectedIds type:', typeof selectedIds, 'isArray:', Array.isArray(selectedIds));
+      this.log('[StateManager] _loadSelectedDevices: Loaded selectedIds from storage: %o', selectedIds);
+      this.log('[StateManager] _loadSelectedDevices: selectedIds type: %s isArray: %s', typeof selectedIds, Array.isArray(selectedIds));
       
       this.appState.bluetooth = this.appState.bluetooth || {};
 
@@ -2002,34 +1946,31 @@ export class StateManager extends EventEmitter {
 
       // For each selected ID, try to get the full device object
       for (const deviceId of selectedIds) {
-        console.log(`[StateManager] _loadSelectedDevices: Processing device ${deviceId}`);
+        this.log(`[StateManager] _loadSelectedDevices: Processing device ${deviceId}`);
         
         // Check if we have the device in memory first
         if (this.appState.bluetooth.devices[deviceId]) {
-          console.log(`[StateManager] _loadSelectedDevices: Found device ${deviceId} in memory`);
+          this.log(`[StateManager] _loadSelectedDevices: Found device ${deviceId} in memory`);
           // Use the device from memory
           selectedDevicesObj[deviceId] =
             this.appState.bluetooth.devices[deviceId];
         } else {
-          console.log(`[StateManager] _loadSelectedDevices: Device ${deviceId} not in memory, trying storage...`);
+          this.log(`[StateManager] _loadSelectedDevices: Device ${deviceId} not in memory, trying storage...`);
           // Try to get the device from storage
           try {
             const device = await storageService.getDevice(deviceId);
-            console.log(`[StateManager] _loadSelectedDevices: Storage returned:`, device ? 'device found' : 'null');
+            this.log(`[StateManager] _loadSelectedDevices: Storage returned: %s`, device ? 'device found' : 'null');
             if (device) {
               selectedDevicesObj[deviceId] = device;
               // Also add it to devices for consistency
               this.appState.bluetooth.devices[deviceId] = device;
-              console.log(`[StateManager] _loadSelectedDevices: Added device ${deviceId} to state from storage`);
+              this.log(`[StateManager] _loadSelectedDevices: Added device ${deviceId} to state from storage`);
             } else {
-              console.log(`[StateManager] _loadSelectedDevices: No device found in storage for ${deviceId}, creating placeholder`);
+              this.log(`[StateManager] _loadSelectedDevices: No device found in storage for ${deviceId}, creating placeholder`);
               selectedDevicesObj[deviceId] = { id: deviceId, isSelected: true };
             }
           } catch (deviceError) {
-            console.log(
-              `[StateManager] _loadSelectedDevices: Failed to load device ${deviceId} from storage:`,
-              deviceError.message
-            );
+            this.log(`[StateManager] _loadSelectedDevices: Failed to load device ${deviceId} from storage: %s`, deviceError.message);
             // Create a minimal placeholder device object
             selectedDevicesObj[deviceId] = { id: deviceId, isSelected: true };
           }
@@ -2517,16 +2458,6 @@ export class StateManager extends EventEmitter {
     // Update the lastUpdated timestamp in the state
     this.appState.bluetooth.lastUpdated = now;
 
-    // Add lastUpdated patch
-    patches.push({
-      op: "replace",
-      path: "/bluetooth/lastUpdated",
-      value: now,
-    });
-
-    // Update the lastUpdated timestamp in the state
-    this.appState.bluetooth.lastUpdated = now;
-
     // Clear the device queue after processing
     // this.log(`[DEBUG-STATE] Clearing device queue after processing`);
     const queueSize = this._bluetoothDeviceQueue.size;
@@ -2559,9 +2490,6 @@ export class StateManager extends EventEmitter {
     );
     this.emit("state:patch", patchPayload);
     logState("state:patch event emitted");
-
-    // Clear the queue
-    this._bluetoothDeviceQueue.clear();
   }
 
   /**

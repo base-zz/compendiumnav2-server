@@ -20,14 +20,14 @@ export class RuleEngine2 extends EventEmitter {
    * @param {Object} options - Configuration options
    * @param {number} [options.evaluationInterval=1000] - Minimum ms between evaluations
    * @param {number} [options.maxConditionsPerRule=5] - Maximum conditions per rule
-   * @param {number} [options.maxRules=20] - Maximum number of rules
+   * @param {number} [options.maxRules=100] - Maximum number of rules
    */
   constructor(options = {}) {
     super();
     this.options = {
       evaluationInterval: 1000, // 1 second default
       maxConditionsPerRule: 5,
-      maxRules: 20,
+      maxRules: 100,
       ...options
     };
     
@@ -45,7 +45,7 @@ export class RuleEngine2 extends EventEmitter {
 
     // Create debounced evaluation function
     this.debouncedEvaluate = debounce(
-      () => this.evaluateFromCache(),
+      (evalContext) => this.evaluateFromCache(evalContext),
       this.options.evaluationInterval,
       { leading: true, trailing: true, maxWait: 5000 }
     );
@@ -325,6 +325,3 @@ function deepEqual(a, b) {
 
   return false;
 }
-
-// Export a singleton instance for convenience
-export const ruleEngine = new RuleEngine2();
