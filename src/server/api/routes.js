@@ -431,71 +431,76 @@ export function registerRouteImportRoutes(app) {
   });
 
   app.post('/api/routes/import', async (req, res) => {
+    const requestId = crypto.randomUUID();
     try {
-      console.log('[ROUTES] /api/routes/import request received');
+      console.log(`[ROUTES] [${requestId}] /api/routes/import request received`);
+      console.log(`[ROUTES] [${requestId}] Content-Type: ${req.headers['content-type'] || 'none'}`);
+      console.log(`[ROUTES] [${requestId}] Content-Length: ${req.headers['content-length'] || 'none'}`);
+      console.log(`[ROUTES] [${requestId}] User-Agent: ${req.headers['user-agent'] || 'none'}`);
 
       const token = extractBearerToken(req.headers.authorization);
-      console.log(`[ROUTES] Auth header present=${!!req.headers.authorization}, bearer parsed=${!!token}`);
+      console.log(`[ROUTES] [${requestId}] Auth header present=${!!req.headers.authorization}, bearer parsed=${!!token}`);
       if (!token) {
-        console.log('[ROUTES] Import rejected: missing bearer token');
+        console.log(`[ROUTES] [${requestId}] Import rejected: missing bearer token`);
         return res.status(401).json({ success: false, action: 'auth:required', error: 'Authorization: Bearer token is required' });
       }
 
       const verifiedToken = verifyJwtToken(token);
       if (!verifiedToken || verifiedToken.ok !== true) {
-        console.log(`[ROUTES] Import rejected: token verification failed (${verifiedToken && verifiedToken.error ? verifiedToken.error : 'unknown'})`);
+        console.log(`[ROUTES] [${requestId}] Import rejected: token verification failed (${verifiedToken && verifiedToken.error ? verifiedToken.error : 'unknown'})`);
         return res.status(401).json({
           success: false,
           action: 'auth:invalid',
           error: verifiedToken && verifiedToken.error ? verifiedToken.error : 'Invalid bearer token format'
         });
       }
-      console.log('[ROUTES] Token verified successfully');
+      console.log(`[ROUTES] [${requestId}] Token verified successfully`);
 
       const importedBy = extractUserIdFromTokenPayload(verifiedToken.payload);
       if (!importedBy) {
-        console.log('[ROUTES] Import rejected: token payload missing sub/userId');
+        console.log(`[ROUTES] [${requestId}] Import rejected: token payload missing sub/userId`);
         return res.status(401).json({
           success: false,
           action: 'auth:invalid-payload',
           error: 'Bearer token payload must include sub or userId'
         });
       }
-      console.log(`[ROUTES] Token payload accepted for importedBy=${importedBy}`);
+      console.log(`[ROUTES] [${requestId}] Token payload accepted for importedBy=${importedBy}`);
 
       const maxGpxBytes = parseConfiguredMaxGpxBytes();
       if (!maxGpxBytes) {
-        console.log('[ROUTES] Import rejected: ROUTE_IMPORT_MAX_GPX_BYTES missing/invalid');
+        console.log(`[ROUTES] [${requestId}] Import rejected: ROUTE_IMPORT_MAX_GPX_BYTES missing/invalid`);
         return res.status(500).json({
           success: false,
           action: 'config:error',
           error: 'ROUTE_IMPORT_MAX_GPX_BYTES is missing or invalid. Please set it in server environment.'
         });
       }
-      console.log(`[ROUTES] GPX max size configured: ${maxGpxBytes} bytes`);
+      console.log(`[ROUTES] [${requestId}] GPX max size configured: ${maxGpxBytes} bytes`);
 
       const body = req.body;
+      console.log(`[ROUTES] [${requestId}] Body keys: ${body && typeof body === 'object' ? Object.keys(body).join(', ') : 'none'}`);
       if (!body || typeof body !== 'object') {
-        console.log('[ROUTES] Import rejected: request body missing/invalid');
+        console.log(`[ROUTES] [${requestId}] Import rejected: request body missing/invalid`);
         return res.status(400).json({ success: false, action: 'validation:error', error: 'Request body is required' });
       }
 
       if (!Object.prototype.hasOwnProperty.call(body, 'gpxData') || typeof body.gpxData !== 'string' || !body.gpxData.trim()) {
-        console.log('[ROUTES] Import rejected: gpxData missing/empty');
+        console.log(`[ROUTES] [${requestId}] Import rejected: gpxData missing/empty`);
         return res.status(400).json({ success: false, action: 'validation:error', error: 'gpxData is required and must be a non-empty string' });
       }
-      console.log('[ROUTES] gpxData present');
+      console.log(`[ROUTES] [${requestId}] gpxData present (length=${body.gpxData.length})`);
 
       if (!hasBasicGpxStructure(body.gpxData)) {
-        console.log('[ROUTES] Import rejected: malformed GPX structure');
+        console.log(`[ROUTES] [${requestId}] Import rejected: malformed GPX structure`);
         return res.status(400).json({ success: false, action: 'validation:error', error: 'Malformed GPX/XML payload' });
       }
-      console.log('[ROUTES] GPX structure validation passed');
+      console.log(`[ROUTES] [${requestId}] GPX structure validation passed`);
 
       const gpxByteLength = Buffer.byteLength(body.gpxData, 'utf8');
-      console.log(`[ROUTES] gpxData byte size=${gpxByteLength}`);
+      console.log(`[ROUTES] [${requestId}] gpxData byte size=${gpxByteLength}`);
       if (gpxByteLength > maxGpxBytes) {
-        console.log('[ROUTES] Import rejected: GPX payload too large');
+        console.log(`[ROUTES] [${requestId}] Import rejected: GPX payload too large`);
         return res.status(413).json({
           success: false,
           action: 'validation:payload-too-large',
@@ -506,24 +511,24 @@ export function registerRouteImportRoutes(app) {
       // Parse waypoints from GPX if not provided in request body
       let waypoints = body.waypoints;
       if (!Array.isArray(waypoints)) {
-        console.log('[ROUTES] waypoints not provided, parsing from GPX data');
+        console.log(`[ROUTES] [${requestId}] waypoints not provided, parsing from GPX data`);
         waypoints = parseGPXWaypoints(body.gpxData);
         if (!waypoints || waypoints.length === 0) {
-          console.log('[ROUTES] Import rejected: failed to parse waypoints from GPX');
+          console.log(`[ROUTES] [${requestId}] Import rejected: failed to parse waypoints from GPX`);
           return res.status(400).json({ 
             success: false, 
             action: 'validation:error', 
             error: 'No waypoints found in GPX data or waypoints array is required' 
           });
         }
-        console.log(`[ROUTES] Parsed ${waypoints.length} waypoints from GPX`);
+        console.log(`[ROUTES] [${requestId}] Parsed ${waypoints.length} waypoints from GPX`);
       } else {
-        console.log(`[ROUTES] waypoints count=${waypoints.length}`);
+        console.log(`[ROUTES] [${requestId}] waypoints count=${waypoints.length}`);
       }
 
       for (let i = 0; i < waypoints.length; i += 1) {
         if (!isValidWaypoint(waypoints[i])) {
-          console.log(`[ROUTES] Import rejected: invalid waypoint at index=${i}`);
+          console.log(`[ROUTES] [${requestId}] Import rejected: invalid waypoint at index=${i}`);
           return res.status(400).json({
             success: false,
             action: 'validation:error',
@@ -531,35 +536,35 @@ export function registerRouteImportRoutes(app) {
           });
         }
       }
-      console.log('[ROUTES] Waypoint validation passed');
+      console.log(`[ROUTES] [${requestId}] Waypoint validation passed`);
 
       if (!Object.prototype.hasOwnProperty.call(body, 'name') || typeof body.name !== 'string' || !body.name.trim()) {
-        console.log('[ROUTES] Import rejected: name missing/empty');
+        console.log(`[ROUTES] [${requestId}] Import rejected: name missing/empty`);
         return res.status(400).json({ success: false, action: 'validation:error', error: 'name is required and must be a non-empty string' });
       }
 
       if (!Object.prototype.hasOwnProperty.call(body, 'source') || typeof body.source !== 'string' || !body.source.trim()) {
-        console.log('[ROUTES] Import rejected: source missing/empty');
+        console.log(`[ROUTES] [${requestId}] Import rejected: source missing/empty`);
         return res.status(400).json({ success: false, action: 'validation:error', error: 'source is required and must be a non-empty string' });
       }
-      console.log(`[ROUTES] Route metadata accepted: name="${body.name}", source="${body.source}"`);
+      console.log(`[ROUTES] [${requestId}] Route metadata accepted: name="${body.name}", source="${body.source}"`);
 
       if (Object.prototype.hasOwnProperty.call(body, 'note') && body.note !== undefined && body.note !== null && typeof body.note !== 'string') {
-        console.log('[ROUTES] Import rejected: note has invalid type');
+        console.log(`[ROUTES] [${requestId}] Import rejected: note has invalid type`);
         return res.status(400).json({ success: false, action: 'validation:error', error: 'note must be a string when provided' });
       }
 
       if (typeof storageService.initialize !== 'function') {
-        console.log('[ROUTES] Import failed: storageService.initialize unavailable');
+        console.log(`[ROUTES] [${requestId}] Import failed: storageService.initialize unavailable`);
         return res.status(500).json({ success: false, action: 'storage:unavailable', error: 'storageService is not available' });
       }
 
       await storageService.initialize();
-      console.log('[ROUTES] storageService initialized for route import');
+      console.log(`[ROUTES] [${requestId}] storageService initialized for route import`);
 
       const routeId = crypto.randomUUID();
       const nowIso = new Date().toISOString();
-      console.log(`[ROUTES] Generated routeId: ${routeId}`);
+      console.log(`[ROUTES] [${requestId}] Generated routeId: ${routeId}`);
 
       const routeRecord = {
         routeId,
@@ -575,26 +580,26 @@ export function registerRouteImportRoutes(app) {
         routeRecord.note = body.note;
       }
 
-      console.log(`[ROUTES] Route record created: ${routeRecord.name} (${routeRecord.source}), ${routeRecord.waypoints.length} waypoints`);
+      console.log(`[ROUTES] [${requestId}] Route record created: ${routeRecord.name} (${routeRecord.source}), ${routeRecord.waypoints.length} waypoints`);
 
       const existingRoutes = await storageService.getSetting('importedRoutes');
       let routesToPersist;
 
       if (Array.isArray(existingRoutes)) {
         routesToPersist = [...existingRoutes, routeRecord];
-        console.log(`[ROUTES] Adding to existing routes (existing: ${existingRoutes.length}, new total: ${routesToPersist.length})`);
+        console.log(`[ROUTES] [${requestId}] Adding to existing routes (existing: ${existingRoutes.length}, new total: ${routesToPersist.length})`);
       } else {
         routesToPersist = [routeRecord];
-        console.log(`[ROUTES] Creating new routes collection (total: ${routesToPersist.length})`);
+        console.log(`[ROUTES] [${requestId}] Creating new routes collection (total: ${routesToPersist.length})`);
       }
 
       const persisted = await storageService.setSetting('importedRoutes', routesToPersist);
       if (!persisted) {
-        console.log('[ROUTES] Import failed: unable to persist route in storage');
+        console.log(`[ROUTES] [${requestId}] Import failed: unable to persist route in storage`);
         return res.status(500).json({ success: false, action: 'storage:write-failed', error: 'Failed to store imported route' });
       }
 
-      console.log(`[ROUTES] Successfully imported route ${routeId}: ${body.name} (${body.source}, ${waypoints.length} waypoints, totalStored=${routesToPersist.length})`);
+      console.log(`[ROUTES] [${requestId}] Successfully imported route ${routeId}: ${body.name} (${body.source}, ${waypoints.length} waypoints, totalStored=${routesToPersist.length})`);
 
       return res.status(201).json({
         routeId: routeRecord.routeId,
@@ -605,7 +610,7 @@ export function registerRouteImportRoutes(app) {
         createdAt: routeRecord.createdAt
       });
     } catch (error) {
-      console.error('[ROUTES] Error importing route:', error);
+      console.error(`[ROUTES] [${requestId}] Error importing route:`, error);
       return res.status(500).json({
         success: false,
         action: 'route:import-failed',
