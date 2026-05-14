@@ -43,6 +43,10 @@ keys/
 # Large local spatial DB (managed outside git)
 data/icw_navigation.sqlite
 
+# Scraped marina HTML files and runtime DB
+data/marina/
+data/nav_data.db
+
 # Temporary/debug files
 tmp/
 **/tmp/
