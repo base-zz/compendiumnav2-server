@@ -951,412 +951,20 @@ export class StateManager extends EventEmitter {
       const serverNowIso = new Date().toISOString();
       const serverNowMs = Date.now();
 
-      // If anchor is being deployed now, capture the server's current boat position as
-      // both the drop location and initial anchor location.
       const wasDeployed = currentAnchor?.anchorDeployed === true;
       const willBeDeployed = sanitizedPatch?.anchorDeployed === true;
       const isDeployTransition = willBeDeployed && !wasDeployed;
 
-      const applyCapturedDropAndAnchorPosition = () => {
-        if (!boatLatLon) {
-          console.warn('[StateManager] Anchor action requires server boat position but it is unavailable');
-          return;
-        }
-
-        const positionCaptured = {
-          latitude: { value: boatLatLon.boatLat, units: 'deg' },
-          longitude: { value: boatLatLon.boatLon, units: 'deg' },
-        };
-
-        sanitizedPatch.anchorDropLocation = {
-          ...(currentAnchor?.anchorDropLocation || {}),
-          ...(sanitizedPatch.anchorDropLocation || {}),
-          position: positionCaptured,
-          time: serverNowIso,
-        };
-
-        sanitizedPatch.anchorLocation = {
-          ...(currentAnchor?.anchorLocation || {}),
-          ...(sanitizedPatch.anchorLocation || {}),
-          position: positionCaptured,
-          time: serverNowIso,
-        };
-      };
-
-      const applyProjectedDropAndAnchorPositionFromSetAfterDeploy = () => {
-        if (!boatLatLon) {
-          console.warn('[StateManager] set_after_deploy requires server boat position but it is unavailable');
-          return;
-        }
-
-        const setBearing = incomingAnchorPatch?.setBearing;
-        const bearingValue = setBearing?.value;
-        const bearingUnits = setBearing?.units;
-        if (bearingValue == null || bearingUnits == null) {
-          console.warn('[StateManager] set_after_deploy requires setBearing.value and setBearing.units');
-          return;
-        }
-        if (!Number.isFinite(bearingValue) || typeof bearingUnits !== 'string' || bearingUnits.toLowerCase() !== 'deg') {
-          console.warn('[StateManager] set_after_deploy requires setBearing.units="deg" and numeric value');
-          return;
-        }
-
-        const rodeMeters = this._extractAnchorRodeLengthMeters({
-          rode: sanitizedPatch?.rode != null ? sanitizedPatch.rode : currentAnchor?.rode,
-        });
-        if (rodeMeters == null) {
-          console.warn('[StateManager] set_after_deploy requires rode (amount+units) either in patch or existing anchor state');
-          return;
-        }
-
-        const dropDepthMeters = this._extractAnchorDropDepthMeters({
-          anchorDropLocation:
-            sanitizedPatch?.anchorDropLocation != null
-              ? sanitizedPatch.anchorDropLocation
-              : currentAnchor?.anchorDropLocation,
-        });
-
-        const effectiveHorizontalMeters =
-          dropDepthMeters != null && dropDepthMeters >= 0 && rodeMeters > dropDepthMeters
-            ? Math.sqrt((rodeMeters * rodeMeters) - (dropDepthMeters * dropDepthMeters))
-            : rodeMeters;
-
-        const projected = projectPoint(
-          boatLatLon.boatLat,
-          boatLatLon.boatLon,
-          bearingValue,
-          effectiveHorizontalMeters
-        );
-        if (!projected) {
-          console.warn('[StateManager] set_after_deploy projection failed; not updating drop/anchor positions');
-          return;
-        }
-
-        const projectedPositionObj = {
-          latitude: { value: projected.latitude, units: 'deg' },
-          longitude: { value: projected.longitude, units: 'deg' },
-        };
-
-        sanitizedPatch.anchorDropLocation = {
-          ...(currentAnchor?.anchorDropLocation || {}),
-          ...(sanitizedPatch.anchorDropLocation || {}),
-          position: projectedPositionObj,
-          time: serverNowIso,
-        };
-
-        // Ensure depth and depthSource are preserved during set_after_deploy
-        if (sanitizedPatch.anchorDropLocation.depth == null && currentAnchor?.anchorDropLocation?.depth != null) {
-          sanitizedPatch.anchorDropLocation.depth = currentAnchor.anchorDropLocation.depth;
-        }
-        if (sanitizedPatch.anchorDropLocation.depthSource == null && currentAnchor?.anchorDropLocation?.depthSource != null) {
-          sanitizedPatch.anchorDropLocation.depthSource = currentAnchor.anchorDropLocation.depthSource;
-        }
-
-        sanitizedPatch.anchorLocation = {
-          ...(currentAnchor?.anchorLocation || {}),
-          ...(sanitizedPatch.anchorLocation || {}),
-          position: projectedPositionObj,
-          time: serverNowIso,
-        };
-      };
-
-      const applyResetAnchorHere = () => {
-        if (!boatLatLon) {
-          console.warn('[StateManager] reset_anchor_here requires server boat position but it is unavailable');
-          return;
-        }
-
-        const oldDropPos = currentAnchor?.anchorDropLocation?.position;
-        const oldDropLat = oldDropPos?.latitude?.value;
-        const oldDropLon = oldDropPos?.longitude?.value;
-
-        const rodeUnits = sanitizedPatch?.rode?.units ?? currentAnchor?.rode?.units;
-        if (Number.isFinite(oldDropLat) && Number.isFinite(oldDropLon) && typeof rodeUnits === 'string') {
-          const movedDistanceMeters = calculateDistance(oldDropLat, oldDropLon, boatLatLon.boatLat, boatLatLon.boatLon);
-          const convertedRodeAmount = this._convertMetersToRequestedLengthUnits(movedDistanceMeters, rodeUnits);
-          if (convertedRodeAmount != null) {
-            sanitizedPatch.rode = {
-              ...(currentAnchor?.rode || {}),
-              ...(sanitizedPatch.rode || {}),
-              amount: convertedRodeAmount,
-              units: rodeUnits,
-            };
-          }
-        }
-
-        applyCapturedDropAndAnchorPosition();
-
-        const moveBearingDeg = calculateBearing(oldDropLat, oldDropLon, boatLatLon.boatLat, boatLatLon.boatLon);
-        if (moveBearingDeg == null) {
-          return;
-        }
-
-        const existingBearingUnits = currentAnchor?.anchorDropLocation?.bearing?.units;
-        const writeBearingValue =
-          typeof existingBearingUnits === 'string' && existingBearingUnits.toLowerCase() === 'rad'
-            ? toRad(moveBearingDeg)
-            : moveBearingDeg;
-
-        sanitizedPatch.anchorDropLocation = {
-          ...(currentAnchor?.anchorDropLocation || {}),
-          ...(sanitizedPatch.anchorDropLocation || {}),
-          originalBearing: {
-            ...(currentAnchor?.anchorDropLocation?.originalBearing || {}),
-            value: writeBearingValue,
-          },
-          bearing: {
-            ...(currentAnchor?.anchorDropLocation?.bearing || {}),
-            value: writeBearingValue,
-          },
-        };
-
-        if (Object.prototype.hasOwnProperty.call(sanitizedPatch.anchorDropLocation.originalBearing, 'degrees')) {
-          sanitizedPatch.anchorDropLocation.originalBearing.degrees = moveBearingDeg;
-        }
-        if (Object.prototype.hasOwnProperty.call(sanitizedPatch.anchorDropLocation.bearing, 'degrees')) {
-          sanitizedPatch.anchorDropLocation.bearing.degrees = moveBearingDeg;
-        }
-      };
-
-      const validateFinalizeDropNowPayload = () => {
-        const rodeAmount = sanitizedPatch?.rode?.amount;
-        const rodeUnits = sanitizedPatch?.rode?.units;
-        if (rodeAmount == null || rodeUnits == null) {
-          throw new Error('finalize_drop_now requires rode.amount and rode.units');
-        }
-        if (!Number.isFinite(rodeAmount) || rodeAmount <= 0) {
-          throw new Error('finalize_drop_now requires rode.amount > 0');
-        }
-
-        const warningRangeValue = sanitizedPatch?.warningRange?.r;
-        const warningRangeUnits = sanitizedPatch?.warningRange?.units;
-        if (warningRangeValue == null || warningRangeUnits == null) {
-          throw new Error('finalize_drop_now requires warningRange.r and warningRange.units');
-        }
-        if (!Number.isFinite(warningRangeValue) || warningRangeValue <= 0) {
-          throw new Error('finalize_drop_now requires warningRange.r > 0');
-        }
-
-        const criticalRangeValue = sanitizedPatch?.criticalRange?.r;
-        const criticalRangeUnits = sanitizedPatch?.criticalRange?.units;
-        if (criticalRangeValue == null || criticalRangeUnits == null) {
-          throw new Error('finalize_drop_now requires criticalRange.r and criticalRange.units');
-        }
-        if (!Number.isFinite(criticalRangeValue) || criticalRangeValue <= 0) {
-          throw new Error('finalize_drop_now requires criticalRange.r > 0');
-        }
-
-        const bearingValue = incomingAnchorPatch?.setBearing?.value;
-        const bearingUnits = incomingAnchorPatch?.setBearing?.units;
-        if (bearingValue == null || bearingUnits == null) {
-          throw new Error('finalize_drop_now requires setBearing.value and setBearing.units');
-        }
-        if (!Number.isFinite(bearingValue) || typeof bearingUnits !== 'string' || bearingUnits.toLowerCase() !== 'deg') {
-          throw new Error('finalize_drop_now requires setBearing.units="deg" and numeric value');
-        }
-
-        const depthValue = sanitizedPatch?.anchorDropLocation?.depth?.value;
-        const depthUnits = sanitizedPatch?.anchorDropLocation?.depth?.units;
-        const depthSource = sanitizedPatch?.anchorDropLocation?.depthSource;
-        if (depthValue == null || depthUnits == null || depthSource == null) {
-          throw new Error('finalize_drop_now requires anchorDropLocation.depth and anchorDropLocation.depthSource');
-        }
-      };
-
-      const backfillFinalizeRodeFromMeasuredDistance = () => {
-        const rodeUnits = this._resolveAnchorPreferredLengthUnits(currentAnchor, sanitizedPatch);
-        if (rodeUnits == null) {
-          throw new Error('finalize_drop_now requires resolvable length units from anchor state or preferences');
-        }
-
-        const rodeAmount = sanitizedPatch?.rode?.amount;
-        if (Number.isFinite(rodeAmount) && rodeAmount > 0 && sanitizedPatch?.rode?.units != null) {
-          return;
-        }
-
-        const measuredMeters = currentAnchor?.dropSession?.measured?.maxDistanceFromDrop;
-        if (!Number.isFinite(measuredMeters)) {
-          throw new Error('finalize_drop_now requires rode.amount or a measured dropSession.measured.maxDistanceFromDrop');
-        }
-
-        if (typeof rodeUnits !== 'string') {
-          throw new Error('finalize_drop_now requires rode.units to be a string');
-        }
-
-        let convertedAmount = null;
-        switch (rodeUnits.toLowerCase()) {
-          case 'm':
-          case 'meter':
-          case 'meters':
-            convertedAmount = measuredMeters;
-            break;
-          case 'ft':
-          case 'foot':
-          case 'feet':
-            convertedAmount = measuredMeters / 0.3048;
-            break;
-          default:
-            throw new Error('finalize_drop_now requires rode.units to be one of: m, meter, meters, ft, foot, feet');
-        }
-
-        sanitizedPatch.rode = {
-          ...(sanitizedPatch.rode || {}),
-          amount: convertedAmount,
-          units: rodeUnits,
-        };
-      };
-
-      const backfillFinalizeCriticalRangeFromRode = () => {
-        const criticalRangeValue = sanitizedPatch?.criticalRange?.r;
-        const criticalRangeUnits = sanitizedPatch?.criticalRange?.units;
-        if (
-          Number.isFinite(criticalRangeValue) &&
-          criticalRangeValue > 0 &&
-          this._isAnchorLengthUnits(criticalRangeUnits)
-        ) {
-          return;
-        }
-
-        const rodeAmount = sanitizedPatch?.rode?.amount;
-        const rodeUnits = sanitizedPatch?.rode?.units;
-        if (!Number.isFinite(rodeAmount) || rodeAmount <= 0 || !this._isAnchorLengthUnits(rodeUnits)) {
-          throw new Error('finalize_drop_now requires criticalRange or calculated rode to derive criticalRange');
-        }
-
-        sanitizedPatch.criticalRange = {
-          ...(sanitizedPatch.criticalRange || {}),
-          r: rodeAmount + 20,
-          units: rodeUnits,
-        };
-      };
-
-      const applyFinalizeDropNow = () => {
-        this.log('[StateManager][finalize_drop_now] incoming payload summary %o', {
-          rode: sanitizedPatch?.rode,
-          warningRange: sanitizedPatch?.warningRange,
-          criticalRange: sanitizedPatch?.criticalRange,
-          setBearing: incomingAnchorPatch?.setBearing,
-          anchorDropDepth: sanitizedPatch?.anchorDropLocation?.depth,
-          anchorDropDepthSource: sanitizedPatch?.anchorDropLocation?.depthSource,
-          measuredMaxDistanceFromDrop: currentAnchor?.dropSession?.measured?.maxDistanceFromDrop,
-        });
-
-        backfillFinalizeRodeFromMeasuredDistance();
-        backfillFinalizeCriticalRangeFromRode();
-        validateFinalizeDropNowPayload();
-
-        const bearingValue = incomingAnchorPatch?.setBearing?.value;
-
-        sanitizedPatch.anchorDeployed = true;
-        sanitizedPatch.deploymentPhase = 'finalized';
-        sanitizedPatch.anchorSet = true;
-        sanitizedPatch.alertsSuppressed = false;
-        sanitizedPatch.dragging = false;
-        sanitizedPatch.aisWarning = false;
-
-        sanitizedPatch.dropSession = {
-          ...(currentAnchor?.dropSession || {}),
-          endedAt: serverNowMs,
-          cancelledAt: null,
-          measured: {
-            ...(currentAnchor?.dropSession?.measured || {}),
-          },
-        };
-
-        sanitizedPatch.anchorDropLocation = {
-          ...(currentAnchor?.anchorDropLocation || {}),
-          ...(sanitizedPatch.anchorDropLocation || {}),
-          bearing: {
-            ...(currentAnchor?.anchorDropLocation?.bearing || {}),
-            value: bearingValue,
-            units: 'deg',
-          },
-          originalBearing: {
-            ...(currentAnchor?.anchorDropLocation?.originalBearing || {}),
-            value: bearingValue,
-            units: 'deg',
-          },
-        };
-      };
-
-      const applyCancelDropNow = () => {
-        sanitizedPatch.anchorDeployed = false;
-        sanitizedPatch.deploymentPhase = 'idle';
-        sanitizedPatch.anchorSet = false;
-        sanitizedPatch.alertsSuppressed = false;
-        sanitizedPatch.dragging = false;
-        sanitizedPatch.aisWarning = false;
-        sanitizedPatch.dropSession = {
-          ...(currentAnchor?.dropSession || {}),
-          endedAt: null,
-          cancelledAt: serverNowMs,
-          measured: {
-            currentDistanceFromDrop: null,
-            maxDistanceFromDrop: null,
-            currentBearingFromDropDeg: null,
-            lastSampleAt: null,
-          },
-        };
-        this._resolveAnchorMonitoringAlerts('drop_now_cancelled');
-      };
-
-      if (action === 'drop_now') {
-        if (!boatLatLon) {
-          throw new Error('drop_now requires server boat position but it is unavailable');
-        }
-        const dropDepthValue = sanitizedPatch?.anchorDropLocation?.depth?.value;
-        const dropDepthUnits = sanitizedPatch?.anchorDropLocation?.depth?.units;
-        const dropDepthSource = sanitizedPatch?.anchorDropLocation?.depthSource;
-        if (dropDepthValue == null || dropDepthUnits == null || dropDepthSource == null) {
-          throw new Error('drop_now requires anchorDropLocation.depth and anchorDropLocation.depthSource');
-        }
-        applyCapturedDropAndAnchorPosition();
-        sanitizedPatch.anchorDeployed = true;
-        sanitizedPatch.deploymentPhase = 'deploying';
-        sanitizedPatch.anchorSet = false;
-        sanitizedPatch.alertsSuppressed = true;
-        sanitizedPatch.dragging = false;
-        sanitizedPatch.aisWarning = false;
-        sanitizedPatch.dropSession = {
-          ...(currentAnchor?.dropSession || {}),
-          startedAt: serverNowMs,
-          endedAt: null,
-          cancelledAt: null,
-          measured: {
-            currentDistanceFromDrop: 0,
-            maxDistanceFromDrop: 0,
-            currentBearingFromDropDeg: null,
-            lastSampleAt: serverNowMs,
-          },
-        };
-        this._resolveAnchorMonitoringAlerts('drop_now_started');
-      } else if (action === 'finalize_drop_now') {
-        applyFinalizeDropNow();
-      } else if (action === 'cancel_drop_now') {
-        applyCancelDropNow();
-      } else if (action === 'set_after_deploy') {
-        applyProjectedDropAndAnchorPositionFromSetAfterDeploy();
-        sanitizedPatch.anchorDeployed = true;
-        sanitizedPatch.deploymentPhase = 'finalized';
-        sanitizedPatch.anchorSet = true;
-        sanitizedPatch.alertsSuppressed = false;
-      } else if (action === 'reset_anchor_here') {
-        applyResetAnchorHere();
-        sanitizedPatch.anchorDeployed = true;
-        sanitizedPatch.deploymentPhase = 'finalized';
-        sanitizedPatch.anchorSet = true;
-        sanitizedPatch.alertsSuppressed = false;
-      } else if (isDeployTransition) {
-        applyCapturedDropAndAnchorPosition();
-        sanitizedPatch.anchorDeployed = true;
-        sanitizedPatch.deploymentPhase = 'finalized';
-        sanitizedPatch.anchorSet = true;
-        sanitizedPatch.alertsSuppressed = false;
-      } else if (sanitizedPatch.anchorDeployed === false) {
-        sanitizedPatch.deploymentPhase = 'idle';
-        sanitizedPatch.anchorSet = false;
-        sanitizedPatch.alertsSuppressed = false;
-      }
+      this._applyAnchorAction({
+        action,
+        incomingAnchorPatch,
+        sanitizedPatch,
+        currentAnchor,
+        boatLatLon,
+        serverNowIso,
+        serverNowMs,
+        isDeployTransition,
+      });
 
       const mergedAnchor = this._deepMergeAnchor(currentAnchor, sanitizedPatch);
 
@@ -1383,6 +991,443 @@ export class StateManager extends EventEmitter {
       this.logError("Error updating anchor state:", error);
       this.emit("error:anchor-update", { error, anchorData });
       return false;
+    }
+  }
+
+  _applyAnchorAction({
+    action,
+    incomingAnchorPatch,
+    sanitizedPatch,
+    currentAnchor,
+    boatLatLon,
+    serverNowIso,
+    serverNowMs,
+    isDeployTransition,
+  }) {
+      // If anchor is being deployed now, capture the server's current boat position as
+      // both the drop location and initial anchor location.
+
+      if (action === 'drop_now') {
+        this._applyAnchorDropNow({ sanitizedPatch, currentAnchor, boatLatLon, serverNowIso, serverNowMs });
+      } else if (action === 'finalize_drop_now') {
+        this._applyAnchorFinalizeDropNow({ incomingAnchorPatch, sanitizedPatch, currentAnchor, serverNowMs });
+      } else if (action === 'cancel_drop_now') {
+        this._applyAnchorCancelDropNow({ sanitizedPatch, currentAnchor, serverNowMs });
+      } else if (action === 'set_after_deploy') {
+        this._applyAnchorSetAfterDeploy({ incomingAnchorPatch, sanitizedPatch, currentAnchor, boatLatLon, serverNowIso });
+        sanitizedPatch.anchorDeployed = true;
+        sanitizedPatch.deploymentPhase = 'finalized';
+        sanitizedPatch.anchorSet = true;
+        sanitizedPatch.alertsSuppressed = false;
+      } else if (action === 'reset_anchor_here') {
+        this._applyAnchorResetHere({ sanitizedPatch, currentAnchor, boatLatLon, serverNowIso });
+        sanitizedPatch.anchorDeployed = true;
+        sanitizedPatch.deploymentPhase = 'finalized';
+        sanitizedPatch.anchorSet = true;
+        sanitizedPatch.alertsSuppressed = false;
+      } else if (isDeployTransition) {
+        this._applyCapturedDropAndAnchorPosition({ sanitizedPatch, currentAnchor, boatLatLon, serverNowIso });
+        sanitizedPatch.anchorDeployed = true;
+        sanitizedPatch.deploymentPhase = 'finalized';
+        sanitizedPatch.anchorSet = true;
+        sanitizedPatch.alertsSuppressed = false;
+      } else if (sanitizedPatch.anchorDeployed === false) {
+        sanitizedPatch.deploymentPhase = 'idle';
+        sanitizedPatch.anchorSet = false;
+        sanitizedPatch.alertsSuppressed = false;
+      }
+  }
+
+  _applyAnchorDropNow({ sanitizedPatch, currentAnchor, boatLatLon, serverNowIso, serverNowMs }) {
+    if (!boatLatLon) {
+      throw new Error('drop_now requires server boat position but it is unavailable');
+    }
+    const dropDepthValue = sanitizedPatch?.anchorDropLocation?.depth?.value;
+    const dropDepthUnits = sanitizedPatch?.anchorDropLocation?.depth?.units;
+    const dropDepthSource = sanitizedPatch?.anchorDropLocation?.depthSource;
+    if (dropDepthValue == null || dropDepthUnits == null || dropDepthSource == null) {
+      throw new Error('drop_now requires anchorDropLocation.depth and anchorDropLocation.depthSource');
+    }
+
+    const positionCaptured = {
+      latitude: { value: boatLatLon.boatLat, units: 'deg' },
+      longitude: { value: boatLatLon.boatLon, units: 'deg' },
+    };
+
+    sanitizedPatch.anchorDropLocation = {
+      ...(currentAnchor?.anchorDropLocation || {}),
+      ...(sanitizedPatch.anchorDropLocation || {}),
+      position: positionCaptured,
+      time: serverNowIso,
+    };
+
+    sanitizedPatch.anchorLocation = {
+      ...(currentAnchor?.anchorLocation || {}),
+      ...(sanitizedPatch.anchorLocation || {}),
+      position: positionCaptured,
+      time: serverNowIso,
+    };
+
+    sanitizedPatch.anchorDeployed = true;
+    sanitizedPatch.deploymentPhase = 'deploying';
+    sanitizedPatch.anchorSet = false;
+    sanitizedPatch.alertsSuppressed = true;
+    sanitizedPatch.dragging = false;
+    sanitizedPatch.aisWarning = false;
+    sanitizedPatch.dropSession = {
+      ...(currentAnchor?.dropSession || {}),
+      startedAt: serverNowMs,
+      endedAt: null,
+      cancelledAt: null,
+      measured: {
+        currentDistanceFromDrop: 0,
+        maxDistanceFromDrop: 0,
+        currentBearingFromDropDeg: null,
+        lastSampleAt: serverNowMs,
+      },
+    };
+    this._resolveAnchorMonitoringAlerts('drop_now_started');
+  }
+
+  _applyAnchorCancelDropNow({ sanitizedPatch, currentAnchor, serverNowMs }) {
+    sanitizedPatch.anchorDeployed = false;
+    sanitizedPatch.deploymentPhase = 'idle';
+    sanitizedPatch.anchorSet = false;
+    sanitizedPatch.alertsSuppressed = false;
+    sanitizedPatch.dragging = false;
+    sanitizedPatch.aisWarning = false;
+    sanitizedPatch.dropSession = {
+      ...(currentAnchor?.dropSession || {}),
+      endedAt: null,
+      cancelledAt: serverNowMs,
+      measured: {
+        currentDistanceFromDrop: null,
+        maxDistanceFromDrop: null,
+        currentBearingFromDropDeg: null,
+        lastSampleAt: null,
+      },
+    };
+    this._resolveAnchorMonitoringAlerts('drop_now_cancelled');
+  }
+
+  _validateFinalizeDropNowPayload({ incomingAnchorPatch, sanitizedPatch }) {
+    const rodeAmount = sanitizedPatch?.rode?.amount;
+    const rodeUnits = sanitizedPatch?.rode?.units;
+    if (rodeAmount == null || rodeUnits == null) {
+      throw new Error('finalize_drop_now requires rode.amount and rode.units');
+    }
+    if (!Number.isFinite(rodeAmount) || rodeAmount <= 0) {
+      throw new Error('finalize_drop_now requires rode.amount > 0');
+    }
+
+    const warningRangeValue = sanitizedPatch?.warningRange?.r;
+    const warningRangeUnits = sanitizedPatch?.warningRange?.units;
+    if (warningRangeValue == null || warningRangeUnits == null) {
+      throw new Error('finalize_drop_now requires warningRange.r and warningRange.units');
+    }
+    if (!Number.isFinite(warningRangeValue) || warningRangeValue <= 0) {
+      throw new Error('finalize_drop_now requires warningRange.r > 0');
+    }
+
+    const criticalRangeValue = sanitizedPatch?.criticalRange?.r;
+    const criticalRangeUnits = sanitizedPatch?.criticalRange?.units;
+    if (criticalRangeValue == null || criticalRangeUnits == null) {
+      throw new Error('finalize_drop_now requires criticalRange.r and criticalRange.units');
+    }
+    if (!Number.isFinite(criticalRangeValue) || criticalRangeValue <= 0) {
+      throw new Error('finalize_drop_now requires criticalRange.r > 0');
+    }
+
+    const bearingValue = incomingAnchorPatch?.setBearing?.value;
+    const bearingUnits = incomingAnchorPatch?.setBearing?.units;
+    if (bearingValue == null || bearingUnits == null) {
+      throw new Error('finalize_drop_now requires setBearing.value and setBearing.units');
+    }
+    if (!Number.isFinite(bearingValue) || typeof bearingUnits !== 'string' || bearingUnits.toLowerCase() !== 'deg') {
+      throw new Error('finalize_drop_now requires setBearing.units="deg" and numeric value');
+    }
+
+    const depthValue = sanitizedPatch?.anchorDropLocation?.depth?.value;
+    const depthUnits = sanitizedPatch?.anchorDropLocation?.depth?.units;
+    const depthSource = sanitizedPatch?.anchorDropLocation?.depthSource;
+    if (depthValue == null || depthUnits == null || depthSource == null) {
+      throw new Error('finalize_drop_now requires anchorDropLocation.depth and anchorDropLocation.depthSource');
+    }
+  }
+
+  _backfillFinalizeRodeFromMeasuredDistance({ sanitizedPatch, currentAnchor }) {
+    const rodeUnits = this._resolveAnchorPreferredLengthUnits(currentAnchor, sanitizedPatch);
+    if (rodeUnits == null) {
+      throw new Error('finalize_drop_now requires resolvable length units from anchor state or preferences');
+    }
+
+    const rodeAmount = sanitizedPatch?.rode?.amount;
+    if (Number.isFinite(rodeAmount) && rodeAmount > 0 && sanitizedPatch?.rode?.units != null) {
+      return;
+    }
+
+    const measuredMeters = currentAnchor?.dropSession?.measured?.maxDistanceFromDrop;
+    if (!Number.isFinite(measuredMeters)) {
+      throw new Error('finalize_drop_now requires rode.amount or a measured dropSession.measured.maxDistanceFromDrop');
+    }
+
+    if (typeof rodeUnits !== 'string') {
+      throw new Error('finalize_drop_now requires rode.units to be a string');
+    }
+
+    let convertedAmount = null;
+    switch (rodeUnits.toLowerCase()) {
+      case 'm':
+      case 'meter':
+      case 'meters':
+        convertedAmount = measuredMeters;
+        break;
+      case 'ft':
+      case 'foot':
+      case 'feet':
+        convertedAmount = measuredMeters / 0.3048;
+        break;
+      default:
+        throw new Error('finalize_drop_now requires rode.units to be one of: m, meter, meters, ft, foot, feet');
+    }
+
+    sanitizedPatch.rode = {
+      ...(sanitizedPatch.rode || {}),
+      amount: convertedAmount,
+      units: rodeUnits,
+    };
+  }
+
+  _backfillFinalizeCriticalRangeFromRode(sanitizedPatch) {
+    const criticalRangeValue = sanitizedPatch?.criticalRange?.r;
+    const criticalRangeUnits = sanitizedPatch?.criticalRange?.units;
+    if (
+      Number.isFinite(criticalRangeValue) &&
+      criticalRangeValue > 0 &&
+      this._isAnchorLengthUnits(criticalRangeUnits)
+    ) {
+      return;
+    }
+
+    const rodeAmount = sanitizedPatch?.rode?.amount;
+    const rodeUnits = sanitizedPatch?.rode?.units;
+    if (!Number.isFinite(rodeAmount) || rodeAmount <= 0 || !this._isAnchorLengthUnits(rodeUnits)) {
+      throw new Error('finalize_drop_now requires criticalRange or calculated rode to derive criticalRange');
+    }
+
+    sanitizedPatch.criticalRange = {
+      ...(sanitizedPatch.criticalRange || {}),
+      r: rodeAmount + 20,
+      units: rodeUnits,
+    };
+  }
+
+  _applyAnchorFinalizeDropNow({ incomingAnchorPatch, sanitizedPatch, currentAnchor, serverNowMs }) {
+    this.log('[StateManager][finalize_drop_now] incoming payload summary %o', {
+      rode: sanitizedPatch?.rode,
+      warningRange: sanitizedPatch?.warningRange,
+      criticalRange: sanitizedPatch?.criticalRange,
+      setBearing: incomingAnchorPatch?.setBearing,
+      anchorDropDepth: sanitizedPatch?.anchorDropLocation?.depth,
+      anchorDropDepthSource: sanitizedPatch?.anchorDropLocation?.depthSource,
+      measuredMaxDistanceFromDrop: currentAnchor?.dropSession?.measured?.maxDistanceFromDrop,
+    });
+
+    this._backfillFinalizeRodeFromMeasuredDistance({ sanitizedPatch, currentAnchor });
+    this._backfillFinalizeCriticalRangeFromRode(sanitizedPatch);
+    this._validateFinalizeDropNowPayload({ incomingAnchorPatch, sanitizedPatch });
+
+    const bearingValue = incomingAnchorPatch?.setBearing?.value;
+
+    sanitizedPatch.anchorDeployed = true;
+    sanitizedPatch.deploymentPhase = 'finalized';
+    sanitizedPatch.anchorSet = true;
+    sanitizedPatch.alertsSuppressed = false;
+    sanitizedPatch.dragging = false;
+    sanitizedPatch.aisWarning = false;
+
+    sanitizedPatch.dropSession = {
+      ...(currentAnchor?.dropSession || {}),
+      endedAt: serverNowMs,
+      cancelledAt: null,
+      measured: {
+        ...(currentAnchor?.dropSession?.measured || {}),
+      },
+    };
+
+    sanitizedPatch.anchorDropLocation = {
+      ...(currentAnchor?.anchorDropLocation || {}),
+      ...(sanitizedPatch.anchorDropLocation || {}),
+      bearing: {
+        ...(currentAnchor?.anchorDropLocation?.bearing || {}),
+        value: bearingValue,
+        units: 'deg',
+      },
+      originalBearing: {
+        ...(currentAnchor?.anchorDropLocation?.originalBearing || {}),
+        value: bearingValue,
+        units: 'deg',
+      },
+    };
+  }
+
+  _applyCapturedDropAndAnchorPosition({ sanitizedPatch, currentAnchor, boatLatLon, serverNowIso }) {
+    if (!boatLatLon) {
+      console.warn('[StateManager] Anchor action requires server boat position but it is unavailable');
+      return;
+    }
+
+    const positionCaptured = {
+      latitude: { value: boatLatLon.boatLat, units: 'deg' },
+      longitude: { value: boatLatLon.boatLon, units: 'deg' },
+    };
+
+    sanitizedPatch.anchorDropLocation = {
+      ...(currentAnchor?.anchorDropLocation || {}),
+      ...(sanitizedPatch.anchorDropLocation || {}),
+      position: positionCaptured,
+      time: serverNowIso,
+    };
+
+    sanitizedPatch.anchorLocation = {
+      ...(currentAnchor?.anchorLocation || {}),
+      ...(sanitizedPatch.anchorLocation || {}),
+      position: positionCaptured,
+      time: serverNowIso,
+    };
+  }
+
+  _applyAnchorSetAfterDeploy({ incomingAnchorPatch, sanitizedPatch, currentAnchor, boatLatLon, serverNowIso }) {
+    if (!boatLatLon) {
+      console.warn('[StateManager] set_after_deploy requires server boat position but it is unavailable');
+      return;
+    }
+
+    const setBearing = incomingAnchorPatch?.setBearing;
+    const bearingValue = setBearing?.value;
+    const bearingUnits = setBearing?.units;
+    if (bearingValue == null || bearingUnits == null) {
+      console.warn('[StateManager] set_after_deploy requires setBearing.value and setBearing.units');
+      return;
+    }
+    if (!Number.isFinite(bearingValue) || typeof bearingUnits !== 'string' || bearingUnits.toLowerCase() !== 'deg') {
+      console.warn('[StateManager] set_after_deploy requires setBearing.units="deg" and numeric value');
+      return;
+    }
+
+    const rodeMeters = this._extractAnchorRodeLengthMeters({
+      rode: sanitizedPatch?.rode != null ? sanitizedPatch.rode : currentAnchor?.rode,
+    });
+    if (rodeMeters == null) {
+      console.warn('[StateManager] set_after_deploy requires rode (amount+units) either in patch or existing anchor state');
+      return;
+    }
+
+    const dropDepthMeters = this._extractAnchorDropDepthMeters({
+      anchorDropLocation:
+        sanitizedPatch?.anchorDropLocation != null
+          ? sanitizedPatch.anchorDropLocation
+          : currentAnchor?.anchorDropLocation,
+    });
+
+    const effectiveHorizontalMeters =
+      dropDepthMeters != null && dropDepthMeters >= 0 && rodeMeters > dropDepthMeters
+        ? Math.sqrt((rodeMeters * rodeMeters) - (dropDepthMeters * dropDepthMeters))
+        : rodeMeters;
+
+    const projected = projectPoint(
+      boatLatLon.boatLat,
+      boatLatLon.boatLon,
+      bearingValue,
+      effectiveHorizontalMeters
+    );
+    if (!projected) {
+      console.warn('[StateManager] set_after_deploy projection failed; not updating drop/anchor positions');
+      return;
+    }
+
+    const projectedPositionObj = {
+      latitude: { value: projected.latitude, units: 'deg' },
+      longitude: { value: projected.longitude, units: 'deg' },
+    };
+
+    sanitizedPatch.anchorDropLocation = {
+      ...(currentAnchor?.anchorDropLocation || {}),
+      ...(sanitizedPatch.anchorDropLocation || {}),
+      position: projectedPositionObj,
+      time: serverNowIso,
+    };
+
+    if (sanitizedPatch.anchorDropLocation.depth == null && currentAnchor?.anchorDropLocation?.depth != null) {
+      sanitizedPatch.anchorDropLocation.depth = currentAnchor.anchorDropLocation.depth;
+    }
+    if (sanitizedPatch.anchorDropLocation.depthSource == null && currentAnchor?.anchorDropLocation?.depthSource != null) {
+      sanitizedPatch.anchorDropLocation.depthSource = currentAnchor.anchorDropLocation.depthSource;
+    }
+
+    sanitizedPatch.anchorLocation = {
+      ...(currentAnchor?.anchorLocation || {}),
+      ...(sanitizedPatch.anchorLocation || {}),
+      position: projectedPositionObj,
+      time: serverNowIso,
+    };
+  }
+
+  _applyAnchorResetHere({ sanitizedPatch, currentAnchor, boatLatLon, serverNowIso }) {
+    if (!boatLatLon) {
+      console.warn('[StateManager] reset_anchor_here requires server boat position but it is unavailable');
+      return;
+    }
+
+    const oldDropPos = currentAnchor?.anchorDropLocation?.position;
+    const oldDropLat = oldDropPos?.latitude?.value;
+    const oldDropLon = oldDropPos?.longitude?.value;
+
+    const rodeUnits = sanitizedPatch?.rode?.units ?? currentAnchor?.rode?.units;
+    if (Number.isFinite(oldDropLat) && Number.isFinite(oldDropLon) && typeof rodeUnits === 'string') {
+      const movedDistanceMeters = calculateDistance(oldDropLat, oldDropLon, boatLatLon.boatLat, boatLatLon.boatLon);
+      const convertedRodeAmount = this._convertMetersToRequestedLengthUnits(movedDistanceMeters, rodeUnits);
+      if (convertedRodeAmount != null) {
+        sanitizedPatch.rode = {
+          ...(currentAnchor?.rode || {}),
+          ...(sanitizedPatch.rode || {}),
+          amount: convertedRodeAmount,
+          units: rodeUnits,
+        };
+      }
+    }
+
+    this._applyCapturedDropAndAnchorPosition({ sanitizedPatch, currentAnchor, boatLatLon, serverNowIso });
+
+    const moveBearingDeg = calculateBearing(oldDropLat, oldDropLon, boatLatLon.boatLat, boatLatLon.boatLon);
+    if (moveBearingDeg == null) {
+      return;
+    }
+
+    const existingBearingUnits = currentAnchor?.anchorDropLocation?.bearing?.units;
+    const writeBearingValue =
+      typeof existingBearingUnits === 'string' && existingBearingUnits.toLowerCase() === 'rad'
+        ? toRad(moveBearingDeg)
+        : moveBearingDeg;
+
+    sanitizedPatch.anchorDropLocation = {
+      ...(currentAnchor?.anchorDropLocation || {}),
+      ...(sanitizedPatch.anchorDropLocation || {}),
+      originalBearing: {
+        ...(currentAnchor?.anchorDropLocation?.originalBearing || {}),
+        value: writeBearingValue,
+      },
+      bearing: {
+        ...(currentAnchor?.anchorDropLocation?.bearing || {}),
+        value: writeBearingValue,
+      },
+    };
+
+    if (Object.prototype.hasOwnProperty.call(sanitizedPatch.anchorDropLocation.originalBearing, 'degrees')) {
+      sanitizedPatch.anchorDropLocation.originalBearing.degrees = moveBearingDeg;
+    }
+    if (Object.prototype.hasOwnProperty.call(sanitizedPatch.anchorDropLocation.bearing, 'degrees')) {
+      sanitizedPatch.anchorDropLocation.bearing.degrees = moveBearingDeg;
     }
   }
 
