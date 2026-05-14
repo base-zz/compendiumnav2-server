@@ -5,6 +5,25 @@
 
 import { calculateBearing, calculateDistance } from './geoUtils.js';
 
+function convertSpeedToKnots(value, units) {
+  if (!Number.isFinite(value)) return null;
+  if (units === 'ms' || units === 'm/s' || units === 'mps') return value * 1.94384; // m/s to knots
+  if (units === 'km/h' || units === 'kmh') return value / 1.852; // km/h to knots
+  return value; // assume knots
+}
+
+function getNormalizedSpeedOverGround(state) {
+  const speedValue = state.navigation?.speedOverGround?.value ?? state.navigation?.speedOverGround;
+  const speedUnits = state.navigation?.speedOverGround?.units ?? 'knots';
+  return convertSpeedToKnots(speedValue, speedUnits);
+}
+
+function getNormalizedWindSpeedApparent(state) {
+  const windSpeedValue = state.environment?.wind?.speedApparent?.value ?? state.environment?.wind?.speedApparent;
+  const windSpeedUnits = state.environment?.wind?.speedApparent?.units ?? 'knots';
+  return convertSpeedToKnots(windSpeedValue, windSpeedUnits);
+}
+
 export const navigationRules = [
   // High Speed Navigation
   {
@@ -13,18 +32,18 @@ export const navigationRules = [
     priority: 'normal',
     dependsOn: ['navigation.speedOverGround'],
     condition: (state) => {
-      const sog = state.navigation?.speedOverGround;
-      return sog && sog > 10; // Knots
+      const sogKnots = getNormalizedSpeedOverGround(state);
+      return sogKnots && sogKnots > 10;
     },
     action: (state) => ({
       type: 'NAVIGATION_STATE',
       state: 'underway',
       subState: 'motoring',
-      speed: state.navigation.speedOverGround,
+      speed: getNormalizedSpeedOverGround(state),
       timestamp: new Date().toISOString()
     })
   },
-  
+
   // Drifting Detection
   {
     name: 'Drifting Detection',
@@ -37,17 +56,17 @@ export const navigationRules = [
       'environment.current'
     ],
     condition: (state) => {
-      const sog = state.navigation?.speedOverGround;
-      const windSpeed = state.environment?.wind?.speedApparent;
-      
+      const sogKnots = getNormalizedSpeedOverGround(state);
+      const windSpeedKnots = getNormalizedWindSpeedApparent(state);
+
       // Considered drifting if speed is low but there's significant wind/current
-      return sog > 0.5 && sog < 2 && windSpeed > 10;
+      return sogKnots > 0.5 && sogKnots < 2 && windSpeedKnots > 10;
     },
     action: (state) => ({
       type: 'NAVIGATION_STATE',
       state: 'drifting',
-      speed: state.navigation.speedOverGround,
-      windSpeed: state.environment.wind.speedApparent,
+      speed: getNormalizedSpeedOverGround(state),
+      windSpeed: getNormalizedWindSpeedApparent(state),
       timestamp: new Date().toISOString()
     })
   },
