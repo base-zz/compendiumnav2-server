@@ -871,7 +871,8 @@ export class StateManager extends EventEmitter {
   }
 
   /**
-   * Receive external state update (e.g. from StateService) while preserving anchor state
+   * Update state with data from an external source (e.g., SignalK)
+   * Preserves locally-authoritative domains (anchor, tides, forecast, bluetooth)
    * @param {Object} newStateData - The new state data from an external source
    */
   receiveExternalStateUpdate(newStateData) {
@@ -882,39 +883,49 @@ export class StateManager extends EventEmitter {
     }
 
     const incomingKeys = Object.keys(newStateData);
-    
-    // Preserve current anchor, tides, forecast, and bluetooth state
-    const currentAnchorState = this.appState.anchor;
-    const currentTidesState = this.appState.tides;
-    const currentForecastState = this.appState.forecast;
-    const currentBluetoothState = this.appState.bluetooth;
-    const currentElectricalState = this.appState?.vessel?.systems?.electrical;
+
+    // Define domains to preserve from external state updates
+    const PRESERVED_DOMAINS = [
+      { path: 'anchor', restore: (state, value) => { state.anchor = value; } },
+      { path: 'tides', restore: (state, value) => { state.tides = value; } },
+      { path: 'forecast', restore: (state, value) => { state.forecast = value; } },
+      { path: 'bluetooth', restore: (state, value) => { state.bluetooth = value; } },
+      {
+        path: 'vessel.systems.electrical',
+        get: (state) => state?.vessel?.systems?.electrical,
+        restore: (state, value) => {
+          if (!state.vessel || typeof state.vessel !== 'object') {
+            state.vessel = {};
+          }
+          if (!state.vessel.systems || typeof state.vessel.systems !== 'object') {
+            state.vessel.systems = {};
+          }
+          state.vessel.systems.electrical = value;
+        },
+        condition: (newState) => !newState?.vessel?.systems?.electrical,
+      },
+    ];
+
+    // Preserve current state for each domain
+    const preservedValues = PRESERVED_DOMAINS.map(domain => {
+      const value = domain.get ? domain.get(this.appState) : this.appState[domain.path];
+      return { domain, value };
+    });
 
     // Replace the state with the new state
     this.appState = this._safeClone(newStateData);
 
     // Restore preserved states
-    if (currentAnchorState) {
-      this.appState.anchor = currentAnchorState;
-    }
-    if (currentTidesState) {
-      this.appState.tides = currentTidesState;
-    }
-    if (currentForecastState) {
-      this.appState.forecast = currentForecastState;
-    }
-    if (currentBluetoothState) {
-      this.appState.bluetooth = currentBluetoothState;
-    }
-    if (currentElectricalState && !this.appState?.vessel?.systems?.electrical) {
-      if (!this.appState.vessel || typeof this.appState.vessel !== 'object') {
-        this.appState.vessel = {};
+    preservedValues.forEach(({ domain, value }) => {
+      if (!value) return;
+
+      // Check conditional restore if defined
+      if (domain.condition && !domain.condition(this.appState)) {
+        return;
       }
-      if (!this.appState.vessel.systems || typeof this.appState.vessel.systems !== 'object') {
-        this.appState.vessel.systems = {};
-      }
-      this.appState.vessel.systems.electrical = currentElectricalState;
-    }
+
+      domain.restore(this.appState, value);
+    });
 
     // Forward aisTargets to the rule engine so AIS proximity rules can evaluate
     if (newStateData.aisTargets && Object.keys(newStateData.aisTargets).length > 0) {
