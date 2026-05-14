@@ -6,7 +6,11 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from fuel_extractor.app.markdown_convert import fetch_full_site_markdown, prune_marina_markdown
+try:
+    from fuel_extractor.app.markdown_convert import fetch_full_site_markdown, prune_marina_markdown
+except ImportError:
+    fetch_full_site_markdown = None
+    prune_marina_markdown = None
 
 
 class PricingWorkerError(Exception):
@@ -132,21 +136,27 @@ def extract_pricing_with_deepseek(
     base_url: str,
     timeout_seconds: int = 45,
     max_pages: int = 20,
+    html_content: str = None,
 ) -> dict[str, Any]:
     """
     Extract pricing data from marina website using DeepSeek v4 via Fireworks.
+    If html_content is provided, use it directly instead of fetching from URL.
     """
     api_key = os.getenv("FIREWORKS_API_KEY")
     if not api_key:
         raise PricingWorkerError("FIREWORKS_API_KEY environment variable not set")
 
-    # 1. Convert entire website to markdown
-    full_markdown = fetch_full_site_markdown(base_url, timeout_seconds, max_pages)
+    # 1. Get content (either from HTML or fetch from URL)
+    if html_content:
+        full_markdown = html_content
+    elif fetch_full_site_markdown is not None:
+        full_markdown = fetch_full_site_markdown(base_url, timeout_seconds, max_pages)
+        # 2. Prune markdown to reduce token count while preserving data-dense content
+        full_markdown = prune_marina_markdown(full_markdown)
+    else:
+        raise PricingWorkerError("html_content not provided and fuel_extractor module not available")
 
-    # 2. Prune markdown to reduce token count while preserving data-dense content
-    full_markdown = prune_marina_markdown(full_markdown)
-
-    # 3. Call Fireworks DeepSeek v4
+    # 2. Call Fireworks DeepSeek v4
     try:
         from fireworks.client import Fireworks
     except ImportError:

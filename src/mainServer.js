@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import http from "http";
+import https from "https";
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
@@ -52,6 +53,7 @@ const startupLog = (...args) => {
 const healthTelemetryLogsEnabled = process.env.HEALTH_TELEMETRY_LOGS === "true";
 let shutdownStarted = false;
 let httpServerInstance = null;
+let httpsServerInstance = null;
 let relayServerInstance = null;
 let directServerInstance = null;
 
@@ -119,9 +121,26 @@ async function closeHttpServer(server) {
     return;
   }
 
-  await new Promise((resolve) => {
-    server.close(() => resolve());
+  return new Promise((resolve) => {
+    server.close(() => {
+      resolve();
+    });
   });
+}
+
+function getHttpsCredentials() {
+  const certDir = process.env.SSL_CERT_DIR || join(dirname(fileURLToPath(import.meta.url)), "..", "ssl");
+  const keyPath = join(certDir, "key.pem");
+  const certPath = join(certDir, "cert.pem");
+
+  if (existsSync(keyPath) && existsSync(certPath)) {
+    return {
+      key: readFileSync(keyPath),
+      cert: readFileSync(certPath),
+    };
+  }
+
+  return null;
 }
 
 async function shutdown(signal) {
@@ -151,6 +170,7 @@ async function shutdown(signal) {
     }
 
     await closeHttpServer(httpServerInstance);
+    await closeHttpServer(httpsServerInstance);
     await serviceManager.stopAll();
     await storageService.close();
 
@@ -672,6 +692,20 @@ async function startServer() {
     const httpServer = http.createServer(app);
     httpServerInstance = httpServer;
 
+    // 6b. Start HTTPS server (dual-stack) if certs exist
+    const HTTPS_PORT = process.env.HTTPS_PORT ? parseInt(process.env.HTTPS_PORT, 10) : 3443;
+    const sslCredentials = getHttpsCredentials();
+    if (sslCredentials) {
+      const httpsServer = https.createServer(sslCredentials, app);
+      httpsServerInstance = httpsServer;
+      httpsServer.listen(HTTPS_PORT, "0.0.0.0", () => {
+        console.log(`[SERVER] HTTPS server listening on port ${HTTPS_PORT}`);
+      });
+    } else {
+      console.log(`[SERVER] HTTPS not started — no certs found at certs/key.pem + certs/cert.pem`);
+      console.log(`[SERVER] To enable HTTPS, generate self-signed certs: openssl req -x509 -newkey rsa:2048 -keyout certs/key.pem -out certs/cert.pem -days 365 -nodes`);
+    }
+
     // Auto-register with VPS on startup if configured
     if (process.env.VPS_AUTO_REGISTER === "true") {
       log("Auto-registration with VPS is enabled");
@@ -715,6 +749,13 @@ async function startServer() {
       console.log(`  - ${host}/api/vps/register - Register with VPS`);
       console.log(`  - ${host}/api/routes/import - Import GPX route`);
       console.log(`  - ${host}/health - Server health check`);
+      if (sslCredentials) {
+        const httpsHost = `https://localhost:${HTTPS_PORT}`;
+        console.log(`[SERVER] API endpoints (HTTPS):`);
+        console.log(`  - ${httpsHost}/api/boat-info - Get boat information`);
+        console.log(`  - ${httpsHost}/api/routes/import - Import GPX route`);
+        console.log(`  - ${httpsHost}/health - Server health check`);
+      }
     });
 
     // 7. Relay state updates to VPS (optional, placeholder for future logic)

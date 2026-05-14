@@ -7,9 +7,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fuel_extractor.app.main import extract_fuel
-from fuel_extractor.app.markdown_convert import fetch_dockwa_fuel_snapshot
-from fuel_extractor.app.schemas import ExtractRequest, ExtractResponse
+try:
+    from fuel_extractor.app.main import extract_fuel
+    from fuel_extractor.app.markdown_convert import fetch_dockwa_fuel_snapshot
+    from fuel_extractor.app.schemas import ExtractRequest, ExtractResponse
+except ImportError:
+    extract_fuel = None
+    fetch_dockwa_fuel_snapshot = None
+    ExtractRequest = None
+    ExtractResponse = None
 
 from .contracts import validate_extractor_output, validate_seed_payload
 from .seed_consumer import mark_seed_status, read_pending_seeds
