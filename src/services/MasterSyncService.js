@@ -204,6 +204,12 @@ export class MasterSyncService extends BaseService {
    * Sync dirty fuel logs to VPS
    */
   async _syncFuelLogs(db) {
+    const tableCheck = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='fuel_logs'").get();
+    if (!tableCheck) {
+      this.log('fuel_logs table does not exist in local database, skipping fuel log sync');
+      return { synced: 0 };
+    }
+
     const dirtyLogs = this._getDirtyRecords(db, "fuel_logs", this.batchSize);
     if (dirtyLogs.length === 0) return { synced: 0 };
 
@@ -236,6 +242,12 @@ export class MasterSyncService extends BaseService {
    * Sync dirty pricing logs to VPS
    */
   async _syncPricingLogs(db) {
+    const tableCheck = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='pricing_logs'").get();
+    if (!tableCheck) {
+      this.log('pricing_logs table does not exist in local database, skipping pricing log sync');
+      return { synced: 0 };
+    }
+
     const dirtyLogs = this._getDirtyRecords(db, "pricing_logs", this.batchSize);
     if (dirtyLogs.length === 0) return { synced: 0 };
 
