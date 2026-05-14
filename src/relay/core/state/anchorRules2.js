@@ -15,13 +15,6 @@ if (!Number.isFinite(ANCHOR_ALERT_DEBOUNCE_MS) || ANCHOR_ALERT_DEBOUNCE_MS < 0) 
   );
 }
 
-const anchorAlertDebounceState = {
-  criticalRangeCandidateSince: null,
-  draggingCandidateSince: null,
-  aisProximityCandidateSince: null,
-  aisProximityClearCandidateSince: null,
-};
-
 function isAnchorMonitoringEnabled(anchorState) {
   if (!anchorState || typeof anchorState !== 'object') return false;
   if (anchorState.anchorDeployed !== true) return false;
@@ -143,7 +136,7 @@ export const anchorRules = [
     name: 'Critical Range Detection',
     description: 'Creates a critical alert when boat exceeds critical anchor range',
     priority: 'high',
-    condition: (state) => {
+    condition: (state, context) => {
       const anchorState = state.anchor || {};
       if (!isAnchorMonitoringEnabled(anchorState)) {
         return false;
@@ -184,17 +177,17 @@ export const anchorRules = [
       const isOutsideCriticalRange = distance > criticalRangeMeters;
 
       if (!isOutsideCriticalRange || hasActiveAlert) {
-        anchorAlertDebounceState.criticalRangeCandidateSince = null;
+        context.anchorDebounceState.criticalRangeCandidateSince = null;
         return false;
       }
 
       const now = Date.now();
-      if (anchorAlertDebounceState.criticalRangeCandidateSince == null) {
-        anchorAlertDebounceState.criticalRangeCandidateSince = now;
+      if (context.anchorDebounceState.criticalRangeCandidateSince == null) {
+        context.anchorDebounceState.criticalRangeCandidateSince = now;
         return false;
       }
 
-      return (now - anchorAlertDebounceState.criticalRangeCandidateSince) >= ANCHOR_ALERT_DEBOUNCE_MS;
+      return (now - context.anchorDebounceState.criticalRangeCandidateSince) >= ANCHOR_ALERT_DEBOUNCE_MS;
     },
     action: (state) => {
       const anchorState = state.anchor || {};
@@ -250,7 +243,7 @@ export const anchorRules = [
     name: 'Anchor Dragging Detection',
     description: 'Creates a critical alert when distance from drop exceeds critical range + buffer',
     priority: 'high',
-    condition: (state) => {
+    condition: (state, context) => {
       const anchorState = state.anchor || {};
       if (!isAnchorMonitoringEnabled(anchorState)) {
         return false;
@@ -263,19 +256,19 @@ export const anchorRules = [
       );
 
       if (!isDragging || hasActiveAlert) {
-        anchorAlertDebounceState.draggingCandidateSince = null;
+        context.anchorDebounceState.draggingCandidateSince = null;
         return false;
       }
 
       const now = Date.now();
-      if (anchorAlertDebounceState.draggingCandidateSince == null) {
-        anchorAlertDebounceState.draggingCandidateSince = now;
+      if (context.anchorDebounceState.draggingCandidateSince == null) {
+        context.anchorDebounceState.draggingCandidateSince = now;
         return false;
       }
 
-      return (now - anchorAlertDebounceState.draggingCandidateSince) >= ANCHOR_ALERT_DEBOUNCE_MS;
+      return (now - context.anchorDebounceState.draggingCandidateSince) >= ANCHOR_ALERT_DEBOUNCE_MS;
     },
-    action: (state) => {
+    action: (state, context) => {
       const anchorState = state.anchor || {};
 
       const filteredBoatPosition = anchorState.filteredBoatPosition?.position;
@@ -318,7 +311,7 @@ export const anchorRules = [
         anchorLon
       );
 
-      anchorAlertDebounceState.draggingCandidateSince = null;
+      context.anchorDebounceState.draggingCandidateSince = null;
 
       return {
         type: 'CREATE_ALERT',
@@ -345,12 +338,112 @@ export const anchorRules = [
     },
   },
 
+  // Anchor Dragging Reset (server-side alert via AlertService)
+  {
+    name: 'Anchor Dragging Reset',
+    description: 'Creates a critical alert when anchor is no longer dragging',
+    priority: 'high',
+    condition: (state, context) => {
+      const anchorState = state.anchor || {};
+      if (!isAnchorMonitoringEnabled(anchorState)) {
+        return false;
+      }
+
+      const isDragging = anchorState.dragging === true;
+
+      const hasActiveAlert = state.alerts?.active?.some(
+        (alert) => alert.trigger === 'anchor_dragging' && !alert.acknowledged
+      );
+
+      if (isDragging || !hasActiveAlert) {
+        context.anchorDebounceState.draggingResetCandidateSince = null;
+        return false;
+      }
+
+      const now = Date.now();
+      if (context.anchorDebounceState.draggingResetCandidateSince == null) {
+        context.anchorDebounceState.draggingResetCandidateSince = now;
+        return false;
+      }
+
+      return (now - context.anchorDebounceState.draggingResetCandidateSince) >= ANCHOR_ALERT_DEBOUNCE_MS;
+    },
+    action: (state, context) => {
+      const anchorState = state.anchor || {};
+
+      const filteredBoatPosition = anchorState.filteredBoatPosition?.position;
+      const boatLat = typeof filteredBoatPosition?.latitude === 'object'
+        ? filteredBoatPosition.latitude?.value
+        : filteredBoatPosition?.latitude;
+      const boatLon = typeof filteredBoatPosition?.longitude === 'object'
+        ? filteredBoatPosition.longitude?.value
+        : filteredBoatPosition?.longitude;
+
+      const dropPosition = anchorState.anchorDropLocation?.position;
+      const anchorPosition = anchorState.anchorLocation?.position;
+      const criticalRangeValue = anchorState.criticalRange?.r;
+      const criticalRangeUnits = anchorState.criticalRange?.units;
+      const criticalRangeMeters = convertDistanceToMeters(criticalRangeValue, criticalRangeUnits);
+      const unitLabel = criticalRangeUnits;
+
+      const dropLat = typeof dropPosition.latitude === 'object' ? dropPosition.latitude?.value : dropPosition.latitude;
+      const dropLon = typeof dropPosition.longitude === 'object' ? dropPosition.longitude?.value : dropPosition.longitude;
+      const anchorLat = typeof anchorPosition.latitude === 'object' ? anchorPosition.latitude?.value : anchorPosition.latitude;
+      const anchorLon = typeof anchorPosition.longitude === 'object' ? anchorPosition.longitude?.value : anchorPosition.longitude;
+
+      if (boatLat == null || boatLon == null || dropLat == null || dropLon == null || anchorLat == null || anchorLon == null) {
+        return null;
+      }
+
+      const distanceBoatFromDrop = calculateDistance(
+        boatLat,
+        boatLon,
+        dropLat,
+        dropLon
+      );
+
+      const distanceInRangeUnits = convertDistanceFromMeters(distanceBoatFromDrop, criticalRangeUnits);
+
+      const drift = calculateDistance(
+        dropLat,
+        dropLon,
+        anchorLat,
+        anchorLon
+      );
+
+      context.anchorDebounceState.draggingResetCandidateSince = null;
+
+      return {
+        type: 'CREATE_ALERT',
+        data: {
+          type: 'system',
+          category: 'anchor',
+          source: 'anchor_monitor',
+          level: 'info',
+          label: 'Anchor Dragging Reset',
+          message: `Anchor is no longer dragging! Distance from drop (${Math.round(
+            distanceInRangeUnits
+          )} ${unitLabel}) is within critical range (${criticalRangeValue} ${unitLabel}).`,
+          trigger: 'anchor_dragging_reset',
+          data: {
+            distance: Math.round(distanceInRangeUnits),
+            criticalRange: criticalRangeValue,
+            criticalRangeMeters,
+            drift: Math.round(drift),
+            units: unitLabel,
+          },
+          autoResolvable: false,
+        },
+      };
+    },
+  },
+
   // AIS Proximity Detection (server-side AIS proximity alert)
   {
     name: 'AIS Proximity Detection',
     description: 'Creates an alert when AIS targets are within warning radius of the boat',
     priority: 'high',
-    condition: (state) => {
+    condition: (state, context) => {
       const anchorState = state.anchor || {};
       
       if (!isAnchorMonitoringEnabled(anchorState)) {
@@ -424,7 +517,7 @@ export const anchorRules = [
 
       const shouldTrigger = newVesselsNeedingAlerts.length > 0;
       if (!shouldTrigger) {
-        if (anchorAlertDebounceState.aisProximityCandidateSince != null) {
+        if (context.anchorDebounceState.aisProximityCandidateSince != null) {
           logAisDiagnostics('[AIS Proximity Detection][diagnostics] candidate reset: no new vessels in range %o', {
             selfMmsi,
             boatLat,
@@ -437,13 +530,13 @@ export const anchorRules = [
             targetDiagnostics,
           });
         }
-        anchorAlertDebounceState.aisProximityCandidateSince = null;
+        context.anchorDebounceState.aisProximityCandidateSince = null;
         return false;
       }
 
       const now = Date.now();
-      if (anchorAlertDebounceState.aisProximityCandidateSince == null) {
-        anchorAlertDebounceState.aisProximityCandidateSince = now;
+      if (context.anchorDebounceState.aisProximityCandidateSince == null) {
+        context.anchorDebounceState.aisProximityCandidateSince = now;
         logAisDiagnostics('[AIS Proximity Detection][diagnostics] trigger candidate started %o', {
           selfMmsi,
           boatLat,
@@ -470,12 +563,12 @@ export const anchorRules = [
         existingAlertMMSIs,
         newVesselsNeedingAlerts,
         targetDiagnostics,
-        debounceMs: now - anchorAlertDebounceState.aisProximityCandidateSince,
+        debounceMs: now - context.anchorDebounceState.aisProximityCandidateSince,
       });
 
-      return (now - anchorAlertDebounceState.aisProximityCandidateSince) >= ANCHOR_ALERT_DEBOUNCE_MS;
+      return (now - context.anchorDebounceState.aisProximityCandidateSince) >= ANCHOR_ALERT_DEBOUNCE_MS;
     },
-    action: (state) => {
+    action: (state, context) => {
       const anchorState = state.anchor || {};
       const selfMmsi = normalizeMmsi(state?.vessel?.info?.mmsi);
       const aisTargetsArray = Array.isArray(state.ais?.targets)
@@ -526,7 +619,7 @@ export const anchorRules = [
         return null;
       }
 
-      anchorAlertDebounceState.aisProximityCandidateSince = null;
+      context.anchorDebounceState.aisProximityCandidateSince = null;
 
       const newVesselMMSIs = newVesselsNeedingAlerts.map(v => v.mmsi);
 
@@ -560,7 +653,7 @@ export const anchorRules = [
     name: 'AIS Proximity Resolution',
     description: 'Resolves AIS proximity alert when no targets are within warning radius',
     priority: 'high',
-    condition: (state) => {
+    condition: (state, context) => {
       const hasActiveAlerts = state.alerts?.active?.some(
         (alert) =>
           alert.trigger === 'ais_proximity' &&
@@ -586,7 +679,7 @@ export const anchorRules = [
       const boatLon = boatPosition?.lon;
 
       if (!hasActiveAlerts || !Number.isFinite(warningRadiusMeters) || boatLat == null || boatLon == null || !aisTargetsArray.length) {
-        if (anchorAlertDebounceState.aisProximityClearCandidateSince != null) {
+        if (context.anchorDebounceState.aisProximityClearCandidateSince != null) {
           logAisDiagnostics('[AIS Proximity Resolution][diagnostics] clear candidate reset: prerequisites missing %o', {
             selfMmsi,
             hasActiveAlerts,
@@ -598,7 +691,7 @@ export const anchorRules = [
             aisTargetsCount: aisTargetsArray.length,
           });
         }
-        anchorAlertDebounceState.aisProximityClearCandidateSince = null;
+        context.anchorDebounceState.aisProximityClearCandidateSince = null;
         return false;
       }
 
@@ -622,13 +715,13 @@ export const anchorRules = [
         if (target.position.latitude == null || target.position.longitude == null ||
             isNaN(target.position.latitude) || isNaN(target.position.longitude) ||
             Math.abs(target.position.latitude) > 90 || Math.abs(target.position.longitude) > 180) {
-          return {
-            mmsi: targetMmsi,
-            latitude: target.position.latitude,
-            longitude: target.position.longitude,
-            ignoredReason: 'invalid_position',
-            inRange: false,
-          };
+            return {
+              mmsi: targetMmsi,
+              latitude: target.position.latitude,
+              longitude: target.position.longitude,
+              ignoredReason: 'invalid_position',
+              inRange: false,
+            };
         }
 
         const distanceMeters = calculateDistance(
@@ -650,7 +743,7 @@ export const anchorRules = [
       const targetsInRange = resolveTargetDiagnostics.filter((target) => target.inRange);
 
       if (targetsInRange.length > 0) {
-        if (anchorAlertDebounceState.aisProximityClearCandidateSince != null) {
+        if (context.anchorDebounceState.aisProximityClearCandidateSince != null) {
           logAisDiagnostics('[AIS Proximity Resolution][diagnostics] clear candidate reset: targets still in range %o', {
             selfMmsi,
             boatLat,
@@ -662,13 +755,13 @@ export const anchorRules = [
             resolveTargetDiagnostics,
           });
         }
-        anchorAlertDebounceState.aisProximityClearCandidateSince = null;
+        context.anchorDebounceState.aisProximityClearCandidateSince = null;
         return false;
       }
 
       const now = Date.now();
-      if (anchorAlertDebounceState.aisProximityClearCandidateSince == null) {
-        anchorAlertDebounceState.aisProximityClearCandidateSince = now;
+      if (context.anchorDebounceState.aisProximityClearCandidateSince == null) {
+        context.anchorDebounceState.aisProximityClearCandidateSince = now;
         logAisDiagnostics('[AIS Proximity Resolution][diagnostics] clear candidate started %o', {
           selfMmsi,
           boatLat,
@@ -689,17 +782,17 @@ export const anchorRules = [
         warningRadiusUnits,
         warningRadiusMeters,
         resolveTargetDiagnostics,
-        debounceMs: now - anchorAlertDebounceState.aisProximityClearCandidateSince,
+        debounceMs: now - context.anchorDebounceState.aisProximityClearCandidateSince,
       });
 
-      return (now - anchorAlertDebounceState.aisProximityClearCandidateSince) >= ANCHOR_ALERT_DEBOUNCE_MS;
+      return (now - context.anchorDebounceState.aisProximityClearCandidateSince) >= ANCHOR_ALERT_DEBOUNCE_MS;
     },
-    action: (state) => {
+    action: (state, context) => {
       const anchorState = state.anchor || {};
       const warningRadiusValue = anchorState.warningRange?.r;
       const warningRadiusUnits = anchorState.warningRange?.units;
 
-      anchorAlertDebounceState.aisProximityClearCandidateSince = null;
+      context.anchorDebounceState.aisProximityClearCandidateSince = null;
 
       return {
         type: 'RESOLVE_ALERT',

@@ -43,6 +43,15 @@ export class RuleEngine2 extends EventEmitter {
       lastEvalTime: 0
     };
 
+    // Per-engine debounce state for anchor rules
+    this.anchorDebounceState = {
+      criticalRangeCandidateSince: null,
+      draggingCandidateSince: null,
+      draggingResetCandidateSince: null,
+      aisProximityCandidateSince: null,
+      aisProximityClearCandidateSince: null,
+    };
+
     // Create debounced evaluation function
     this.debouncedEvaluate = debounce(
       (evalContext) => this.evaluateFromCache(evalContext),
@@ -195,7 +204,7 @@ export class RuleEngine2 extends EventEmitter {
     
     // Evaluate each rule
     const actions = [];
-    const context = { state, source };
+    const context = { state, source, anchorDebounceState: this.anchorDebounceState, previousState: evalContext.previousState };
 
     // Sort rules by priority
     const sortedRules = [...rules].sort((a, b) => {
@@ -299,6 +308,13 @@ export class RuleEngine2 extends EventEmitter {
       rulesTriggered: 0,
       avgEvalTime: 0,
       lastEvalTime: 0
+    };
+    this.anchorDebounceState = {
+      criticalRangeCandidateSince: null,
+      draggingCandidateSince: null,
+      draggingResetCandidateSince: null,
+      aisProximityCandidateSince: null,
+      aisProximityClearCandidateSince: null,
     };
   }
 }
