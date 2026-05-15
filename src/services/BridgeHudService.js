@@ -1,9 +1,13 @@
 import BaseService from "./BaseService.js";
 import { getStateManager } from "../relay/core/state/StateManager.js";
-import Database from 'better-sqlite3';
-import { parseGPXRoute, calculateRouteDistances, findClosestRoutePoint } from '../bridges/gpx-route-parser.js';
-import { queryBridgesAlongRoute } from '../bridges/route-queries.js';
-import { NexusTideService } from '../bridges/nexus-tide-service.js';
+import Database from "better-sqlite3";
+import {
+  parseGPXRoute,
+  calculateRouteDistances,
+  findClosestRoutePoint,
+} from "../bridges/gpx-route-parser.js";
+import { queryBridgesAlongRoute } from "../bridges/route-queries.js";
+import { NexusTideService } from "../bridges/nexus-tide-service.js";
 import storageService from "../bluetooth/services/storage/storageService.js";
 
 /**
@@ -21,9 +25,10 @@ export class BridgeHudService extends BaseService {
 
     this.boatId = options.boatId || "unknown";
     this.dbPath = options.dbPath;
-    
+
     // SpatiaLite extension path
-    this.spatiaLitePath = options.spatiaLitePath || '/usr/lib/aarch64-linux-gnu/mod_spatialite.so';
+    this.spatiaLitePath =
+      options.spatiaLitePath || "/usr/lib/aarch64-linux-gnu/mod_spatialite.so";
 
     // User configuration (fetched from storage)
     this._storageService = storageService;
@@ -46,7 +51,7 @@ export class BridgeHudService extends BaseService {
       position: null,
       sog: null,
       cog: null,
-      lastBridgeCheck: null
+      lastBridgeCheck: null,
     };
 
     this._lastHeaderData = null;
@@ -82,8 +87,11 @@ export class BridgeHudService extends BaseService {
     await super.start();
 
     // Do heavy initialization asynchronously
-    this._initializeAsync().catch(err => {
-      console.error('[BridgeHudService] Background initialization failed:', err);
+    this._initializeAsync().catch((err) => {
+      console.error(
+        "[BridgeHudService] Background initialization failed:",
+        err,
+      );
     });
   }
 
@@ -102,7 +110,7 @@ export class BridgeHudService extends BaseService {
       this._tideService = new NexusTideService({
         dbPath: this.dbPath,
         spatialitePath: this.spatiaLitePath,
-        requestTimeoutMs: 10000
+        requestTimeoutMs: 10000,
       });
 
       this._activeRouteHandler = (event) => {
@@ -115,7 +123,7 @@ export class BridgeHudService extends BaseService {
         this._seedBoatState();
       }
     } catch (err) {
-      console.error('[BridgeHudService] Initialization failed:', err);
+      console.error("[BridgeHudService] Initialization failed:", err);
       throw err;
     }
   }
@@ -221,9 +229,9 @@ export class BridgeHudService extends BaseService {
     let navigationUpdated = false;
 
     for (const patch of patchData) {
-      if (patch.path.startsWith('/position/')) {
+      if (patch.path.startsWith("/position/")) {
         positionUpdated = true;
-      } else if (patch.path.startsWith('/navigation/')) {
+      } else if (patch.path.startsWith("/navigation/")) {
         navigationUpdated = true;
       }
     }
@@ -260,7 +268,11 @@ export class BridgeHudService extends BaseService {
       // Try to find a position source (signalk, gps, etc.)
       const sources = Object.keys(position);
       for (const source of sources) {
-        if (position[source] && position[source].latitude !== undefined && position[source].longitude !== undefined) {
+        if (
+          position[source] &&
+          position[source].latitude !== undefined &&
+          position[source].longitude !== undefined
+        ) {
           positionSource = position[source];
           break;
         }
@@ -268,12 +280,14 @@ export class BridgeHudService extends BaseService {
     }
 
     if (positionSource) {
-      const latitude = typeof positionSource.latitude === 'number'
-        ? positionSource.latitude
-        : positionSource.latitude?.value;
-      const longitude = typeof positionSource.longitude === 'number'
-        ? positionSource.longitude
-        : positionSource.longitude?.value;
+      const latitude =
+        typeof positionSource.latitude === "number"
+          ? positionSource.latitude
+          : positionSource.latitude?.value;
+      const longitude =
+        typeof positionSource.longitude === "number"
+          ? positionSource.longitude
+          : positionSource.longitude?.value;
 
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
         return;
@@ -282,7 +296,7 @@ export class BridgeHudService extends BaseService {
       this._boatState.position = {
         latitude,
         longitude,
-        heading: positionSource.heading || null
+        heading: positionSource.heading || null,
       };
       this._boatState.sog = navigation?.speed?.sog?.value;
       this._boatState.cog = navigation?.course?.cog?.value;
@@ -291,7 +305,10 @@ export class BridgeHudService extends BaseService {
 
       // Bridge lookup is rate-limited to avoid repeated expensive spatial queries.
       const now = Date.now();
-      if (!this._boatState.lastBridgeCheck || (now - this._boatState.lastBridgeCheck) > 1000) {
+      if (
+        !this._boatState.lastBridgeCheck ||
+        now - this._boatState.lastBridgeCheck > 1000
+      ) {
         this._boatState.lastBridgeCheck = now;
         this._findAndPublishNextBridge();
       }
@@ -305,10 +322,12 @@ export class BridgeHudService extends BaseService {
       // Load SpatiaLite extension
       try {
         this._db.loadExtension(this.spatiaLitePath);
-        
+
         // Initialize spatial metadata only if not already present
         try {
-          const checkTable = this._db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='spatial_ref_sys'`);
+          const checkTable = this._db.prepare(
+            `SELECT name FROM sqlite_master WHERE type='table' AND name='spatial_ref_sys'`,
+          );
           const tableExists = checkTable.get();
           if (!tableExists) {
             this._db.exec(`SELECT InitSpatialMetaData(1);`);
@@ -317,7 +336,10 @@ export class BridgeHudService extends BaseService {
           // Ignore errors - metadata may already exist
         }
       } catch (_err) {
-        console.warn('[BridgeHudService] SpatiaLite not available:', _err.message);
+        console.warn(
+          "[BridgeHudService] SpatiaLite not available:",
+          _err.message,
+        );
       }
     } catch (err) {
       throw new Error(`Failed to initialize database: ${err.message}`);
@@ -327,27 +349,32 @@ export class BridgeHudService extends BaseService {
   async _fetchUserConfig() {
     try {
       await this._storageService.initialize();
-      
+
       // Fetch bridge settings from storage
-      const safeAirDraft = await this._storageService.getSetting('bridgeSafeAirDraft');
+      const safeAirDraft =
+        await this._storageService.getSetting("bridgeSafeAirDraft");
       if (safeAirDraft !== undefined && safeAirDraft !== null) {
         this._safeAirDraft = parseFloat(safeAirDraft);
       }
 
-      const topSpeed = await this._storageService.getSetting('bridgeTopSpeed');
+      const topSpeed = await this._storageService.getSetting("bridgeTopSpeed");
       if (topSpeed !== undefined && topSpeed !== null) {
         this._topSpeed = parseFloat(topSpeed);
       }
 
       // Fetch active route from storage
-      const activeRouteId = await this._storageService.getSetting('activeRouteId');
+      const activeRouteId =
+        await this._storageService.getSetting("activeRouteId");
       if (activeRouteId) {
         this._activeRouteId = activeRouteId;
 
         // Fetch the route data
-        const importedRoutes = await this._storageService.getSetting('importedRoutes');
+        const importedRoutes =
+          await this._storageService.getSetting("importedRoutes");
         if (Array.isArray(importedRoutes)) {
-          const activeRoute = importedRoutes.find(r => r.routeId === activeRouteId);
+          const activeRoute = importedRoutes.find(
+            (r) => r.routeId === activeRouteId,
+          );
           if (activeRoute && activeRoute.gpxData) {
             this._routeGpxData = activeRoute.gpxData;
           } else {
@@ -365,7 +392,10 @@ export class BridgeHudService extends BaseService {
         this._routePoints = [];
       }
     } catch (err) {
-      console.warn('[BridgeHudService] Failed to fetch user config from storage:', err.message);
+      console.warn(
+        "[BridgeHudService] Failed to fetch user config from storage:",
+        err.message,
+      );
     }
   }
 
@@ -374,9 +404,9 @@ export class BridgeHudService extends BaseService {
       if (this._routeGpxData) {
         // Parse GPX data directly from string (parseGPXRoute expects a file path, need to adapt)
         // For now, write to temp file and parse
-        const fs = await import('fs');
-        const path = await import('path');
-        const os = await import('os');
+        const fs = await import("fs");
+        const path = await import("path");
+        const os = await import("os");
         const tempDir = os.tmpdir();
         const tempFile = path.join(tempDir, `route-${Date.now()}.gpx`);
         fs.writeFileSync(tempFile, this._routeGpxData);
@@ -387,12 +417,14 @@ export class BridgeHudService extends BaseService {
         // Clean up temp file
         fs.unlinkSync(tempFile);
       } else {
-        console.warn('[BridgeHudService] No GPX data available from storage, clearing route data');
+        console.warn(
+          "[BridgeHudService] No GPX data available from storage, clearing route data",
+        );
         this._routePoints = [];
         this._routeWithDistances = [];
       }
     } catch (_err) {
-      console.error('[BridgeHudService] Failed to load route:', _err.message);
+      console.error("[BridgeHudService] Failed to load route:", _err.message);
       this._routePoints = [];
       this._routeWithDistances = [];
     }
@@ -406,7 +438,7 @@ export class BridgeHudService extends BaseService {
       sog: this._boatState.sog,
       cog: this._boatState.cog,
       depth: depthValue,
-      wind: windValue
+      wind: windValue,
     };
 
     // Skip identical payloads to reduce state churn/log/transport overhead.
@@ -424,16 +456,14 @@ export class BridgeHudService extends BaseService {
 
     const headerData = {
       ...nextHeaderData,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
 
-    this._stateManager.emit('state:patch', {
-      type: 'state:patch',
-      data: [
-        { op: 'replace', path: '/bridges/hud/header', value: headerData }
-      ],
-      source: 'bridge-hud',
-      timestamp: Date.now()
+    this._stateManager.emit("state:patch", {
+      type: "state:patch",
+      data: [{ op: "replace", path: "/bridges/hud/header", value: headerData }],
+      source: "bridge-hud",
+      timestamp: Date.now(),
     });
   }
 
@@ -458,31 +488,32 @@ export class BridgeHudService extends BaseService {
 
   async _findNextBridgeOnRoute(boatLat, boatLon, maxDistanceFromRoute = 2) {
     // Find closest point on route to boat
-    const closest = findClosestRoutePoint(this._routeWithDistances, boatLat, boatLon);
-    
+    const closest = findClosestRoutePoint(
+      this._routeWithDistances,
+      boatLat,
+      boatLon,
+    );
+
     if (closest.distanceNM > maxDistanceFromRoute) {
       return null;
     }
-    
+
     // Use route-queries module to find bridges along route
     // Since we already have the route loaded in memory, we can use the route points directly
     // queryBridgesAlongRoute expects a file path, so we'll need to write temp file
-    const fs = await import('fs');
-    const path = await import('path');
-    const os = await import('os');
+    const fs = await import("fs");
+    const path = await import("path");
+    const os = await import("os");
     const tempDir = os.tmpdir();
     const tempFile = path.join(tempDir, `route-query-${Date.now()}.gpx`);
 
     try {
-      fs.writeFileSync(tempFile, this._routeGpxData || '');
+      fs.writeFileSync(tempFile, this._routeGpxData || "");
 
-      const bridgesAhead = await queryBridgesAlongRoute(
-        tempFile,
-        {
-          dbPath: this.dbPath,
-          maxDistanceNM: 2
-        }
-      );
+      const bridgesAhead = await queryBridgesAlongRoute(tempFile, {
+        dbPath: this.dbPath,
+        maxDistanceNM: 2,
+      });
 
       // Clean up temp file
       fs.unlinkSync(tempFile);
@@ -500,7 +531,10 @@ export class BridgeHudService extends BaseService {
       }
       return bridge;
     } catch (_err) {
-      console.error('[BridgeHudService] Error finding bridges on route:', _err.message);
+      console.error(
+        "[BridgeHudService] Error finding bridges on route:",
+        _err.message,
+      );
       // Clean up temp file if it exists
       try {
         fs.unlinkSync(tempFile);
@@ -511,9 +545,11 @@ export class BridgeHudService extends BaseService {
     }
   }
 
-async _publishNextBridge(bridge) {
+  async _publishNextBridge(bridge) {
     if (!bridge) {
-      console.warn('[BridgeHudService] Cannot publish next bridge - bridge is null/undefined');
+      console.warn(
+        "[BridgeHudService] Cannot publish next bridge - bridge is null/undefined",
+      );
       return;
     }
 
@@ -521,19 +557,34 @@ async _publishNextBridge(bridge) {
     let tideData = null;
     if (bridge.latitude !== undefined && bridge.longitude !== undefined) {
       try {
-        tideData = await this._tideService.getEnvironmentalData(bridge.latitude, bridge.longitude);
+        tideData = await this._tideService.getEnvironmentalData(
+          bridge.latitude,
+          bridge.longitude,
+        );
       } catch (err) {
-        console.warn('[BridgeHudService] Failed to get tide data:', err.message);
+        console.warn(
+          "[BridgeHudService] Failed to get tide data:",
+          err.message,
+        );
       }
     } else {
-      console.warn('[BridgeHudService] Bridge missing latitude/longitude, skipping tide data');
+      console.warn(
+        "[BridgeHudService] Bridge missing latitude/longitude, skipping tide data",
+      );
     }
 
     // Calculate dynamic clearance
     let dynamicClearance = null;
     let clearanceMargin = null;
 
-    if (tideData && tideData.tide && 'height' in tideData.tide && typeof tideData.tide.height === 'number' && bridge.closed_height_mhw !== undefined && this._safeAirDraft !== undefined) {
+    if (
+      tideData &&
+      tideData.tide &&
+      "height" in tideData.tide &&
+      typeof tideData.tide.height === "number" &&
+      bridge.closed_height_mhw !== undefined &&
+      this._safeAirDraft !== undefined
+    ) {
       dynamicClearance = bridge.closed_height_mhw - tideData.tide.height;
       clearanceMargin = dynamicClearance - this._safeAirDraft;
     }
@@ -541,22 +592,38 @@ async _publishNextBridge(bridge) {
     // Calculate time to arrival
     let timeToArrivalMinutes = null;
     const boatSOG = this._boatState.sog;
-    if (bridge.distance_along_route_nm !== undefined && bridge.distance_along_route_nm !== null) {
-      const boatClosest = findClosestRoutePoint(this._routeWithDistances, this._boatState.position.latitude, this._boatState.position.longitude);
-      if (boatClosest && bridge.distance_along_route_nm > boatClosest.distanceFromStart) {
-        const distanceToBridge = bridge.distance_along_route_nm - boatClosest.distanceFromStart;
+    if (
+      bridge.distance_along_route_nm !== undefined &&
+      bridge.distance_along_route_nm !== null
+    ) {
+      const boatClosest = findClosestRoutePoint(
+        this._routeWithDistances,
+        this._boatState.position.latitude,
+        this._boatState.position.longitude,
+      );
+      if (
+        boatClosest &&
+        bridge.distance_along_route_nm > boatClosest.distanceFromStart
+      ) {
+        const distanceToBridge =
+          bridge.distance_along_route_nm - boatClosest.distanceFromStart;
 
         if (distanceToBridge === null || distanceToBridge === undefined) {
           timeToArrivalMinutes = null;
-        } else if (boatSOG === 0) {
+        } else if (!boatSOG || boatSOG === 0) {
           timeToArrivalMinutes = Infinity;
-        } else if (Number.isFinite(boatSOG) && Number.isFinite(distanceToBridge)) {
+        } else if (
+          Number.isFinite(boatSOG) &&
+          Number.isFinite(distanceToBridge)
+        ) {
           timeToArrivalMinutes = (distanceToBridge / boatSOG) * 60;
         } else {
           timeToArrivalMinutes = null;
         }
-
-      } else if (boatClosest && bridge.distance_along_route_nm <= boatClosest.distanceFromStart) {
+      } else if (
+        boatClosest &&
+        bridge.distance_along_route_nm <= boatClosest.distanceFromStart
+      ) {
         // Already past the bridge along route
         timeToArrivalMinutes = 0;
       }
@@ -564,76 +631,100 @@ async _publishNextBridge(bridge) {
 
     const nextBridgeData = {
       id: bridge.external_id || null,
-      name: bridge.name || 'Unknown Bridge',
+      name: bridge.name || "Unknown Bridge",
       latitude: bridge.latitude !== undefined ? bridge.latitude : null,
       longitude: bridge.longitude !== undefined ? bridge.longitude : null,
       distance_nm: bridge.distance_nm !== undefined ? bridge.distance_nm : null,
-      distance_along_route_nm: bridge.distance_along_route_nm !== undefined ? bridge.distance_along_route_nm : null,
+      distance_along_route_nm:
+        bridge.distance_along_route_nm !== undefined
+          ? bridge.distance_along_route_nm
+          : null,
       time_to_arrival_minutes: timeToArrivalMinutes,
-      charted_clearance_ft: bridge.closed_height_mhw !== undefined ? bridge.closed_height_mhw : null,
+      charted_clearance_ft:
+        bridge.closed_height_mhw !== undefined
+          ? bridge.closed_height_mhw
+          : null,
       dynamic_clearance_ft: dynamicClearance,
       clearance_margin_ft: clearanceMargin,
       schedule_type: bridge.schedule_type || null,
       vhf_channel: bridge.vhf_channel || null,
       tier: bridge.tier || null,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
 
     // Add schedule-specific data
-    if (bridge.schedule_type === 'SCHEDULED' && bridge.opening_intervals) {
+    if (bridge.schedule_type === "SCHEDULED" && bridge.opening_intervals) {
       nextBridgeData.opening_intervals = bridge.opening_intervals;
       try {
         nextBridgeData.next_opening = this._calculateNextOpening(bridge);
       } catch (err) {
-        console.warn('[BridgeHudService] Failed to calculate next opening:', err.message);
+        console.warn(
+          "[BridgeHudService] Failed to calculate next opening:",
+          err.message,
+        );
       }
-    } else if (bridge.schedule_type === 'ON_DEMAND') {
+    } else if (bridge.schedule_type === "ON_DEMAND") {
       nextBridgeData.on_demand = true;
-      nextBridgeData.should_hail = bridge.distance_nm !== undefined && bridge.distance_nm <= 1.0;
-    } else if (bridge.schedule_type === 'FIXED') {
+      nextBridgeData.should_hail =
+        bridge.distance_nm !== undefined && bridge.distance_nm <= 1.0;
+    } else if (bridge.schedule_type === "FIXED") {
       nextBridgeData.fixed = true;
-      if (bridge.closed_height_mhw !== undefined && this._safeAirDraft !== undefined) {
-        nextBridgeData.can_pass_closed = bridge.closed_height_mhw >= this._safeAirDraft;
+      if (
+        bridge.closed_height_mhw !== undefined &&
+        this._safeAirDraft !== undefined
+      ) {
+        nextBridgeData.can_pass_closed =
+          bridge.closed_height_mhw >= this._safeAirDraft;
       }
     }
 
-    this._stateManager.emit('state:patch', {
-      type: 'state:patch',
+    this._stateManager.emit("state:patch", {
+      type: "state:patch",
       data: [
-        { op: 'replace', path: '/bridges/hud/nextBridge', value: nextBridgeData }
+        {
+          op: "replace",
+          path: "/bridges/hud/nextBridge",
+          value: nextBridgeData,
+        },
       ],
-      source: 'bridge-hud',
-      timestamp: Date.now()
+      source: "bridge-hud",
+      timestamp: Date.now(),
     });
 
     // Update alert for this bridge (add or remove based on clearance)
     if (bridge.external_id) {
       this._updateBridgeAlert(bridge, clearanceMargin, dynamicClearance);
     } else {
-      console.warn('[BridgeHudService] Cannot update alert - bridge missing external_id');
+      console.warn(
+        "[BridgeHudService] Cannot update alert - bridge missing external_id",
+      );
     }
   }
 
   _updateBridgeAlert(bridge, clearanceMargin, dynamicClearance) {
     if (!bridge.external_id) {
-      console.warn('[BridgeHudService] Cannot update alert - bridge missing external_id');
+      console.warn(
+        "[BridgeHudService] Cannot update alert - bridge missing external_id",
+      );
       return;
     }
 
-    const alertIndex = this._activeAlerts.findIndex(a => a.bridge_id === bridge.external_id);
+    const alertIndex = this._activeAlerts.findIndex(
+      (a) => a.bridge_id === bridge.external_id,
+    );
     const hasLowClearance = clearanceMargin !== null && clearanceMargin < 5;
 
     if (hasLowClearance && dynamicClearance !== null) {
-      const bridgeName = bridge.name || 'Unknown Bridge';
+      const bridgeName = bridge.name || "Unknown Bridge";
       const alertData = {
-        type: 'CLEARANCE_WARNING',
+        type: "CLEARANCE_WARNING",
         message: `Low clearance at ${bridgeName}: ${dynamicClearance.toFixed(1)}ft (margin: ${clearanceMargin.toFixed(1)}ft)`,
-        severity: clearanceMargin < 0 ? 'CRITICAL' : 'WARNING',
+        severity: clearanceMargin < 0 ? "CRITICAL" : "WARNING",
         bridge_id: bridge.external_id,
         bridge_name: bridgeName,
         bridge_latitude: bridge.latitude,
         bridge_longitude: bridge.longitude,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       if (alertIndex >= 0) {
@@ -653,13 +744,17 @@ async _publishNextBridge(bridge) {
   }
 
   _publishAlerts() {
-    this._stateManager.emit('state:patch', {
-      type: 'state:patch',
+    this._stateManager.emit("state:patch", {
+      type: "state:patch",
       data: [
-        { op: 'replace', path: '/bridges/hud/alerts', value: [...this._activeAlerts] }
+        {
+          op: "replace",
+          path: "/bridges/hud/alerts",
+          value: [...this._activeAlerts],
+        },
       ],
-      source: 'bridge-hud',
-      timestamp: Date.now()
+      source: "bridge-hud",
+      timestamp: Date.now(),
     });
   }
 
@@ -670,12 +765,15 @@ async _publishNextBridge(bridge) {
 
     const now = new Date();
     let intervals;
-    
+
     try {
       const parsed = JSON.parse(bridge.opening_intervals);
       intervals = (parsed.minutes || []).map(Number).sort((a, b) => a - b);
     } catch (_e) {
-      intervals = bridge.opening_intervals.split(',').map(Number).sort((a, b) => a - b);
+      intervals = bridge.opening_intervals
+        .split(",")
+        .map(Number)
+        .sort((a, b) => a - b);
     }
 
     const nowMinuteOfHour = now.getMinutes();
@@ -697,8 +795,14 @@ async _publishNextBridge(bridge) {
     }
 
     return {
-      time: nextOpening ? nextOpening.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
-      minutes_until: minutesUntil !== Infinity ? Math.floor(minutesUntil) : null
+      time: nextOpening
+        ? nextOpening.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : null,
+      minutes_until:
+        minutesUntil !== Infinity ? Math.floor(minutesUntil) : null,
     };
   }
 
@@ -706,7 +810,7 @@ async _publishNextBridge(bridge) {
     const notificationData = {
       id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       ...notification,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
 
     this._activeNotifications.push(notificationData);
@@ -719,7 +823,7 @@ async _publishNextBridge(bridge) {
   }
 
   _removeNotification(id) {
-    const index = this._activeNotifications.findIndex(n => n.id === id);
+    const index = this._activeNotifications.findIndex((n) => n.id === id);
     if (index >= 0) {
       this._activeNotifications.splice(index, 1);
       this._publishNotifications();
@@ -727,13 +831,17 @@ async _publishNextBridge(bridge) {
   }
 
   _publishNotifications() {
-    this._stateManager.emit('state:patch', {
-      type: 'state:patch',
+    this._stateManager.emit("state:patch", {
+      type: "state:patch",
       data: [
-        { op: 'replace', path: '/bridges/hud/notifications', value: [...this._activeNotifications] }
+        {
+          op: "replace",
+          path: "/bridges/hud/notifications",
+          value: [...this._activeNotifications],
+        },
       ],
-      source: 'bridge-hud',
-      timestamp: Date.now()
+      source: "bridge-hud",
+      timestamp: Date.now(),
     });
   }
 }
