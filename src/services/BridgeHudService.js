@@ -609,6 +609,7 @@ export class BridgeHudService extends BaseService {
       ) {
         const distanceToBridge =
           bridge.distance_along_route_nm - boatClosest.distanceFromStart;
+console.log('[BridgeHudService] distanceToBridge:', distanceToBridge, 'boatSOG:', boatSOG, 'boatClosest:', boatClosest?.distanceFromStart, 'bridge distance:', bridge.distance_along_route_nm);
 
         if (distanceToBridge === null || distanceToBridge === undefined) {
           timeToArrivalMinutes = null;
