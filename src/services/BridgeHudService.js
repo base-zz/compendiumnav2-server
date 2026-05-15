@@ -287,7 +287,6 @@ export class BridgeHudService extends BaseService {
       this._boatState.sog = navigation?.speed?.sog?.value;
       this._boatState.cog = navigation?.course?.cog?.value;
       // Publish header data
-      console.log('[BridgeHudService] Navigation depth data:', navigation?.depth);
       this._publishHeader(navigation?.depth, navigation?.wind?.apparent?.speed);
 
       // Bridge lookup is rate-limited to avoid repeated expensive spatial queries.
