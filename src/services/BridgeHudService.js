@@ -495,6 +495,8 @@ export class BridgeHudService extends BaseService {
       if (bridge) {
         // Map distanceFromRoute to distance_nm for consistency
         bridge.distance_nm = bridge.distanceFromRoute;
+        // Include distance along route for reference
+        bridge.distance_along_route_nm = bridge.distanceAlongRoute;
       }
       return bridge;
     } catch (_err) {
