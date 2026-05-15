@@ -282,45 +282,70 @@ export function registerRouteImportRoutes(app) {
     }
   });
 
-  // PUT /api/routes/active - Set active route
+  // PUT /api/routes/active - Set active route (null to deactivate)
   app.put('/api/routes/active', async (req, res) => {
     try {
       console.log('[ROUTES] PUT /api/routes/active request received');
-      
+
       const { routeId } = req.body;
-      if (!routeId) {
-        console.log('[ROUTES] Set active rejected: routeId missing');
-        return res.status(400).json({ success: false, error: 'routeId is required' });
-      }
-      
-      console.log(`[ROUTES] Attempting to set active route: ${routeId}`);
-      
+
       if (!storageService.initialize) {
         console.log('[ROUTES] Set active rejected: storageService.initialize unavailable');
         return res.status(500).json({ success: false, error: 'Storage service not available' });
       }
-      
+
       await storageService.initialize();
-      
+
+      // Handle deactivation (null routeId)
+      if (routeId === null || routeId === undefined) {
+        console.log('[ROUTES] Deactivating active route (routeId is null)');
+
+        const persisted = await storageService.setSetting('activeRouteId', null);
+        if (!persisted) {
+          console.log('[ROUTES] Deactivate failed: unable to persist');
+          return res.status(500).json({ success: false, error: 'Failed to deactivate active route' });
+        }
+
+        // Clear active route in state manager
+        const { getStateManager } = await import("../../relay/core/state/StateManager.js");
+        const stateManager = getStateManager();
+        if (stateManager) {
+          const patch = [{ op: "replace", path: "/routes/activeRoute", value: { routeId: null, routeName: null } }];
+          stateManager.applyPatchAndForward(patch);
+          console.log('[ROUTES] Cleared active route in state');
+        } else {
+          console.log('[ROUTES] State manager not available, skipping state update');
+        }
+
+        console.log('[ROUTES] Successfully deactivated active route');
+        return res.status(200).json({
+          success: true,
+          action: 'route:deactivated'
+        });
+      }
+
+      // Activate a specific route
+      console.log(`[ROUTES] Attempting to set active route: ${routeId}`);
+
       // Verify route exists
       const importedRoutes = await storageService.getSetting('importedRoutes');
       const routes = Array.isArray(importedRoutes) ? importedRoutes : [];
       const route = routes.find(r => r.routeId === routeId);
-      
+
       if (!route) {
         console.log(`[ROUTES] Set active rejected: route ${routeId} not found`);
         return res.status(404).json({ success: false, error: 'Route not found' });
       }
-      
+
       console.log(`[ROUTES] Route found: ${route.name} (${route.source})`);
-      
+
       // Set active route
       const persisted = await storageService.setSetting('activeRouteId', routeId);
       if (!persisted) {
         console.log('[ROUTES] Set active failed: unable to persist');
         return res.status(500).json({ success: false, error: 'Failed to set active route' });
       }
-      
+
       // Update state manager with active route info
       const { getStateManager } = await import("../../relay/core/state/StateManager.js");
       const stateManager = getStateManager();
@@ -339,9 +364,9 @@ export function registerRouteImportRoutes(app) {
       } else {
         console.log('[ROUTES] State manager not available, skipping state update');
       }
-      
+
       console.log(`[ROUTES] Successfully set active route: ${routeId} (${route.name})`);
-      
+
       return res.status(200).json({
         success: true,
         action: 'route:activated',
