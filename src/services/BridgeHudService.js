@@ -556,6 +556,9 @@ export class BridgeHudService extends BaseService {
             timeToArrivalMinutes = Infinity;
           }
         }
+      } else if (boatClosest && bridge.distance_along_route_nm <= boatClosest.distanceFromStart) {
+        // Already past the bridge along route
+        timeToArrivalMinutes = 0;
       }
     }
 
