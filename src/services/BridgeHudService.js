@@ -287,7 +287,8 @@ export class BridgeHudService extends BaseService {
       this._boatState.sog = navigation?.speed?.sog?.value;
       this._boatState.cog = navigation?.course?.cog?.value;
       // Publish header data
-      this._publishHeader(navigation?.depth?.belowTransducer, navigation?.wind?.apparent?.speed);
+      console.log('[BridgeHudService] Navigation depth data:', navigation?.depth);
+      this._publishHeader(navigation?.depth?.belowSurface, navigation?.wind?.apparent?.speed);
 
       // Bridge lookup is rate-limited to avoid repeated expensive spatial queries.
       const now = Date.now();
@@ -313,11 +314,11 @@ export class BridgeHudService extends BaseService {
           if (!tableExists) {
             this._db.exec(`SELECT InitSpatialMetaData(1);`);
           }
-        } catch (err) {
+        } catch (_err) {
           // Ignore errors - metadata may already exist
         }
-      } catch (err) {
-        console.warn('[BridgeHudService] SpatiaLite not available:', err.message);
+      } catch (_err) {
+        console.warn('[BridgeHudService] SpatiaLite not available:', _err.message);
       }
     } catch (err) {
       throw new Error(`Failed to initialize database: ${err.message}`);
@@ -391,8 +392,8 @@ export class BridgeHudService extends BaseService {
         this._routePoints = [];
         this._routeWithDistances = [];
       }
-    } catch (err) {
-      console.warn('[BridgeHudService] Failed to load route:', err.message);
+    } catch (_err) {
+      console.error('[BridgeHudService] Failed to load route:', _err.message);
       this._routePoints = [];
       this._routeWithDistances = [];
     }
@@ -494,12 +495,12 @@ export class BridgeHudService extends BaseService {
         bridge.distance_nm = bridge.distanceFromRoute;
       }
       return bridge;
-    } catch (err) {
-      console.error('[BridgeHudService] Error finding bridges on route:', err.message);
+    } catch (_err) {
+      console.error('[BridgeHudService] Error finding bridges on route:', _err.message);
       // Clean up temp file if it exists
       try {
         fs.unlinkSync(tempFile);
-      } catch (cleanupErr) {
+      } catch (_cleanupErr) {
         // Ignore cleanup errors
       }
       return null;
@@ -643,7 +644,7 @@ export class BridgeHudService extends BaseService {
     try {
       const parsed = JSON.parse(bridge.opening_intervals);
       intervals = (parsed.minutes || []).map(Number).sort((a, b) => a - b);
-    } catch (e) {
+    } catch (_e) {
       intervals = bridge.opening_intervals.split(',').map(Number).sort((a, b) => a - b);
     }
 
