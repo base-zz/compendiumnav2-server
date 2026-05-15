@@ -287,7 +287,7 @@ export class BridgeHudService extends BaseService {
       this._boatState.sog = navigation?.speed?.sog?.value;
       this._boatState.cog = navigation?.course?.cog?.value;
       // Publish header data
-      this._publishHeader(navigation?.depth, navigation?.wind?.apparent?.speed);
+      this._publishHeader(navigation?.depth, navigation?.wind);
 
       // Bridge lookup is rate-limited to avoid repeated expensive spatial queries.
       const now = Date.now();
@@ -400,7 +400,7 @@ export class BridgeHudService extends BaseService {
 
   _publishHeader(depth, wind) {
     const depthValue = depth?.belowSurface?.value;
-    const windValue = wind?.speed?.value;
+    const windValue = wind?.apparent?.speed?.value;
 
     const nextHeaderData = {
       sog: this._boatState.sog,
@@ -408,8 +408,6 @@ export class BridgeHudService extends BaseService {
       depth: depthValue,
       wind: windValue
     };
-
-    console.log('[BridgeHudService] Publishing header:', nextHeaderData);
 
     // Skip identical payloads to reduce state churn/log/transport overhead.
     if (
