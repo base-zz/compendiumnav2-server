@@ -538,6 +538,20 @@ export class BridgeHudService extends BaseService {
       clearanceMargin = dynamicClearance - this._safeAirDraft;
     }
 
+    // Calculate time to arrival
+    let timeToArrivalMinutes = null;
+    const boatSOG = this._boatState.sog;
+    if (boatSOG && boatSOG > 0 && bridge.distance_along_route_nm !== undefined) {
+      // Find boat's position along route
+      const boatClosest = findClosestRoutePoint(this._routeWithDistances, this._boatState.position.latitude, this._boatState.position.longitude);
+      if (boatClosest && bridge.distance_along_route_nm > boatClosest.distanceFromStart) {
+        const distanceToBridge = bridge.distance_along_route_nm - boatClosest.distanceFromStart;
+        // Time = distance / speed (nm / knots = hours)
+        const timeToArrivalHours = distanceToBridge / boatSOG;
+        timeToArrivalMinutes = timeToArrivalHours * 60;
+      }
+    }
+
     const nextBridgeData = {
       id: bridge.external_id || null,
       name: bridge.name || 'Unknown Bridge',
@@ -545,6 +559,7 @@ export class BridgeHudService extends BaseService {
       longitude: bridge.longitude !== undefined ? bridge.longitude : null,
       distance_nm: bridge.distance_nm !== undefined ? bridge.distance_nm : null,
       distance_along_route_nm: bridge.distance_along_route_nm !== undefined ? bridge.distance_along_route_nm : null,
+      time_to_arrival_minutes: timeToArrivalMinutes,
       charted_clearance_ft: bridge.closed_height_mhw !== undefined ? bridge.closed_height_mhw : null,
       dynamic_clearance_ft: dynamicClearance,
       clearance_margin_ft: clearanceMargin,
