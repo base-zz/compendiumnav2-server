@@ -160,6 +160,13 @@ export function createStateDataModel(unitPreferences = UNIT_PRESETS.IMPERIAL) {
           displayLabel: "Depth Below Surface",
           description: "Depth Below Surface",
         },
+        surfaceToTransducer: {
+          value: null,
+          units: unitPreferences.length,
+          label: "Transducer Offset",
+          displayLabel: "Surface to Transducer",
+          description: "Depth Transducer Offset from Surface",
+        },
       },
       wind: {
         apparent: {

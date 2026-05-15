@@ -516,7 +516,7 @@ export const stateData = {
 
   ensureDataStructures() {
     // Depth measurements
-    const depthMeasurements = ["belowTransducer", "belowKeel", "belowSurface"];
+    const depthMeasurements = ["belowTransducer", "belowKeel", "belowSurface", "surfaceToTransducer"];
     depthMeasurements.forEach((key) => {
       if (!this.navigation.depth[key]) {
         this.navigation.depth[key] = { value: null, units: UNIT_PRESETS.IMPERIAL.length };

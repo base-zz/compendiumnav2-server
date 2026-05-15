@@ -1344,6 +1344,18 @@ class NewStateService extends ContinuousService {
           return value;
         }
       },
+      "environment.depth.belowSurface": {
+        path: "navigation.depth.belowSurface.value",
+        transform: function(value) {
+          return value;
+        }
+      },
+      "environment.depth.surfaceToTransducer": {
+        path: "navigation.depth.surfaceToTransducer.value",
+        transform: function(value) {
+          return value;
+        }
+      },
 
       // Wind Data
       "environment.wind.speedApparent": {
