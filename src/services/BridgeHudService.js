@@ -541,14 +541,21 @@ export class BridgeHudService extends BaseService {
     // Calculate time to arrival
     let timeToArrivalMinutes = null;
     const boatSOG = this._boatState.sog;
-    if (boatSOG && boatSOG > 0 && bridge.distance_along_route_nm !== undefined) {
+    if (bridge.distance_along_route_nm !== undefined && bridge.distance_along_route_nm !== null) {
       // Find boat's position along route
       const boatClosest = findClosestRoutePoint(this._routeWithDistances, this._boatState.position.latitude, this._boatState.position.longitude);
       if (boatClosest && bridge.distance_along_route_nm > boatClosest.distanceFromStart) {
         const distanceToBridge = bridge.distance_along_route_nm - boatClosest.distanceFromStart;
-        // Time = distance / speed (nm / knots = hours)
-        const timeToArrivalHours = distanceToBridge / boatSOG;
-        timeToArrivalMinutes = timeToArrivalHours * 60;
+        if (Number.isFinite(distanceToBridge)) {
+          if (boatSOG && boatSOG > 0) {
+            // Time = distance / speed (nm / knots = hours)
+            const timeToArrivalHours = distanceToBridge / boatSOG;
+            timeToArrivalMinutes = timeToArrivalHours * 60;
+          } else {
+            // Not moving - will never arrive
+            timeToArrivalMinutes = Infinity;
+          }
+        }
       }
     }
 
