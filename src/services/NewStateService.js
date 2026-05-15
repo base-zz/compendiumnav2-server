@@ -124,7 +124,7 @@ class NewStateService extends ContinuousService {
  * Starts the StateService and establishes necessary connections.
  * Initializes the service with the current configuration, sets up batch processing,
  * connects to SignalK, and starts notification path logging.
- * @returns {Promise<NewStateService>} The service instance for chaining
+ * @returns {Promise<void>}
  * @emits service:state:starting - When the service is starting up
  * @emits service:state:started - When the service has successfully started
  * @emits service:state:error - If an error occurs during startup
@@ -433,7 +433,7 @@ class NewStateService extends ContinuousService {
    */
   async updateAISTargetsFromSignalK(fullSignalKData) {
     try {
-      const startTime = Date.now();
+      const _startTime = Date.now();
       
       // Ensure we have valid data to work with
       if (!fullSignalKData?.vessels) {
@@ -707,10 +707,10 @@ class NewStateService extends ContinuousService {
     
     this._aisRefreshTimer = setInterval(async () => {
       try {
-        const startTime = Date.now();
+        const _startTime = Date.now();
         
         const fullSignalKData = await fetchSignalKFullState();
-        const vesselCount = Object.keys(fullSignalKData?.vessels || {}).length;
+        const _vesselCount = Object.keys(fullSignalKData?.vessels || {}).length;
         
         // console.log(`[StateService] Received SignalK data with ${vesselCount} vessels in ${Date.now() - startTime}ms`);
         
@@ -1571,7 +1571,7 @@ class NewStateService extends ContinuousService {
     // Track which categories of data changed
     const changedCategories = new Set();
 
-    this.updateQueue.forEach(({value, source}, path) => {
+    this.updateQueue.forEach(({value, source: _source}, path) => {
       // Skip external paths that aren't mapped to our canonical state
       if (path.startsWith('external.')) {
         console.debug(`[StateService] Skipping unmapped external path: ${path}`);
