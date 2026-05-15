@@ -544,6 +544,7 @@ export class BridgeHudService extends BaseService {
       latitude: bridge.latitude !== undefined ? bridge.latitude : null,
       longitude: bridge.longitude !== undefined ? bridge.longitude : null,
       distance_nm: bridge.distance_nm !== undefined ? bridge.distance_nm : null,
+      distance_along_route_nm: bridge.distance_along_route_nm !== undefined ? bridge.distance_along_route_nm : null,
       charted_clearance_ft: bridge.closed_height_mhw !== undefined ? bridge.closed_height_mhw : null,
       dynamic_clearance_ft: dynamicClearance,
       clearance_margin_ft: clearanceMargin,
