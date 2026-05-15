@@ -511,7 +511,7 @@ export class BridgeHudService extends BaseService {
     }
   }
 
-  async _publishNextBridge(bridge) {
+async _publishNextBridge(bridge) {
     if (!bridge) {
       console.warn('[BridgeHudService] Cannot publish next bridge - bridge is null/undefined');
       return;
@@ -542,20 +542,20 @@ export class BridgeHudService extends BaseService {
     let timeToArrivalMinutes = null;
     const boatSOG = this._boatState.sog;
     if (bridge.distance_along_route_nm !== undefined && bridge.distance_along_route_nm !== null) {
-      // Find boat's position along route
       const boatClosest = findClosestRoutePoint(this._routeWithDistances, this._boatState.position.latitude, this._boatState.position.longitude);
       if (boatClosest && bridge.distance_along_route_nm > boatClosest.distanceFromStart) {
         const distanceToBridge = bridge.distance_along_route_nm - boatClosest.distanceFromStart;
-        if (Number.isFinite(distanceToBridge)) {
-          if (boatSOG && boatSOG > 0) {
-            // Time = distance / speed (nm / knots = hours)
-            const timeToArrivalHours = distanceToBridge / boatSOG;
-            timeToArrivalMinutes = timeToArrivalHours * 60;
-          } else {
-            // Not moving - will never arrive
-            timeToArrivalMinutes = Infinity;
-          }
+
+        if (distanceToBridge === null || distanceToBridge === undefined) {
+          timeToArrivalMinutes = null;
+        } else if (boatSOG === 0) {
+          timeToArrivalMinutes = Infinity;
+        } else if (Number.isFinite(boatSOG) && Number.isFinite(distanceToBridge)) {
+          timeToArrivalMinutes = (distanceToBridge / boatSOG) * 60;
+        } else {
+          timeToArrivalMinutes = null;
         }
+
       } else if (boatClosest && bridge.distance_along_route_nm <= boatClosest.distanceFromStart) {
         // Already past the bridge along route
         timeToArrivalMinutes = 0;
