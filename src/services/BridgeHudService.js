@@ -650,6 +650,9 @@ export class BridgeHudService extends BaseService {
           ? bridge.distance_along_route_nm
           : null,
       time_to_arrival_minutes: timeToArrivalMinutes,
+      tide_height_ft: (tideData?.tide && typeof tideData.tide.height === 'number')
+        ? tideData.tide.height
+        : null,
       charted_clearance_ft:
         bridge.closed_height_mhw !== undefined
           ? bridge.closed_height_mhw
