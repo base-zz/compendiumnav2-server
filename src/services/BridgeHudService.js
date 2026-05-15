@@ -402,7 +402,7 @@ export class BridgeHudService extends BaseService {
     const nextHeaderData = {
       sog: this._boatState.sog,
       cog: this._boatState.cog,
-      depth: depth?.belowTransducer?.value,
+      depth: depth?.belowSurface?.value,
       wind: wind?.speedOverGround?.value
     };
 
