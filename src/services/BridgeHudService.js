@@ -299,8 +299,6 @@ export class BridgeHudService extends BaseService {
         heading: positionSource.heading || null,
       };
       this._boatState.sog = navigation?.speed?.sog?.value;
-      console.log('[!!!!!!!!!!!!BridgeHudService] boatSOG raw:', this._boatState.sog, typeof this._boatState.sog);
-
       this._boatState.cog = navigation?.course?.cog?.value;
       // Publish header data
       this._publishHeader(navigation?.depth, navigation?.wind);
@@ -548,6 +546,8 @@ export class BridgeHudService extends BaseService {
   }
 
   async _publishNextBridge(bridge) {
+      console.log('[BridgeHudService] _publishNextBridge SOG at publish time:', this._boatState.sog, typeof this._boatState.sog);
+
     if (!bridge) {
       console.warn(
         "[BridgeHudService] Cannot publish next bridge - bridge is null/undefined",
