@@ -17,6 +17,10 @@ import storageService from "../bluetooth/services/storage/storageService.js";
  * - Registers `state:bridge-patch` handler on activation and unregisters on deactivation.
  * - Emits JSON Patch arrays for HUD updates.
  * - Avoids redundant patch traffic by deduplicating unchanged header payloads.
+ *
+ * Note: time_to_arrival_minutes uses the string "Infinity" (not the JS Infinity value)
+ * when SOG === 0 and distance is finite, because JSON.stringify(Infinity) === "null".
+ * Frontend should check: time_to_arrival_minutes === "Infinity" and render ∞.
  */
 
 export class BridgeHudService extends BaseService {
@@ -300,6 +304,7 @@ export class BridgeHudService extends BaseService {
       };
       this._boatState.sog = navigation?.speed?.sog?.value;
       this._boatState.cog = navigation?.course?.cog?.value;
+
       // Publish header data
       this._publishHeader(navigation?.depth, navigation?.wind);
 
@@ -546,8 +551,6 @@ export class BridgeHudService extends BaseService {
   }
 
   async _publishNextBridge(bridge) {
-      console.log('[BridgeHudService] _publishNextBridge SOG at publish time:', this._boatState.sog, typeof this._boatState.sog);
-
     if (!bridge) {
       console.warn(
         "[BridgeHudService] Cannot publish next bridge - bridge is null/undefined",
@@ -591,9 +594,12 @@ export class BridgeHudService extends BaseService {
       clearanceMargin = dynamicClearance - this._safeAirDraft;
     }
 
-    // Calculate time to arrival
+    // Calculate time to arrival.
+    // Uses the string "Infinity" instead of JS Infinity because JSON.stringify(Infinity) === "null",
+    // which would silently corrupt the value in transit. Frontend checks === "Infinity" and renders ∞.
     let timeToArrivalMinutes = null;
     const boatSOG = this._boatState.sog;
+
     if (
       bridge.distance_along_route_nm !== undefined &&
       bridge.distance_along_route_nm !== null
@@ -603,18 +609,19 @@ export class BridgeHudService extends BaseService {
         this._boatState.position.latitude,
         this._boatState.position.longitude,
       );
+
       if (
         boatClosest &&
         bridge.distance_along_route_nm > boatClosest.distanceFromStart
       ) {
         const distanceToBridge =
           bridge.distance_along_route_nm - boatClosest.distanceFromStart;
-console.log('[BridgeHudService] distanceToBridge:', distanceToBridge, 'boatSOG:', boatSOG, 'boatClosest:', boatClosest?.distanceFromStart, 'bridge distance:', bridge.distance_along_route_nm);
 
         if (distanceToBridge === null || distanceToBridge === undefined) {
           timeToArrivalMinutes = null;
         } else if (!boatSOG || boatSOG === 0) {
-          timeToArrivalMinutes = Infinity;
+          // SOG is zero — boat is stationary, time to bridge is infinite
+          timeToArrivalMinutes = "Infinity";
         } else if (
           Number.isFinite(boatSOG) &&
           Number.isFinite(distanceToBridge)
