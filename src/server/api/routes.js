@@ -361,6 +361,9 @@ export function registerRouteImportRoutes(app) {
         stateManager.applyPatchAndForward(patch);
         console.log(`[ROUTES] Patch applied, appState.routes after:`, stateManager.appState.routes);
         console.log(`[ROUTES] Updated state with active route: ${routeId} (${route.name})`);
+        // Emit event for BridgeHudService and other route-aware services
+        stateManager.emit('state:active-route', { routeId, routeName: route.name });
+        console.log(`[ROUTES] Emitted state:active-route event for ${routeId}`);
       } else {
         console.log('[ROUTES] State manager not available, skipping state update');
       }
@@ -438,6 +441,9 @@ export function registerRouteImportRoutes(app) {
           const patch = [{ op: "replace", path: "/routes/activeRoute", value: { routeId: null, routeName: null } }];
           stateManager.applyPatchAndForward(patch);
           console.log(`[ROUTES] Cleared active route in state`);
+          // Emit event for BridgeHudService and other route-aware services
+          stateManager.emit('state:active-route', { routeId: null });
+          console.log(`[ROUTES] Emitted state:active-route event for deactivation`);
         } else {
           console.log('[ROUTES] State manager not available, skipping state update');
         }
