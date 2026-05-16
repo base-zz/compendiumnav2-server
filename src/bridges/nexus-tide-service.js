@@ -1,4 +1,6 @@
 import Database from "better-sqlite3";
+import { fetch } from "node-fetch";
+import { AbortController } from "abort-controller";
 
 export class NexusTideService {
   constructor(options) {
@@ -82,6 +84,25 @@ export class NexusTideService {
       `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?begin_date=${beginDate}&range=48&station=${id}&product=predictions&interval=hilo&datum=MLLW&units=english&time_zone=lst_ldt&format=json`,
     ];
 
+    let mhwMllwOffset = null;
+
+    // Fetch datum offsets for this station
+    try {
+      const datumUrl = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${id}&product=datums&units=english&format=json`;
+      const datumResponse = await this.fetchWithTimeout(datumUrl);
+      const datumData = await datumResponse.json();
+
+      if (datumData.datums && Array.isArray(datumData.datums)) {
+        const mhw = datumData.datums.find((d) => d.name === "MHW");
+        const mllw = datumData.datums.find((d) => d.name === "MLLW");
+        if (mhw && mllw) {
+          mhwMllwOffset = parseFloat(mhw.value) - parseFloat(mllw.value);
+        }
+      }
+    } catch (_err) {
+      // Silently fail if datum offsets can't be fetched
+    }
+
     for (const url of urls) {
       try {
         const response = await this.fetchWithTimeout(url);
@@ -101,11 +122,13 @@ export class NexusTideService {
 
           return {
             height: parseFloat(closest.v),
+            height_mhw: mhwMllwOffset !== null ? parseFloat(closest.v) - mhwMllwOffset : null,
             station: name,
             id,
+            mhw_mllw_offset: mhwMllwOffset,
           };
         }
-      } catch (error) {
+      } catch (_error) {
       }
     }
 
@@ -152,7 +175,7 @@ export class NexusTideService {
             id,
           };
         }
-      } catch (error) {
+      } catch (_error) {
       }
     }
 
@@ -177,7 +200,7 @@ export class NexusTideService {
 
     try {
       return this.db.prepare(query).all(`${type[0]}%`, lon, lat, limit);
-    } catch (error) {
+    } catch (_error) {
       return [];
     }
   }

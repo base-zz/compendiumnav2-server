@@ -2,6 +2,49 @@ import fetch from "node-fetch";
 
 const NOAA_API_BASE = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
 
+export async function fetchNoaaDatumOffsets(stationId, options = {}) {
+  const { units = "english" } = options;
+
+  const params = new URLSearchParams({
+    station: stationId,
+    product: "datums",
+    units,
+    format: "json",
+    application: "CompendiumNav",
+  });
+
+  const url = `${NOAA_API_BASE}?${params.toString()}`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`NOAA datums API error: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+
+  if (data.error) {
+    throw new Error(`NOAA datums API error: ${data.error.message}`);
+  }
+
+  if (!data.datums || !Array.isArray(data.datums)) {
+    throw new Error("NOAA datums API returned no datums");
+  }
+
+  // Extract MHW and MLLW values
+  const mhw = data.datums.find((d) => d.name === "MHW");
+  const mllw = data.datums.find((d) => d.name === "MLLW");
+
+  if (!mhw || !mllw) {
+    throw new Error("NOAA datums API missing MHW or MLLW");
+  }
+
+  return {
+    mhw: parseFloat(mhw.value),
+    mllw: parseFloat(mllw.value),
+    mhw_mllw_offset: parseFloat(mhw.value) - parseFloat(mllw.value),
+  };
+}
+
 export async function fetchNoaaTidePredictions(stationId, options = {}) {
   const {
     rangeHours = 72,
@@ -416,6 +459,7 @@ export function buildTidePayload(options) {
             latitude: tideStation.latitude,
             longitude: tideStation.longitude,
             distanceKm: tideStation.distanceKm,
+            mhw_mllw_offset: tideStation.mhw_mllw_offset || null,
           }
         : null,
       currentStation: currentStation

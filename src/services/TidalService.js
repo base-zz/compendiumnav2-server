@@ -6,6 +6,7 @@ import { findNearestTideStation, findNearestCurrentStation } from "./noaa/NoaaSt
 import {
   fetchNoaaTidePredictions,
   fetchNoaaCurrentPredictions,
+  fetchNoaaDatumOffsets,
   interpolateHourlyTides,
   buildTidePayload,
   buildImputedCurrentData,
@@ -369,6 +370,22 @@ export class TidalService extends ScheduledService {
             this.log(
               `Found NOAA tide station: ${tideStation.name} (${tideStation.id}) at ${tideStation.distanceKm.toFixed(1)} km`
             );
+            // Fetch datum offsets for this station (MHW-MLLW offset for bridge clearance calculations)
+            try {
+              const datumOffsets = await fetchNoaaDatumOffsets(tideStation.id, {
+                units: noaaUnits,
+              });
+              tideStation.mhw_mllw_offset = datumOffsets.mhw_mllw_offset;
+              this.log(
+                `Fetched datum offsets for ${tideStation.id}: MHW-MLLW offset = ${datumOffsets.mhw_mllw_offset.toFixed(2)} ft`
+              );
+            } catch (_err) {
+              this.logError(
+                `Failed to fetch datum offsets for ${tideStation.id}:`,
+                _err.message
+              );
+              tideStation.mhw_mllw_offset = null;
+            }
           } else {
             this.log(
               `No NOAA tide station within ${this._maxStationDistanceKm} km, will use Open-Meteo only`

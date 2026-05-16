@@ -585,12 +585,16 @@ export class BridgeHudService extends BaseService {
     if (
       tideData &&
       tideData.tide &&
-      "height" in tideData.tide &&
+      "station" in tideData.tide &&
       typeof tideData.tide.height === "number" &&
       bridge.closed_height_mhw !== undefined &&
       this._safeAirDraft !== undefined
     ) {
-      dynamicClearance = bridge.closed_height_mhw - tideData.tide.height;
+      // Use height_mhw if available (converted from MLLW), otherwise fall back to height
+      const tideHeight = tideData.tide.height_mhw != null && typeof tideData.tide.height_mhw === "number"
+        ? tideData.tide.height_mhw
+        : tideData.tide.height;
+      dynamicClearance = bridge.closed_height_mhw - tideHeight;
       clearanceMargin = dynamicClearance - this._safeAirDraft;
     }
 
@@ -650,8 +654,8 @@ export class BridgeHudService extends BaseService {
           ? bridge.distance_along_route_nm
           : null,
       time_to_arrival_minutes: timeToArrivalMinutes,
-      tide_height_ft: (tideData?.tide && typeof tideData.tide.height === 'number')
-        ? tideData.tide.height
+      tide_height_ft: (tideData?.tide && "station" in tideData.tide && typeof tideData.tide.height === 'number')
+        ? (tideData.tide.height_mhw != null && typeof tideData.tide.height_mhw === 'number' ? tideData.tide.height_mhw : tideData.tide.height)
         : null,
       charted_clearance_ft:
         bridge.closed_height_mhw !== undefined
