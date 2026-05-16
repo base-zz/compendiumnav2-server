@@ -259,6 +259,7 @@ export class TidalService extends ScheduledService {
           this.log(
             `Initial tidal fetch scheduled from PositionService with position latitude=${position.latitude}, longitude=${position.longitude}`
           );
+          this.log(`POSITION LISTENER TRIGGERED: latitude=${position.latitude}, longitude=${position.longitude}`);
           try {
             await this.run();
           } catch (err) {
@@ -328,6 +329,7 @@ export class TidalService extends ScheduledService {
       this._currentFetch = (async () => {
         try {
           const { latitude, longitude } = this.position;
+          this.log(`TidalService.fetchTidalData called with position: latitude=${latitude}, longitude=${longitude}`);
           if (typeof latitude !== "number" || typeof longitude !== "number") {
             this.logError("No valid position available for tidal data fetch.");
             return;
