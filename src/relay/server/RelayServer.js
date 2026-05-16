@@ -223,6 +223,11 @@ export class RelayServer extends EventEmitter {
           dataSize: JSON.stringify(message).length,
         });
 
+        // Log tide:update messages specifically
+        if (message.type === 'tide:update') {
+          console.log('[RelayServer] Received tide:update from VPS:', JSON.stringify(message).substring(0, 500));
+        }
+
         // Log the raw message for debugging
         logTrace(
           `Raw message from VPS: ${JSON.stringify(
