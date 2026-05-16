@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
-import { fetch } from "node-fetch";
+import pkg from "node-fetch";
+const { fetch } = pkg;
 import { AbortController } from "abort-controller";
 
 export class NexusTideService {
