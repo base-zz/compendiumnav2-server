@@ -415,11 +415,21 @@ export class TidalService extends ScheduledService {
               this.log(
                 `Fetching tide predictions using station ${predictionStationId} (selected: ${tideStation.id}${tideStation.referenceId ? ', subordinate of ' + tideStation.referenceId : ''})`
               );
+              this.log(`Location: latitude=${latitude}, longitude=${longitude}`);
+              this.log(`NOAA units: ${noaaUnits}`);
+              const now = new Date();
+              const beginDate = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+              const endDate = new Date(now.getTime() + forecastHours * 60 * 60 * 1000);
+              const formatDate = (d) =>
+                `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+              const noaaUrl = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${predictionStationId}&product=predictions&datum=MLLW&time_zone=gmt&units=${noaaUnits}&interval=hilo&begin_date=${formatDate(beginDate)}&end_date=${formatDate(endDate)}&format=json&application=CompendiumNav`;
+              this.log(`NOAA URL: ${noaaUrl}`);
               hiloData = await fetchNoaaTidePredictions(predictionStationId, {
                 rangeHours: forecastHours,
                 units: noaaUnits,
               });
               this.log(`Fetched ${hiloData.length} NOAA tide predictions`);
+              this.log(`Tide data sample: ${JSON.stringify(hiloData.slice(0, 3))}`);
 
               hourlyTideData = interpolateHourlyTides(hiloData, forecastHours);
               this.log(`Interpolated ${hourlyTideData.length} hourly tide values`);
