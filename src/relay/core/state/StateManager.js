@@ -720,6 +720,7 @@ export class StateManager extends EventEmitter {
       return;
     }
 
+    this.log('[StateManager] setTideData called - CALLER:', new Error().stack);
     this.log('[StateManager] setTideData called with data: %o', {
       hasData: !!tideData,
       type: typeof tideData,
